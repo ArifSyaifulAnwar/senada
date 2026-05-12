@@ -361,17 +361,6 @@ class _SignUpScreenState extends State<SignUpScreen>
                                   ),
                                 ],
                               ),
-
-                            if (isWeb) ...[
-                              const SizedBox(height: 30),
-                              Text(
-                                '© 2025 Sistem Absensi Karyawan SDB',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[400],
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
