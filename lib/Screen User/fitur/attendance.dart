@@ -47,6 +47,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   bool _isFaceRegistered = false;
   String _faceVerificationMessage = "";
   bool _isAttendanceSubmitted = false;
+  bool _isCompanyUser = false;
 
   // ─── AUTO-RETRY ────────────────────────────────────────────────────────────
   // Ketika verifikasi gagal, sistem otomatis coba ulang hingga _maxAutoRetry kali
@@ -85,6 +86,18 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     ).animate(_pulseController);
 
     _initializeApp();
+    _detectUserMode();
+  }
+
+  Future<void> _detectUserMode() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    String userId = prefs.getString('UserID') ?? '';
+    String email = prefs.getString('Email') ?? '';
+
+    _isCompanyUser = await isCompanyUser(userId, email);
+
+    await prefs.setBool('isCompanyUser', _isCompanyUser);
   }
 
   @override
@@ -268,6 +281,56 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       }
     } catch (e) {
       // Abaikan, tetap lanjut
+    }
+  }
+
+  Future<bool> isCompanyUser(String userId, String email) async {
+    try {
+      // 🔑 Ambil token
+      final tokenResponse = await http
+          .post(
+            Uri.parse('$baseURL/api/auth/token'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (tokenResponse.statusCode != 200) {
+        throw Exception('Gagal ambil token: ${tokenResponse.statusCode}');
+      }
+
+      final tokenData = json.decode(tokenResponse.body);
+      final token = tokenData['access_token'];
+
+      if (token == null || token.isEmpty) {
+        throw Exception('Token kosong');
+      }
+
+      // 📡 Hit API company check
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/asn/getCompanyInfo'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode({"UserId": userId, "Mail": email}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      // ✅ Logic utama
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+
+        // 👉 Optional: cek isi data kalau API return payload
+        if (responseData != null) {
+          return true; // ✅ COMPANY
+        }
+      }
+
+      return false; // ❌ PUBLIC
+    } catch (e) {
+      return false;
     }
   }
 

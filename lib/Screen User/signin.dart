@@ -62,7 +62,7 @@ class _SignInScreenState extends State<SignInScreen>
       final otpCode = _isOtpMode ? _otpController.text.trim() : null;
 
       if (emailOrUserId.isEmpty || password.isEmpty) {
-        _showDialog('Silakan masukkan Email/UserID dan Password');
+        _showDialog('Silakan masukkan Email dan Password');
         return;
       }
 
@@ -71,9 +71,7 @@ class _SignInScreenState extends State<SignInScreen>
         return;
       }
 
-      setState(() {
-        _isLoading = true;
-      });
+      setState(() => _isLoading = true);
 
       try {
         final tokenResponse = await http.post(
@@ -86,19 +84,17 @@ class _SignInScreenState extends State<SignInScreen>
           final tokenData = json.decode(tokenResponse.body);
           final accessToken = tokenData['access_token'];
           if (accessToken != null) {
-            final loginRequestBody = {
-              'Email': emailOrUserId,
-              'Password': password,
-              'OtpCode': otpCode,
-            };
-
             final loginResponse = await http.post(
               Uri.parse('$baseURL/api/asn/login'),
               headers: {
                 'Authorization': 'bearer $accessToken',
                 'Content-Type': 'application/json',
               },
-              body: json.encode(loginRequestBody),
+              body: json.encode({
+                'Email': emailOrUserId,
+                'Password': password,
+                'OtpCode': otpCode,
+              }),
             );
 
             final responseData = json.decode(loginResponse.body);
@@ -116,11 +112,9 @@ class _SignInScreenState extends State<SignInScreen>
                 );
               } else {
                 final prefs = await SharedPreferences.getInstance();
-
                 String email = responseData['Email'] ?? '';
                 String role = responseData['Role'] ?? '';
 
-                // Menyimpan data user ke SharedPreferences
                 await prefs.setString('Name', responseData['Name'] ?? '');
                 await prefs.setString('Email', email);
                 await prefs.setString('UserID', responseData['UserId'] ?? '');
@@ -130,7 +124,6 @@ class _SignInScreenState extends State<SignInScreen>
                 );
                 await prefs.setString('Role', role);
 
-                // Navigasi berdasarkan role
                 _navigateByRole(role);
               }
             } else if (loginResponse.statusCode == 400 ||
@@ -148,13 +141,11 @@ class _SignInScreenState extends State<SignInScreen>
               } else {
                 _showDialog(
                   responseData['message'] ??
-                      'Password atau email/userID yang anda masukkan salah.',
+                      'Password atau email yang anda masukkan salah.',
                 );
               }
             } else if (loginResponse.statusCode == 403) {
-              _showDialog(
-                'Akun anda terkunci. Silakan segera menghubungi admin.',
-              );
+              _showDialog('Akun anda terkunci. Silakan hubungi administrator.');
             } else {
               _showDialog(
                 responseData['message'] ??
@@ -170,9 +161,7 @@ class _SignInScreenState extends State<SignInScreen>
       } catch (e) {
         _showDialog('Terjadi kesalahan: $e');
       } finally {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     } else {
       _showDialog('Silakan periksa kembali input Anda.');
@@ -181,33 +170,23 @@ class _SignInScreenState extends State<SignInScreen>
 
   void _navigateByRole(String role) {
     Widget destination;
-
     switch (role.toLowerCase()) {
       case 'admin':
         destination = const HomePageAdmin();
         break;
       case 'hrd':
-        destination = const HomePageHRD(); // Buat halaman ini
+        destination = const HomePageHRD();
         break;
       case 'user':
       default:
         destination = const HomePage();
         break;
     }
-
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => destination),
     );
   }
-
-  // Fungsi untuk mengecek apakah input adalah email yang valid
-  // bool _isValidEmail(String email) {
-  //   final emailRegex = RegExp(
-  //     r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-  //   );
-  //   return emailRegex.hasMatch(email);
-  // }
 
   void _resetOtpMode() {
     setState(() {
@@ -218,30 +197,6 @@ class _SignInScreenState extends State<SignInScreen>
     });
   }
 
-  // void _showDialog(String message) {
-  //   showDialog(
-  //     context: context,
-  //     builder: (context) {
-  //       return AlertDialog(
-  //         backgroundColor: const Color(0xFF1f4262),
-  //         shape: RoundedRectangleBorder(
-  //           borderRadius: BorderRadius.circular(15.0),
-  //         ),
-  //         title: const Text('Informasi', style: TextStyle(color: Colors.white)),
-  //         content: Text(message, style: const TextStyle(color: Colors.white)),
-  //         actions: [
-  //           TextButton(
-  //             onPressed: () => Navigator.pop(context),
-  //             child: const Text(
-  //               'OK',
-  //               style: TextStyle(color: Color(0xFFF4BE42)),
-  //             ),
-  //           ),
-  //         ],
-  //       );
-  //     },
-  //   );
-  // }
   void _showDialog(String message) {
     showDialog(
       context: context,
@@ -269,6 +224,45 @@ class _SignInScreenState extends State<SignInScreen>
           ],
         );
       },
+    );
+  }
+
+  // ── Dialog Tentang Aplikasi ──────────────────────────────────────────────
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.info_outline, color: Color(0xFF246BFD)),
+            SizedBox(width: 8),
+            Text('Tentang SENADA'),
+          ],
+        ),
+        content: const Text(
+          'SENADA adalah platform manajemen absensi dan kehadiran yang dapat '
+          'digunakan oleh perusahaan, UKM, komunitas, maupun tim freelance.\n\n'
+          'Siapapun dapat mendaftar secara mandiri menggunakan email dan '
+          'langsung menggunakan semua fitur tanpa perlu persetujuan khusus.\n\n'
+          'Fitur utama:\n'
+          '• Absensi dengan Face Recognition\n'
+          '• Manajemen Cuti & Lembur\n'
+          '• Reimbursement digital\n'
+          '• Live Attendance Tracking\n'
+          '• Laporan kehadiran otomatis',
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Tutup',
+              style: TextStyle(color: Color(0xFF246BFD)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -307,7 +301,7 @@ class _SignInScreenState extends State<SignInScreen>
                   controller: emailController,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    labelText: 'Email atau User ID',
+                    labelText: 'Email',
                     labelStyle: const TextStyle(color: Colors.white70),
                     prefixIcon: const Icon(
                       Icons.email,
@@ -329,7 +323,7 @@ class _SignInScreenState extends State<SignInScreen>
                           backgroundColor: const Color(0xFF1e3554),
                         ),
                         onPressed: () => Navigator.pop(context),
-                        child: const Text("Batal"),
+                        child: const Text('Batal'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -345,13 +339,13 @@ class _SignInScreenState extends State<SignInScreen>
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text("Email tidak boleh kosong"),
+                                content: Text('Email tidak boleh kosong'),
                                 backgroundColor: Colors.red,
                               ),
                             );
                           }
                         },
-                        child: const Text("Kirim OTP"),
+                        child: const Text('Kirim OTP'),
                       ),
                     ),
                   ],
@@ -366,7 +360,6 @@ class _SignInScreenState extends State<SignInScreen>
 
   Future<void> _resetPassword(String email) async {
     try {
-      // First get the token - similar to previous implementation
       final tokenResponse = await http.post(
         Uri.parse('$baseURL/api/auth/token'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -374,17 +367,13 @@ class _SignInScreenState extends State<SignInScreen>
       );
 
       if (tokenResponse.statusCode != 200) {
-        throw Exception('Gagal mendapatkan token akses');
+        throw Exception('Gagal mendapatkan token');
       }
 
       final tokenData = json.decode(tokenResponse.body);
       final accessToken = tokenData['access_token'];
+      if (accessToken == null) throw Exception('Token tidak valid');
 
-      if (accessToken == null) {
-        throw Exception('Token tidak valid');
-      }
-
-      // Make the reset password request
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/PermintaanResetPassword'),
         headers: {
@@ -398,9 +387,7 @@ class _SignInScreenState extends State<SignInScreen>
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Kode verifikasi telah dikirim ke email Anda, silahkan cek email Anda.',
-              ),
+              content: Text('Kode verifikasi telah dikirim ke email Anda.'),
               backgroundColor: Colors.green,
             ),
           );
@@ -410,14 +397,8 @@ class _SignInScreenState extends State<SignInScreen>
             builder: (context) =>
                 const Center(child: CircularProgressIndicator()),
           );
-
-          // Simulasikan jeda menunggu kode verifikasi (misalnya 2 detik)
           await Future.delayed(const Duration(seconds: 2));
-
-          // Tutup loading indicator
           Navigator.pop(context);
-
-          // Show verification code dialog after successful email sending
           _showVerificationDialog(email, accessToken);
         }
       } else {
@@ -429,15 +410,9 @@ class _SignInScreenState extends State<SignInScreen>
           case 404:
             message = 'Email tidak terdaftar.';
             break;
-          case 500:
-            final responseBody = json.decode(response.body);
-            message =
-                responseBody['Message'] ?? 'Terjadi kesalahan internal server.';
-            break;
           default:
             message = 'Terjadi kesalahan yang tidak diketahui.';
         }
-
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -473,9 +448,8 @@ class _SignInScreenState extends State<SignInScreen>
         body: json.encode({
           'Email': email,
           'VerificationCode': verificationCode,
-          'NewPassword': newPassword, // Pastikan ini plain text
-          'ConfirmPassword':
-              confirmPassword, // Pastikan ini juga plain text dan sama dengan NewPassword
+          'NewPassword': newPassword,
+          'ConfirmPassword': confirmPassword,
         }),
       );
 
@@ -497,11 +471,6 @@ class _SignInScreenState extends State<SignInScreen>
         case 404:
           message = 'Kode verifikasi tidak ditemukan atau sudah kadaluarsa.';
           break;
-        case 500:
-          final responseBody = json.decode(response.body);
-          message =
-              responseBody['Message'] ?? 'Terjadi kesalahan internal server.';
-          break;
         default:
           message = 'Terjadi kesalahan yang tidak diketahui.';
       }
@@ -513,10 +482,7 @@ class _SignInScreenState extends State<SignInScreen>
             backgroundColor: isSuccess ? Colors.green : Colors.red,
           ),
         );
-
-        if (isSuccess) {
-          Navigator.pop(context); // Tutup dialog verifikasi
-        }
+        if (isSuccess) Navigator.pop(context);
       }
     } catch (e) {
       if (context.mounted) {
@@ -552,7 +518,7 @@ class _SignInScreenState extends State<SignInScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text(
-                      "Verifikasi OTP",
+                      'Verifikasi OTP',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -566,7 +532,7 @@ class _SignInScreenState extends State<SignInScreen>
                       keyboardType: TextInputType.number,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        labelText: "Kode OTP",
+                        labelText: 'Kode OTP',
                         labelStyle: TextStyle(color: Colors.white70),
                         prefixIcon: Icon(
                           Icons.security,
@@ -580,7 +546,7 @@ class _SignInScreenState extends State<SignInScreen>
                       obscureText: true,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        labelText: "Password Baru",
+                        labelText: 'Password Baru',
                         labelStyle: TextStyle(color: Colors.white70),
                         prefixIcon: Icon(Icons.lock, color: Color(0xFFF4BE42)),
                       ),
@@ -591,7 +557,7 @@ class _SignInScreenState extends State<SignInScreen>
                       obscureText: true,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
-                        labelText: "Konfirmasi Password",
+                        labelText: 'Konfirmasi Password',
                         labelStyle: TextStyle(color: Colors.white70),
                         prefixIcon: Icon(
                           Icons.lock_outline,
@@ -608,7 +574,7 @@ class _SignInScreenState extends State<SignInScreen>
                               backgroundColor: const Color(0xFF1e3554),
                             ),
                             onPressed: () => Navigator.pop(context),
-                            child: const Text("Batal"),
+                            child: const Text('Batal'),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -623,7 +589,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   confirmPassController.text.isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text("Semua field wajib diisi"),
+                                    content: Text('Semua field wajib diisi'),
                                     backgroundColor: Colors.red,
                                   ),
                                 );
@@ -633,7 +599,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   confirmPassController.text) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text("Password tidak cocok"),
+                                    content: Text('Password tidak cocok'),
                                     backgroundColor: Colors.red,
                                   ),
                                 );
@@ -647,7 +613,7 @@ class _SignInScreenState extends State<SignInScreen>
                                 accessToken,
                               );
                             },
-                            child: const Text("Reset Password"),
+                            child: const Text('Reset Password'),
                           ),
                         ),
                       ],
@@ -666,14 +632,12 @@ class _SignInScreenState extends State<SignInScreen>
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isWeb = kIsWeb;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = size.width;
+    final screenHeight = size.height;
 
-    // Responsive values
     final logoSize = isWeb ? 120.0 : size.width * 0.35;
     final titleFontSize = isWeb ? 36.0 : size.width * 0.08;
     final subtitleFontSize = isWeb ? 16.0 : size.width * 0.045;
-    // Responsive sizing
     final double maxWidth = isWeb ? 500 : double.infinity;
     final double horizontalPadding = isWeb ? 20.0 : screenWidth * 0.05;
 
@@ -700,6 +664,7 @@ class _SignInScreenState extends State<SignInScreen>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: <Widget>[
+                            // Logo
                             Hero(
                               tag: 'app-logo',
                               child: Container(
@@ -710,18 +675,16 @@ class _SignInScreenState extends State<SignInScreen>
                                   color: Colors.white,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(
-                                        isWeb ? 0.1 : 0.2,
-                                      ),
-                                      blurRadius: isWeb ? 30 : 20,
-                                      offset: Offset(0, isWeb ? 15 : 10),
+                                      color: Colors.black.withOpacity(0.2),
+                                      blurRadius: 20,
+                                      offset: const Offset(0, 10),
                                     ),
                                     BoxShadow(
                                       color: const Color(
                                         0xFF246BFD,
-                                      ).withOpacity(isWeb ? 0.2 : 0.3),
-                                      blurRadius: isWeb ? 50 : 40,
-                                      offset: Offset(0, isWeb ? 25 : 20),
+                                      ).withOpacity(0.3),
+                                      blurRadius: 40,
+                                      offset: const Offset(0, 20),
                                     ),
                                   ],
                                 ),
@@ -750,29 +713,17 @@ class _SignInScreenState extends State<SignInScreen>
 
                             SizedBox(height: isWeb ? 32 : size.height * 0.04),
 
-                            // App Title
                             Text(
                               'SENADA',
                               style: TextStyle(
                                 fontSize: titleFontSize,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.black,
-                                fontFamily: isWeb ? 'Roboto' : null,
-                                shadows: isWeb
-                                    ? null
-                                    : [
-                                        Shadow(
-                                          color: Colors.black.withOpacity(0.2),
-                                          offset: const Offset(2, 2),
-                                          blurRadius: 4,
-                                        ),
-                                      ],
                               ),
                             ),
 
                             SizedBox(height: isWeb ? 12 : size.height * 0.01),
 
-                            // Subtitle
                             Text(
                               _isOtpMode
                                   ? 'Verifikasi OTP'
@@ -781,16 +732,6 @@ class _SignInScreenState extends State<SignInScreen>
                                 fontSize: subtitleFontSize,
                                 color: Colors.black87,
                                 fontWeight: FontWeight.w500,
-                                fontFamily: isWeb ? 'Roboto' : null,
-                                shadows: isWeb
-                                    ? null
-                                    : [
-                                        Shadow(
-                                          color: Colors.black.withOpacity(0.4),
-                                          offset: const Offset(1, 1),
-                                          blurRadius: 3,
-                                        ),
-                                      ],
                               ),
                             ),
 
@@ -805,11 +746,10 @@ class _SignInScreenState extends State<SignInScreen>
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
-                                    'Akun anda terkunci. Silakan verifikasi dengan OTP untuk membuka.',
+                                    'Akun anda terkunci. Silakan verifikasi dengan OTP.',
                                     style: TextStyle(
                                       color: Colors.red.shade700,
                                       fontSize: isWeb ? 14 : 12,
-                                      fontFamily: isWeb ? 'Roboto' : null,
                                     ),
                                     textAlign: TextAlign.center,
                                   ),
@@ -819,10 +759,9 @@ class _SignInScreenState extends State<SignInScreen>
                             SizedBox(height: isWeb ? 48 : size.height * 0.06),
 
                             // Form Fields
-                            // Form Fields
                             if (!_isOtpMode) ...[
                               _buildTextField(
-                                label: 'Email atau userID',
+                                label: 'Email',
                                 icon: Icons.person,
                                 isPassword: false,
                                 controller: _emailController,
@@ -838,13 +777,12 @@ class _SignInScreenState extends State<SignInScreen>
                                 isWeb: isWeb,
                               ),
 
-                              // Lupa Password dekat field password
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
                                   onPressed: _showForgotPasswordDialog,
                                   child: const Text(
-                                    "Lupa Password?",
+                                    'Lupa Password?',
                                     style: TextStyle(
                                       color: Color(0xFF246BFD),
                                       fontWeight: FontWeight.w600,
@@ -855,15 +793,13 @@ class _SignInScreenState extends State<SignInScreen>
 
                               SizedBox(
                                 height: isWeb ? 20 : size.height * 0.025,
-                              ), // lebih kecil
+                              ),
                             ] else ...[
-                              // OTP mode tetap
                               Text(
-                                'Kode OTP telah dikirim ke email anda, Silakan masukkan kode OTP untuk melanjutkan.',
+                                'Kode OTP telah dikirim ke email anda.',
                                 style: TextStyle(
                                   fontSize: isWeb ? 14 : 12,
                                   color: Colors.black54,
-                                  fontFamily: isWeb ? 'Roboto' : null,
                                 ),
                                 textAlign: TextAlign.center,
                               ),
@@ -878,7 +814,7 @@ class _SignInScreenState extends State<SignInScreen>
                               ),
                             ],
 
-                            // Tombol Login lebih dekat
+                            // Tombol Login
                             SizedBox(
                               width: double.infinity,
                               height: isWeb ? 56 : 55,
@@ -890,8 +826,7 @@ class _SignInScreenState extends State<SignInScreen>
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(15.0),
                                   ),
-                                  elevation: isWeb ? 6 : 8,
-                                  shadowColor: Colors.black.withOpacity(0.3),
+                                  elevation: 8,
                                 ),
                                 child: _isLoading
                                     ? const CircularProgressIndicator(
@@ -905,16 +840,14 @@ class _SignInScreenState extends State<SignInScreen>
                                         style: TextStyle(
                                           fontSize: isWeb ? 18 : 16,
                                           fontWeight: FontWeight.bold,
-                                          fontFamily: isWeb ? 'Roboto' : null,
                                         ),
                                       ),
                               ),
                             ),
 
-                            SizedBox(
-                              height: isWeb ? 16 : size.height * 0.02,
-                            ), // jarak kecil setelah tombol
-                            // Register option
+                            SizedBox(height: isWeb ? 16 : size.height * 0.02),
+
+                            // Link Daftar
                             if (!_isOtpMode)
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -924,7 +857,6 @@ class _SignInScreenState extends State<SignInScreen>
                                     style: TextStyle(
                                       color: Colors.black87,
                                       fontSize: isWeb ? 16 : 14,
-                                      fontFamily: isWeb ? 'Roboto' : null,
                                     ),
                                   ),
                                   InkWell(
@@ -940,7 +872,7 @@ class _SignInScreenState extends State<SignInScreen>
                                                 context,
                                                 animation,
                                                 secondaryAnimation,
-                                              ) => SignUpScreen(),
+                                              ) => const SignUpScreen(),
                                           transitionsBuilder:
                                               (
                                                 context,
@@ -951,7 +883,6 @@ class _SignInScreenState extends State<SignInScreen>
                                                 const begin = Offset(0.0, -1.0);
                                                 const end = Offset.zero;
                                                 const curve = Curves.decelerate;
-
                                                 var tween =
                                                     Tween(
                                                       begin: begin,
@@ -961,7 +892,6 @@ class _SignInScreenState extends State<SignInScreen>
                                                     );
                                                 var offsetAnimation = animation
                                                     .drive(tween);
-
                                                 return FadeTransition(
                                                   opacity: animation,
                                                   child: SlideTransition(
@@ -979,7 +909,6 @@ class _SignInScreenState extends State<SignInScreen>
                                         color: const Color(0xFF246BFD),
                                         fontWeight: FontWeight.bold,
                                         fontSize: isWeb ? 16 : 14,
-                                        fontFamily: isWeb ? 'Roboto' : null,
                                         decoration: TextDecoration.underline,
                                         decorationColor: const Color(
                                           0xFF246BFD,
@@ -990,18 +919,24 @@ class _SignInScreenState extends State<SignInScreen>
                                 ],
                               ),
 
-                            // Web footer (optional)
-                            if (isWeb) ...[
-                              const SizedBox(height: 40),
-                              Text(
-                                '© 2025 Sistem Absensi Karyawan SDB',
+                            SizedBox(height: isWeb ? 24 : size.height * 0.03),
+
+                            // ── Tentang Aplikasi (ganti footer SDB) ──
+                            TextButton.icon(
+                              onPressed: _showAboutDialog,
+                              icon: const Icon(
+                                Icons.info_outline,
+                                size: 16,
+                                color: Colors.black38,
+                              ),
+                              label: const Text(
+                                'Tentang SENADA',
                                 style: TextStyle(
+                                  color: Colors.black38,
                                   fontSize: 12,
-                                  color: Colors.grey[400],
-                                  fontFamily: 'Roboto',
                                 ),
                               ),
-                            ],
+                            ),
                           ],
                         ),
                       ),
@@ -1032,7 +967,6 @@ class _SignInScreenState extends State<SignInScreen>
         color: Colors.black,
         fontSize: isWeb ? 16 : 14,
         fontWeight: FontWeight.w500,
-        fontFamily: isWeb ? 'Roboto' : null,
       ),
       validator: (value) {
         if (value == null || value.isEmpty) {
@@ -1046,7 +980,6 @@ class _SignInScreenState extends State<SignInScreen>
           color: Colors.black54,
           fontWeight: FontWeight.w500,
           fontSize: isWeb ? 14 : 12,
-          fontFamily: isWeb ? 'Roboto' : null,
         ),
         prefixIcon: Icon(icon, color: const Color(0xFF246BFD)),
         suffixIcon: isPassword
@@ -1095,7 +1028,6 @@ class _SignInScreenState extends State<SignInScreen>
           color: Colors.red,
           fontWeight: FontWeight.w500,
           fontSize: isWeb ? 12 : 11,
-          fontFamily: isWeb ? 'Roboto' : null,
         ),
       ),
       inputFormatters: keyboardType == TextInputType.number

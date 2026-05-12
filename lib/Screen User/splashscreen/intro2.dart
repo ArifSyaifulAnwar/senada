@@ -27,13 +27,13 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 1), // Start from bottom
+      begin: const Offset(0, 1),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
 
-    _controller.forward(); // Start animation
+    _controller.forward();
   }
 
   @override
@@ -47,7 +47,6 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
     final size = MediaQuery.of(context).size;
     final isWeb = kIsWeb;
 
-    // Responsive sizing untuk web dan mobile
     final paddingHorizontal = isWeb
         ? (size.width > 1200 ? 80.0 : size.width * 0.1)
         : size.width * 0.06;
@@ -63,7 +62,6 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
     return Scaffold(
       body: Stack(
         children: [
-          // Full background image dengan error handling untuk web
           SizedBox.expand(
             child: Image.asset(
               'assets/images/03_onboarding.png',
@@ -79,7 +77,7 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
                   ),
                   child: Center(
                     child: Icon(
-                      Icons.schedule_outlined,
+                      Icons.how_to_reg_outlined,
                       size: isWeb ? 120 : 80,
                       color: Colors.white.withOpacity(0.3),
                     ),
@@ -89,7 +87,6 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
             ),
           ),
 
-          // Animated container dengan batasan untuk web
           Align(
             alignment: Alignment.bottomCenter,
             child: SlideTransition(
@@ -102,7 +99,7 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
                       ? const BoxConstraints(maxWidth: 800)
                       : null,
                   margin: isWeb
-                      ? EdgeInsets.symmetric(horizontal: 20)
+                      ? const EdgeInsets.symmetric(horizontal: 20)
                       : EdgeInsets.zero,
                   padding: EdgeInsets.symmetric(
                     horizontal: paddingHorizontal,
@@ -124,8 +121,9 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // ── TEKS DIUBAH ──
                       Text(
-                        "Disiplin di tangan Anda",
+                        "Daftar dan mulai dalam hitungan menit",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: fontSizeTitle,
@@ -137,7 +135,7 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
                       ),
                       SizedBox(height: isWeb ? 16 : 12),
                       Text(
-                        "Tidak perlu lagi absen manual — cukup lewat genggaman, semua tercatat otomatis.",
+                        "Buat akun dengan email Anda, undang anggota tim, dan langsung mulai mencatat kehadiran hari ini juga. Tanpa perlu pelatihan khusus.",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: fontSizeDesc,
@@ -177,8 +175,7 @@ class _IntroScreenTwoState extends State<IntroScreenTwo>
                           ),
                         ),
                       ),
-                      if (isWeb)
-                        const SizedBox(height: 20), // Extra spacing for web
+                      if (isWeb) const SizedBox(height: 20),
                     ],
                   ),
                 ),

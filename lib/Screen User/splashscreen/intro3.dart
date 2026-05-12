@@ -27,13 +27,13 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 1), // Start from bottom
+      begin: const Offset(0, 1),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
 
-    _controller.forward(); // Start animation
+    _controller.forward();
   }
 
   @override
@@ -47,7 +47,6 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
     final size = MediaQuery.of(context).size;
     final isWeb = kIsWeb;
 
-    // Responsive sizing untuk web dan mobile
     final paddingHorizontal = isWeb
         ? (size.width > 1200 ? 80.0 : size.width * 0.1)
         : size.width * 0.06;
@@ -63,7 +62,6 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
     return Scaffold(
       body: Stack(
         children: [
-          // Full background image dengan error handling untuk web
           SizedBox.expand(
             child: Image.asset(
               'assets/images/04_onboarding.png',
@@ -79,7 +77,7 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                   ),
                   child: Center(
                     child: Icon(
-                      Icons.business_center_outlined,
+                      Icons.people_outline,
                       size: isWeb ? 120 : 80,
                       color: Colors.white.withOpacity(0.3),
                     ),
@@ -89,7 +87,6 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
             ),
           ),
 
-          // Animated container dengan batasan untuk web
           Align(
             alignment: Alignment.bottomCenter,
             child: SlideTransition(
@@ -102,7 +99,7 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                       ? const BoxConstraints(maxWidth: 800)
                       : null,
                   margin: isWeb
-                      ? EdgeInsets.symmetric(horizontal: 20)
+                      ? const EdgeInsets.symmetric(horizontal: 20)
                       : EdgeInsets.zero,
                   padding: EdgeInsets.symmetric(
                     horizontal: paddingHorizontal,
@@ -124,8 +121,9 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // ── TEKS DIUBAH ──
                       Text(
-                        "Mengurangi beban kerja manajemen SDM",
+                        "Tersedia untuk siapa saja, di mana saja",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: fontSizeTitle,
@@ -137,7 +135,7 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                       ),
                       SizedBox(height: isWeb ? 16 : 12),
                       Text(
-                        "Tidak perlu lagi absen manual — cukup lewat genggaman, semua tercatat otomatis.",
+                        "SENADA dapat digunakan oleh perusahaan, UKM, komunitas, maupun tim freelance. Siapapun bisa mendaftar secara mandiri dan langsung menggunakan semua fitur.",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: fontSizeDesc,
@@ -155,8 +153,7 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                             Navigator.pushReplacement(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    SignInScreen(), // Import perlu ditambahkan
+                                builder: (context) => const SignInScreen(),
                               ),
                             );
                           },
@@ -169,7 +166,7 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                             ),
                           ),
                           child: Text(
-                            "Mulai",
+                            "Mulai Sekarang",
                             style: TextStyle(
                               fontSize: isWeb ? 18 : 16,
                               fontWeight: FontWeight.w600,
@@ -178,8 +175,7 @@ class _IntroScreenThreeState extends State<IntroScreenThree>
                           ),
                         ),
                       ),
-                      if (isWeb)
-                        const SizedBox(height: 20), // Extra spacing for web
+                      if (isWeb) const SizedBox(height: 20),
                     ],
                   ),
                 ),

@@ -6,13 +6,13 @@ void main() {
 }
 
 class MyApp extends StatelessWidget {
-  // ignore: use_super_parameters
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Absensi Karyawan',
+      title: 'SENADA',
+      debugShowCheckedModeBanner: false, // hapus banner DEBUG
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const SplashScreen(),
     );

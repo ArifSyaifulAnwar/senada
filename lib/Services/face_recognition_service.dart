@@ -733,4 +733,5 @@ class FaceRecognitionService {
       return false;
     }
   }
+
 }

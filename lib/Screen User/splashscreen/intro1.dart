@@ -2,7 +2,7 @@
 
 import 'package:absensikaryawan/Screen%20User/splashscreen/intro2.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'; // Untuk kIsWeb
+import 'package:flutter/foundation.dart';
 
 class IntroScreenOne extends StatefulWidget {
   const IntroScreenOne({super.key});
@@ -27,13 +27,13 @@ class _IntroScreenOneState extends State<IntroScreenOne>
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 1), // Start from bottom
+      begin: const Offset(0, 1),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
 
-    _controller.forward(); // Start animation
+    _controller.forward();
   }
 
   @override
@@ -47,7 +47,6 @@ class _IntroScreenOneState extends State<IntroScreenOne>
     final size = MediaQuery.of(context).size;
     final isWeb = kIsWeb;
 
-    // Responsive sizing untuk web dan mobile
     final paddingHorizontal = isWeb
         ? (size.width > 1200 ? 80.0 : size.width * 0.1)
         : size.width * 0.06;
@@ -63,14 +62,13 @@ class _IntroScreenOneState extends State<IntroScreenOne>
     return Scaffold(
       body: Stack(
         children: [
-          // Full background image dengan error handling untuk web
           SizedBox.expand(
             child: Image.asset(
               'assets/images/02_onboarding.png',
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) {
                 return Container(
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
@@ -79,7 +77,7 @@ class _IntroScreenOneState extends State<IntroScreenOne>
                   ),
                   child: Center(
                     child: Icon(
-                      Icons.assignment_ind_outlined,
+                      Icons.business_outlined,
                       size: isWeb ? 120 : 80,
                       color: Colors.white.withOpacity(0.3),
                     ),
@@ -89,7 +87,6 @@ class _IntroScreenOneState extends State<IntroScreenOne>
             ),
           ),
 
-          // Animated container dengan batasan untuk web
           Align(
             alignment: Alignment.bottomCenter,
             child: SlideTransition(
@@ -102,7 +99,7 @@ class _IntroScreenOneState extends State<IntroScreenOne>
                       ? const BoxConstraints(maxWidth: 800)
                       : null,
                   margin: isWeb
-                      ? EdgeInsets.symmetric(horizontal: 20)
+                      ? const EdgeInsets.symmetric(horizontal: 20)
                       : EdgeInsets.zero,
                   padding: EdgeInsets.symmetric(
                     horizontal: paddingHorizontal,
@@ -124,8 +121,9 @@ class _IntroScreenOneState extends State<IntroScreenOne>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // ── TEKS DIUBAH ──
                       Text(
-                        "Cara mudah untuk konfirmasi kehadiran",
+                        "Platform absensi untuk semua jenis bisnis",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: fontSizeTitle,
@@ -137,7 +135,7 @@ class _IntroScreenOneState extends State<IntroScreenOne>
                       ),
                       SizedBox(height: isWeb ? 16 : 12),
                       Text(
-                        "Tidak perlu antri atau tanda tangan manual, semuanya serba digital.",
+                        "Kelola kehadiran tim Anda dengan mudah — dari perusahaan kecil hingga enterprise. Daftar gratis, langsung bisa digunakan.",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: fontSizeDesc,
@@ -177,8 +175,7 @@ class _IntroScreenOneState extends State<IntroScreenOne>
                           ),
                         ),
                       ),
-                      if (isWeb)
-                        const SizedBox(height: 20), // Extra spacing for web
+                      if (isWeb) const SizedBox(height: 20),
                     ],
                   ),
                 ),
