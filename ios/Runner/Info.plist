@@ -2,26 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<!-- ==== PERMISSIONS ==== -->
-  <key>NSLocationWhenInUseUsageDescription</key>
-  <string>Aplikasi membutuhkan akses lokasi untuk absensi berbasis GPS.</string>
-
-  <key>NSCameraUsageDescription</key>
-  <string>Aplikasi membutuhkan akses kamera untuk mengambil foto absensi.</string>
-
-  <key>NSPhotoLibraryUsageDescription</key>
-  <string>Aplikasi membutuhkan akses galeri untuk memilih foto.</string>
-
-  <key>NSPhotoLibraryAddUsageDescription</key>
-  <string>Aplikasi membutuhkan izin untuk menyimpan foto ke galeri.</string>
-
-  <!-- OPTIONAL: meminimalisir penolakan App Review -->
-  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-  <string>Aplikasi memerlukan lokasi untuk memverifikasi kehadiran.</string>
-
-  
 	<key>CFBundleDisplayName</key>
 	<string>SENADA</string>
 	<key>CFBundleExecutable</key>
@@ -42,6 +26,18 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Aplikasi membutuhkan akses kamera untuk mengambil foto absensi.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Aplikasi memerlukan lokasi untuk memverifikasi kehadiran.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Aplikasi membutuhkan akses lokasi untuk absensi berbasis GPS.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Aplikasi membutuhkan izin untuk menyimpan foto ke galeri.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Aplikasi membutuhkan akses galeri untuk memilih foto.</string>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -59,9 +55,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
 </dict>
 </plist>
