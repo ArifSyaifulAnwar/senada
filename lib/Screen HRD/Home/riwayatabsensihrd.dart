@@ -2,8 +2,9 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:absensikaryawan/Services/web_download.dart';
+import 'package:absensikaryawan/Services/excel_export_service.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:excel/excel.dart' hide Border;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
@@ -11,6 +12,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../Screen admin/model/admin_attendance_model.dart';
 import '../../Screen admin/service/admin_attendance_service.dart';
+
+// ── helper ──────────────────────────────────────────
+bool _isWeb(BuildContext context) => MediaQuery.of(context).size.width >= 768;
 
 class HalamanHRDAbsensi extends StatefulWidget {
   const HalamanHRDAbsensi({super.key});
@@ -47,15 +51,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   bool hasMoreData = false;
   bool isExporting = false;
 
-  // HRD specific stats
   Map<String, int> departmentStats = {};
   Map<String, double> attendanceRateByDepartment = {};
   List<Employee> problematicEmployees = [];
+
+  // ── Web: index tab aktif ──
+  int _webTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() => _webTabIndex = _tabController.index);
+    });
     _loadInitialData();
   }
 
@@ -67,13 +76,18 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   }
 
   Future<void> _loadInitialData() async {
+    // Step 1: load employees, offices, stats secara paralel (cepat)
     await Future.wait([
       _loadEmployees(),
       _loadOffices(),
-      _loadAttendanceData(refresh: true),
       _loadDashboardStats(),
-      _loadHRDAnalytics(),
     ]);
+
+    // Step 2: load attendance data
+    await _loadAttendanceData(refresh: true);
+
+    // Step 3: analytics hanya sekali setelah data siap (tidak dipanggil lagi dari _loadAttendanceData)
+    await _loadHRDAnalytics();
   }
 
   Future<void> _loadEmployees() async {
@@ -82,16 +96,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (response.success) {
         setState(() {
           employees = response.data ?? [];
-          // Extract departments
           departments =
               employees.map((e) => e.department ?? 'Unknown').toSet().toList()
                 ..sort();
         });
       }
     } catch (e) {
-      setState(() {
-        employees = [];
-      });
+      setState(() => employees = []);
     }
   }
 
@@ -99,14 +110,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     try {
       final response = await _adminService.getOffices();
       if (response.success) {
-        setState(() {
-          offices = response.data ?? [];
-        });
+        setState(() => offices = response.data ?? []);
       }
     } catch (e) {
-      setState(() {
-        offices = [];
-      });
+      setState(() => offices = []);
     }
   }
 
@@ -119,11 +126,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (selectedTimeRange == 'Pilih Periode' && customDateRange != null) {
         startDateToSend = customDateRange!.start;
         endDateToSend = customDateRange!.end;
-        timeRangeToSend = null;
       } else if (selectedTimeRange != 'Semua Data') {
         timeRangeToSend = selectedTimeRange;
-      } else {
-        timeRangeToSend = null;
       }
 
       final response = await _adminService.getDashboardStats(
@@ -133,35 +137,24 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       );
 
       if (response.success) {
-        setState(() {
-          stats = response.data ?? AdminAttendanceStats();
-        });
+        setState(() => stats = response.data ?? AdminAttendanceStats());
       }
     } catch (e) {
-      setState(() {
-        stats = AdminAttendanceStats();
-      });
+      setState(() => stats = AdminAttendanceStats());
     }
   }
 
   Future<void> _loadHRDAnalytics() async {
-    // Load HRD specific analytics
     try {
-      // Calculate department statistics
       Map<String, int> deptStats = {};
       Map<String, List<AdminAttendanceData>> deptAttendance = {};
 
       for (var data in attendanceData) {
         String dept = data.department ?? 'Unknown';
         deptStats[dept] = (deptStats[dept] ?? 0) + 1;
-
-        if (!deptAttendance.containsKey(dept)) {
-          deptAttendance[dept] = [];
-        }
-        deptAttendance[dept]!.add(data);
+        deptAttendance.putIfAbsent(dept, () => []).add(data);
       }
 
-      // Calculate attendance rate by department
       Map<String, double> deptRate = {};
       deptAttendance.forEach((dept, dataList) {
         int present = dataList
@@ -176,18 +169,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             : (present / dataList.length * 100);
       });
 
-      // Find problematic employees (high absence/late rate)
-      Map<String, List<AdminAttendanceData>> employeeAttendance = {};
+      Map<String, List<AdminAttendanceData>> empAttendance = {};
       for (var data in attendanceData) {
-        String userId = data.userId;
-        if (!employeeAttendance.containsKey(userId)) {
-          employeeAttendance[userId] = [];
-        }
-        employeeAttendance[userId]!.add(data);
+        empAttendance.putIfAbsent(data.userId, () => []).add(data);
       }
 
       List<Employee> problematic = [];
-      employeeAttendance.forEach((userId, dataList) {
+      empAttendance.forEach((userId, dataList) {
         int lateCount = dataList
             .where((d) => d.displayStatus.toLowerCase().contains('terlambat'))
             .length;
@@ -198,18 +186,15 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   d.displayStatus.toLowerCase().contains('absent'),
             )
             .length;
-
         double problemRate = dataList.isEmpty
             ? 0
             : ((lateCount + absentCount) / dataList.length * 100);
-
         if (problemRate > 30) {
-          // More than 30% problematic attendance
-          var employee = employees.firstWhere(
+          var emp = employees.firstWhere(
             (e) => e.userId == userId,
             orElse: () => Employee(userId: userId, name: 'Unknown'),
           );
-          problematic.add(employee);
+          problematic.add(emp);
         }
       });
 
@@ -245,7 +230,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (selectedTimeRange == 'Pilih Periode' && customDateRange != null) {
         startDateToSend = customDateRange!.start;
         endDateToSend = customDateRange!.end;
-        timeRangeToSend = null;
       } else if (selectedTimeRange != 'Semua Data') {
         timeRangeToSend = selectedTimeRange;
       }
@@ -263,7 +247,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         officeId: selectedOffice?.id,
         searchTerm: searchTerm.isNotEmpty ? searchTerm : null,
         page: currentPage,
-        pageSize: 20,
+        pageSize: 50, // naik dari 20 → 50, kurangi jumlah request
       );
 
       if (response.success) {
@@ -278,9 +262,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           isLoading = false;
           errorMessage = '';
         });
-
-        // Reload HRD analytics after data update
-        await _loadHRDAnalytics();
+        // Analytics hanya di-update setelah refresh, bukan setiap load-more
+        if (refresh) await _loadHRDAnalytics();
       } else {
         setState(() {
           isLoading = false;
@@ -297,106 +280,74 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Future<void> _loadMoreData() async {
     if (!hasMoreData || isLoading) return;
-
-    setState(() {
-      currentPage++;
-    });
-
+    setState(() => currentPage++);
     await _loadAttendanceData();
   }
 
-  Future<void> _refreshData() async {
-    await _loadInitialData();
-  }
+  Future<void> _refreshData() async => await _loadInitialData();
 
   Future<void> _exportData() async {
-    setState(() {
-      isExporting = true;
-    });
-
+    setState(() => isExporting = true);
     try {
-      // 1. bikin excel nya dulu (ini common, bisa dipakai web & mobile)
-
-      var excel = Excel.createExcel();
-
-      // nama sheet yang kita pakai
-      const sheetName = 'Absensi';
-
-      // Ambil sheet 'Absensi'
-      Sheet sheetObject = excel[sheetName];
-
-      // HAPUS sheet default yg kosong
-      excel.delete('Sheet1'); // <-- ini penting
-
-      // Set sheet 'Absensi' jadi aktif
-      excel.setDefaultSheet(sheetName);
-      // Header
-      sheetObject.appendRow([
-        TextCellValue('ID Absensi'),
-        TextCellValue('Nama Karyawan'),
-        TextCellValue('Departemen'),
-        TextCellValue('Tanggal'),
-        TextCellValue('Jam Masuk'),
-        TextCellValue('Jam Keluar'),
-        TextCellValue('Status'),
-      ]);
-
-      for (var data in attendanceData) {
-        sheetObject.appendRow([
-          TextCellValue(data.id.toString()),
-          TextCellValue(data.userName),
-          TextCellValue(data.department ?? '-'),
-          TextCellValue(_formatTanggalFromDateTime(data.attendanceDate)),
-          TextCellValue(data.formattedCheckIn),
-          TextCellValue(data.formattedCheckOut),
-          TextCellValue(data.displayStatus),
-        ]);
+      // Buat label periode dari filter aktif
+      String? periodLabel;
+      if (selectedTimeRange == 'Pilih Periode' && customDateRange != null) {
+        periodLabel =
+            '${DateFormat('dd MMM yyyy', 'id_ID').format(customDateRange!.start)} - ${DateFormat('dd MMM yyyy', 'id_ID').format(customDateRange!.end)}';
+      } else if (selectedTimeRange != 'Semua Data') {
+        periodLabel = selectedTimeRange;
       }
 
-      final bytes = excel.encode();
+      // Pakai ExcelExportService untuk generate Excel yang rapi
+      final bytes = ExcelExportService.buildAbsensiExcel(
+        attendanceData,
+        periodLabel: periodLabel,
+      );
       if (bytes == null) throw Exception('Gagal encode excel');
-
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final fileName = 'Absensi_$timestamp.xlsx';
 
-      // 2. Cek platform
       if (kIsWeb) {
-        // ✅ Web platform - Flutter web tidak bisa direct download
-        // User akan download via browser default behavior
+        // Trigger download langsung via browser (dart:html)
+        downloadFileWeb(bytes, fileName);
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Export berhasil! File Excel siap diunduh. '
-                'Gunakan fitur save dari browser Anda.',
+            SnackBar(
+              content: Row(
+                children: const [
+                  Icon(Icons.download_done, color: Colors.white, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'File Excel berhasil diunduh!',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
               ),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 3),
+              backgroundColor: const Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              margin: const EdgeInsets.all(16),
+              duration: const Duration(seconds: 3),
             ),
           );
         }
         setState(() => isExporting = false);
         return;
       } else {
-        // =========================
-        // JALUR MOBILE / DESKTOP
-        // =========================
-
-        // cek permission android
         if (Platform.isAndroid) {
           final androidInfo = await DeviceInfoPlugin().androidInfo;
-          Permission permission;
-          if (androidInfo.version.sdkInt >= 33) {
-            permission = Permission.photos;
-          } else {
-            permission = Permission.storage;
-          }
-
+          Permission permission = androidInfo.version.sdkInt >= 33
+              ? Permission.photos
+              : Permission.storage;
           var status = await permission.status;
           if (status.isDenied || status.isPermanentlyDenied) {
             status = await permission.request();
           }
-
           if (!status.isGranted) {
             _showErrorSnackBar('Izin penyimpanan diperlukan untuk export');
             setState(() => isExporting = false);
@@ -404,12 +355,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           }
         }
 
-        // simpan ke folder external
         final directory = await getExternalStorageDirectory();
         if (directory == null) {
-          throw Exception('Tidak dapat mengakses direktori penyimpanan');
+          throw Exception('Tidak dapat mengakses direktori');
         }
-
         final path = '${directory.path}/$fileName';
         final file = File(path)
           ..createSync(recursive: true)
@@ -420,9 +369,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             context: context,
             builder: (context) => AlertDialog(
               title: const Text('Berhasil'),
-              content: Text(
-                'File Excel berhasil disimpan di:\n$path\n\nBuka sekarang?',
-              ),
+              content: Text('File tersimpan di:\n$path\n\nBuka sekarang?'),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context, false),
@@ -435,34 +382,23 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
               ],
             ),
           );
-
           if (shouldOpen == true) {
             await OpenFile.open(file.path);
           }
-
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Export berhasil! File tersimpan di storage.'),
+              content: Text('Export berhasil!'),
               backgroundColor: Colors.green,
             ),
           );
         }
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Gagal export: $e');
-      }
+      if (mounted) _showErrorSnackBar('Gagal export: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          isExporting = false;
-        });
-      }
+      if (mounted) setState(() => isExporting = false);
     }
   }
-
-  // ✅ Simplified export untuk mobile/desktop
-  // Untuk web, user akan menggunakan browser download
 
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -475,9 +411,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   }
 
   void _performSearch(String value) {
-    setState(() {
-      searchTerm = value;
-    });
+    setState(() => searchTerm = value);
     _loadAttendanceData(refresh: true);
   }
 
@@ -485,9 +419,1267 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     _showDetailBottomSheet(data);
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final isWebLayout = _isWeb(context);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: _buildAppBar(isWebLayout),
+      body: SafeArea(child: isWebLayout ? _buildWebBody() : _buildMobileBody()),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(bool isWebLayout) {
+    return AppBar(
+      automaticallyImplyLeading: false,
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366F1).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.assignment_ind,
+              color: Color(0xFF6366F1),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Flexible(
+            child: Text(
+              'HRD - Data Absensi',
+              style: TextStyle(
+                color: Color(0xFF1E293B),
+                fontWeight: FontWeight.w600,
+                fontSize: 18,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: Colors.white,
+      elevation: 0,
+      centerTitle: isWebLayout ? false : true,
+      actions: [
+        Container(
+          margin: const EdgeInsets.only(right: 16),
+          child: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.refresh_rounded,
+                color: Color(0xFF6366F1),
+                size: 20,
+              ),
+            ),
+            onPressed: _refreshData,
+          ),
+        ),
+      ],
+      // Tab bar hanya untuk mobile
+      bottom: isWebLayout
+          ? null
+          : TabBar(
+              controller: _tabController,
+              labelColor: const Color(0xFF6366F1),
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: const Color(0xFF6366F1),
+              isScrollable: MediaQuery.of(context).size.width < 400,
+              tabs: const [
+                Tab(icon: Icon(Icons.dashboard, size: 18), text: 'Dashboard'),
+                Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Absensi'),
+                Tab(icon: Icon(Icons.analytics, size: 18), text: 'Analitik'),
+              ],
+            ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE BODY (layout asli)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileBody() {
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildDashboardTab(),
+        _buildAttendanceTab(),
+        _buildAnalyticsTab(),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB BODY (2 kolom: sidebar nav kiri + konten kanan)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebBody() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Sidebar navigasi tab vertikal ──
+        _buildWebSideNav(),
+
+        // ── Konten tab aktif ──
+        Expanded(
+          child: IndexedStack(
+            index: _webTabIndex,
+            children: [
+              _buildDashboardTab(),
+              _buildAttendanceTab(),
+              _buildAnalyticsTab(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWebSideNav() {
+    final tabs = [
+      _WebNavItem(Icons.dashboard, 'Dashboard', 0),
+      _WebNavItem(Icons.list_alt, 'Absensi', 1),
+      _WebNavItem(Icons.analytics, 'Analitik', 2),
+    ];
+
+    return Container(
+      width: 180,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(right: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 16),
+          ...tabs.map((tab) {
+            final isSelected = _webTabIndex == tab.index;
+            return GestureDetector(
+              onTap: () {
+                setState(() => _webTabIndex = tab.index);
+                _tabController.animateTo(tab.index);
+              },
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF6366F1).withOpacity(0.08)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: isSelected
+                      ? Border.all(
+                          color: const Color(0xFF6366F1).withOpacity(0.2),
+                        )
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      tab.icon,
+                      size: 18,
+                      color: isSelected
+                          ? const Color(0xFF6366F1)
+                          : Colors.grey[500],
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      tab.label,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? const Color(0xFF6366F1)
+                            : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // DASHBOARD TAB — responsive grid
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildDashboardTab() {
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Dashboard HRD - Absensi',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1E293B),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _buildHRDStatsGrid(),
+            const SizedBox(height: 20),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 600) {
+                  // Web: analitik & problematic side by side
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: _buildDepartmentAnalytics()),
+                      const SizedBox(width: 16),
+                      Expanded(child: _buildProblematicEmployees()),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    _buildDepartmentAnalytics(),
+                    const SizedBox(height: 16),
+                    _buildProblematicEmployees(),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ABSENSI TAB — filter + list (web: 2 kolom filter/list)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildAttendanceTab() {
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 700;
+
+            final filterWidget = _buildFilterSection();
+            final listWidget = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Data Absensi Karyawan',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${attendanceData.length} data',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (isLoading && attendanceData.isEmpty)
+                  _buildLoadingWidget()
+                else if (errorMessage.isNotEmpty && attendanceData.isEmpty)
+                  Column(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: Colors.red,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        errorMessage,
+                        style: const TextStyle(color: Colors.red),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _refreshData,
+                        child: const Text('Coba Lagi'),
+                      ),
+                    ],
+                  )
+                else if (attendanceData.isEmpty)
+                  _buildEmptyStateWidget()
+                else
+                  _buildAttendanceList(),
+              ],
+            );
+
+            if (isWide) {
+              // Web: filter di kiri (fixed 300px), list di kanan
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(width: 280, child: filterWidget),
+                  const SizedBox(width: 16),
+                  Expanded(child: listWidget),
+                ],
+              );
+            }
+
+            // Mobile: stacked
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [filterWidget, const SizedBox(height: 20), listWidget],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ANALITIK TAB — responsive
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildAnalyticsTab() {
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.analytics, color: Colors.white, size: 32),
+                  SizedBox(height: 12),
+                  Text(
+                    'Analitik HRD',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Analisis mendalam data absensi karyawan',
+                    style: TextStyle(fontSize: 14, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 600) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: _buildDepartmentAnalytics()),
+                      const SizedBox(width: 16),
+                      Expanded(child: _buildProblematicEmployees()),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    _buildDepartmentAnalytics(),
+                    const SizedBox(height: 16),
+                    _buildProblematicEmployees(),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // STATS GRID — 2 kolom mobile, 4 kolom web
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildHRDStatsGrid() {
+    final currentStats = stats ?? AdminAttendanceStats();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final int cols = constraints.maxWidth >= 600 ? 4 : 2;
+        final double ratio = constraints.maxWidth >= 600 ? 1.6 : 1.2;
+
+        return Column(
+          children: [
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: cols,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: ratio,
+              children: [
+                _buildHRDStatCard(
+                  'Total Karyawan',
+                  currentStats.totalKaryawan.toString(),
+                  Icons.people,
+                  const Color(0xFF3B82F6),
+                  subtitle: 'Terdaftar',
+                ),
+                _buildHRDStatCard(
+                  'Tepat Waktu',
+                  currentStats.tepatWaktu.toString(),
+                  Icons.check_circle,
+                  const Color(0xFF10B981),
+                  subtitle: 'Karyawan',
+                ),
+                _buildHRDStatCard(
+                  'Terlambat',
+                  currentStats.terlambat.toString(),
+                  Icons.access_time,
+                  const Color(0xFFF59E0B),
+                  subtitle: 'Karyawan',
+                  isWarning: currentStats.terlambat > 5,
+                ),
+                _buildHRDStatCard(
+                  'Tidak Hadir',
+                  currentStats.tidakHadir.toString(),
+                  Icons.cancel,
+                  const Color(0xFFEF4444),
+                  subtitle: 'Karyawan',
+                  isWarning: currentStats.tidakHadir > 3,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Attendance rate card
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.analytics, color: Colors.white, size: 32),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Tingkat Kehadiran',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_calculateAttendanceRate()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      _calculateAttendanceRate() > 90
+                          ? Icons.trending_up
+                          : Icons.trending_down,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildHRDStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color, {
+    String? subtitle,
+    bool isWarning = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isWarning ? color.withOpacity(0.5) : color.withOpacity(0.2),
+          width: isWarning ? 2 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isWarning
+                ? color.withOpacity(0.1)
+                : Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              if (isWarning)
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.priority_high,
+                    size: 10,
+                    color: Colors.red,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 2),
+          if (subtitle != null)
+            Text(
+              subtitle,
+              style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+            ),
+          const SizedBox(height: 2),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // FILTER SECTION — kompak untuk sidebar web
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildFilterSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Filter Data HRD',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ),
+              if (isExporting)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                GestureDetector(
+                  onTap: _exportData,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.download,
+                          size: 14,
+                          color: Color(0xFF10B981),
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'Export',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF10B981),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Search
+          TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Cari nama, ID, departemen...',
+              hintStyle: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF94A3B8),
+              ),
+              prefixIcon: const Icon(
+                Icons.search,
+                color: Color(0xFF64748B),
+                size: 18,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFF3B82F6)),
+              ),
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              isDense: true,
+            ),
+            onChanged: (value) {
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (_searchController.text == value) _performSearch(value);
+              });
+            },
+          ),
+
+          const SizedBox(height: 10),
+
+          // Filter buttons — stacked vertikal (cocok di sidebar)
+          _buildFilterBtn(
+            'Periode',
+            selectedTimeRange,
+            Icons.calendar_today,
+            const Color(0xFF3B82F6),
+            _showDateFilterSheet,
+          ),
+          const SizedBox(height: 6),
+          _buildFilterBtn(
+            'Status',
+            selectedStatusFilter,
+            Icons.filter_alt,
+            const Color(0xFF10B981),
+            _showStatusFilterSheet,
+          ),
+          const SizedBox(height: 6),
+          _buildFilterBtn(
+            'Karyawan',
+            selectedEmployee?.name ?? 'Semua',
+            Icons.person,
+            const Color(0xFF8B5CF6),
+            _showEmployeeFilterSheet,
+          ),
+          const SizedBox(height: 6),
+          _buildFilterBtn(
+            'Departemen',
+            selectedDepartment ?? 'Semua',
+            Icons.business,
+            const Color(0xFF6366F1),
+            _showDepartmentFilterSheet,
+          ),
+          const SizedBox(height: 6),
+          _buildFilterBtn(
+            'Kantor',
+            selectedOffice?.officeName ?? 'Semua',
+            Icons.location_city,
+            const Color(0xFFEF4444),
+            _showOfficeFilterSheet,
+          ),
+          const SizedBox(height: 10),
+
+          // Reset button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  selectedTimeRange = 'Semua Data';
+                  selectedStatusFilter = 'Semua';
+                  selectedEmployee = null;
+                  selectedOffice = null;
+                  selectedDepartment = null;
+                  customDateRange = null;
+                  _searchController.clear();
+                });
+                _loadAttendanceData(refresh: true);
+              },
+              icon: const Icon(Icons.clear, size: 14),
+              label: const Text('Reset Filter', style: TextStyle(fontSize: 13)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6B7280),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterBtn(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.25)),
+          borderRadius: BorderRadius.circular(8),
+          color: color.withOpacity(0.04),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: color,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF1E293B),
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 14, color: Colors.grey[400]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ATTENDANCE LIST & CARD
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildAttendanceList() {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (ScrollNotification scrollInfo) {
+        if (!isLoading &&
+            hasMoreData &&
+            scrollInfo.metrics.pixels == scrollInfo.metrics.maxScrollExtent) {
+          _loadMoreData();
+        }
+        return false;
+      },
+      child: ListView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: attendanceData.length + (hasMoreData ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index >= attendanceData.length) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+          return _buildAttendanceCard(attendanceData[index]);
+        },
+      ),
+    );
+  }
+
+  Widget _buildAttendanceCard(AdminAttendanceData data) {
+    return GestureDetector(
+      onTap: () => _showDetailAbsensi(data),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: _getStatusColor(data.displayStatus).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  _getStatusIcon(data.displayStatus),
+                  color: _getStatusColor(data.displayStatus),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data.userName,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1E293B),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (data.department != null)
+                                Text(
+                                  data.department!,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF6366F1),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getStatusColor(
+                              data.displayStatus,
+                            ).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            data.displayStatus,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: _getStatusColor(data.displayStatus),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.calendar_today,
+                          size: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatTanggalFromDateTime(data.attendanceDate),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        if (data.displayStatus != 'Cuti') ...[
+                          const SizedBox(width: 12),
+                          const Icon(
+                            Icons.login,
+                            size: 12,
+                            color: Color(0xFF10B981),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            data.formattedCheckIn,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.logout,
+                            size: 12,
+                            color: Color(0xFFF59E0B),
+                          ),
+                          const SizedBox(width: 3),
+                          Expanded(
+                            child: Text(
+                              data.formattedCheckOut,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF64748B),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // DEPARTMENT ANALYTICS
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildDepartmentAnalytics() {
+    if (departmentStats.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'Analisis per Departemen',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ),
+              const Icon(Icons.insights, color: Color(0xFF6366F1)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...departmentStats.entries.map((entry) {
+            double rate = attendanceRateByDepartment[entry.key] ?? 0;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          entry.key,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF1E293B),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${entry.value} • ${rate.toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  LinearProgressIndicator(
+                    value: rate / 100,
+                    backgroundColor: const Color(0xFFE5E7EB),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      rate > 90
+                          ? const Color(0xFF10B981)
+                          : rate > 75
+                          ? const Color(0xFFF59E0B)
+                          : const Color(0xFFEF4444),
+                    ),
+                    minHeight: 5,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // PROBLEMATIC EMPLOYEES
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildProblematicEmployees() {
+    if (problematicEmployees.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFCA5A5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.warning, color: Color(0xFFEF4444), size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Karyawan Perlu Perhatian',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF991B1B),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...problematicEmployees.take(5).map((employee) {
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 14,
+                    backgroundColor: const Color(0xFFEF4444).withOpacity(0.1),
+                    child: Text(
+                      employee.name.isNotEmpty ? employee.name[0] : '?',
+                      style: const TextStyle(
+                        color: Color(0xFFEF4444),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          employee.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF1E293B),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (employee.department != null)
+                          Text(
+                            employee.department!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF64748B),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => selectedEmployee = employee);
+                      _loadAttendanceData(refresh: true);
+                      setState(() => _webTabIndex = 1);
+                      _tabController.animateTo(1);
+                    },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                    ),
+                    child: const Text('Detail', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // DETAIL BOTTOM SHEET
+  // ─────────────────────────────────────────────────────────────────
   void _showDetailBottomSheet(AdminAttendanceData data) {
     final screenHeight = MediaQuery.of(context).size.height;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -495,15 +1687,14 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       builder: (context) => SafeArea(
         child: Container(
           height: screenHeight * 0.85,
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
-              // Handle bar
               Container(
-                margin: EdgeInsets.only(top: 12),
+                margin: const EdgeInsets.only(top: 12),
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
@@ -511,20 +1702,18 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-
               Expanded(
                 child: SingleChildScrollView(
-                  padding: EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header with HRD Actions
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            width: 60,
-                            height: 60,
+                            width: 56,
+                            height: 56,
                             decoration: BoxDecoration(
                               color: _getStatusColor(
                                 data.displayStatus,
@@ -534,15 +1723,15 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                             child: Icon(
                               _getStatusIcon(data.displayStatus),
                               color: _getStatusColor(data.displayStatus),
-                              size: 30,
+                              size: 28,
                             ),
                           ),
-                          SizedBox(width: 16),
+                          const SizedBox(width: 16),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
+                                const Text(
                                   'Detail Absensi HRD',
                                   style: TextStyle(
                                     fontSize: 18,
@@ -550,21 +1739,21 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                                     color: Color(0xFF1E293B),
                                   ),
                                 ),
-                                SizedBox(height: 4),
+                                const SizedBox(height: 4),
                                 Text(
                                   _formatTanggalFromDateTime(
                                     data.attendanceDate,
                                   ),
-                                  style: TextStyle(
-                                    fontSize: 14,
+                                  style: const TextStyle(
+                                    fontSize: 13,
                                     color: Color(0xFF64748B),
                                   ),
                                 ),
-                                SizedBox(height: 8),
+                                const SizedBox(height: 8),
                                 Container(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
                                   ),
                                   decoration: BoxDecoration(
                                     color: _getStatusColor(
@@ -588,112 +1777,61 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                           ),
                         ],
                       ),
-
-                      SizedBox(height: 24),
-
-                      // HRD Action Buttons - Made responsive
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          if (constraints.maxWidth > 400) {
-                            // For wider screens, show buttons in a row
-                            return Row(
-                              children: [
-                                Expanded(
-                                  child: _buildActionButton(
-                                    'Edit',
-                                    Icons.edit,
-                                    Color(0xFF3B82F6),
-                                    () => _showEditAttendanceDialog(data),
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: _buildActionButton(
-                                    'Report',
-                                    Icons.description,
-                                    Color(0xFF10B981),
-                                    () => _generateAttendanceReport(data),
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: _buildActionButton(
-                                    'Warning',
-                                    Icons.warning,
-                                    Color(0xFFEF4444),
-                                    () => _sendWarningToEmployee(data),
-                                  ),
-                                ),
-                              ],
-                            );
-                          } else {
-                            // For smaller screens, show buttons in a column
-                            return Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildActionButton(
-                                        'Edit',
-                                        Icons.edit,
-                                        Color(0xFF3B82F6),
-                                        () => _showEditAttendanceDialog(data),
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: _buildActionButton(
-                                        'Report',
-                                        Icons.description,
-                                        Color(0xFF10B981),
-                                        () => _generateAttendanceReport(data),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: _buildActionButton(
-                                    'Warning',
-                                    Icons.warning,
-                                    Color(0xFFEF4444),
-                                    () => _sendWarningToEmployee(data),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                        },
+                      const SizedBox(height: 20),
+                      // Action buttons
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildActionButton(
+                              'Edit',
+                              Icons.edit,
+                              const Color(0xFF3B82F6),
+                              () => _showEditAttendanceDialog(data),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildActionButton(
+                              'Report',
+                              Icons.description,
+                              const Color(0xFF10B981),
+                              () => _generateAttendanceReport(data),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildActionButton(
+                              'Warning',
+                              Icons.warning,
+                              const Color(0xFFEF4444),
+                              () => _sendWarningToEmployee(data),
+                            ),
+                          ),
+                        ],
                       ),
-
-                      SizedBox(height: 20),
-
-                      // Detail informasi
+                      const SizedBox(height: 20),
                       ..._buildDetailItems(data),
                     ],
                   ),
                 ),
               ),
-
-              // Close button
               Padding(
-                padding: EdgeInsets.all(20),
+                padding: const EdgeInsets.all(20),
                 child: SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF6366F1),
-                      padding: EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: const Color(0xFF6366F1),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: Text(
+                    child: const Text(
                       'Tutup',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: Colors.white,
                       ),
@@ -716,150 +1854,85 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   ) {
     return ElevatedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 16),
-      label: Text(label),
+      icon: Icon(icon, size: 14),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        padding: EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 10),
       ),
     );
   }
 
   List<Widget> _buildDetailItems(AdminAttendanceData data) {
     List<Widget> items = [];
+    void add(String label, String value, IconData icon, Color color) {
+      items.add(_buildDetailItem(label, value, icon, color));
+    }
 
-    items.add(
-      _buildDetailItem(
-        'ID Absensi',
-        '#${data.id.toString().padLeft(4, '0')}',
-        Icons.badge,
-        Colors.blue,
-      ),
+    add(
+      'ID Absensi',
+      '#${data.id.toString().padLeft(4, '0')}',
+      Icons.badge,
+      Colors.blue,
     );
-
-    items.add(
-      _buildDetailItem(
-        'Nama Karyawan',
-        data.userName,
-        Icons.person,
-        Colors.purple,
-      ),
-    );
-
+    add('Nama Karyawan', data.userName, Icons.person, Colors.purple);
     if (data.employeeId != null) {
-      items.add(
-        _buildDetailItem(
-          'ID Karyawan',
-          data.employeeId!,
-          Icons.badge_outlined,
-          Colors.indigo,
-        ),
-      );
+      add('ID Karyawan', data.employeeId!, Icons.badge_outlined, Colors.indigo);
     }
-
     if (data.department != null) {
-      items.add(
-        _buildDetailItem(
-          'Departemen',
-          data.department!,
-          Icons.business,
-          Colors.teal,
-        ),
-      );
+      add('Departemen', data.department!, Icons.business, Colors.teal);
     }
-
     if (data.displayStatus != 'Cuti') {
-      items.add(
-        _buildDetailItem(
-          'Jam Masuk',
-          data.formattedCheckIn,
-          Icons.login,
-          Colors.green,
-        ),
-      );
-
-      items.add(
-        _buildDetailItem(
-          'Jam Keluar',
-          data.formattedCheckOut,
-          Icons.logout,
-          Colors.orange,
-        ),
-      );
+      add('Jam Masuk', data.formattedCheckIn, Icons.login, Colors.green);
+      add('Jam Keluar', data.formattedCheckOut, Icons.logout, Colors.orange);
     }
-
-    items.add(
-      _buildDetailItem(
-        'Status Check In',
-        data.checkInStatus.isNotEmpty ? data.checkInStatus : 'Tidak ada data',
-        _getStatusIcon(data.checkInStatus),
-        _getStatusColor(data.checkInStatus),
-      ),
+    add(
+      'Status Check In',
+      data.checkInStatus.isNotEmpty ? data.checkInStatus : 'Tidak ada data',
+      _getStatusIcon(data.checkInStatus),
+      _getStatusColor(data.checkInStatus),
     );
-
     if (data.checkOutStatus.isNotEmpty) {
-      items.add(
-        _buildDetailItem(
-          'Status Check Out',
-          data.checkOutStatus,
-          _getStatusIcon(data.checkOutStatus),
-          _getStatusColor(data.checkOutStatus),
-        ),
+      add(
+        'Status Check Out',
+        data.checkOutStatus,
+        _getStatusIcon(data.checkOutStatus),
+        _getStatusColor(data.checkOutStatus),
       );
     }
-
     if (data.checkInOfficeName != null) {
-      items.add(
-        _buildDetailItem(
-          'Kantor',
-          data.checkInOfficeName!,
-          Icons.location_city,
-          Colors.red,
-        ),
-      );
+      add('Kantor', data.checkInOfficeName!, Icons.location_city, Colors.red);
     }
-
-    items.add(
-      _buildDetailItem(
-        'Keterangan',
-        data.notes.isNotEmpty ? data.notes : 'Tidak ada keterangan',
-        Icons.info,
-        Colors.purple,
-      ),
+    add(
+      'Keterangan',
+      data.notes.isNotEmpty ? data.notes : 'Tidak ada keterangan',
+      Icons.info,
+      Colors.purple,
     );
-
     if (data.workingHoursMinutes != null) {
-      items.add(
-        _buildDetailItem(
-          'Jam Kerja',
-          '${(data.workingHoursMinutes! / 60).toStringAsFixed(1)} jam',
-          Icons.schedule,
-          Colors.indigo,
-        ),
+      add(
+        'Jam Kerja',
+        '${(data.workingHoursMinutes! / 60).toStringAsFixed(1)} jam',
+        Icons.schedule,
+        Colors.indigo,
       );
     }
-
     if (data.overtimeMinutes != null && data.overtimeMinutes! > 0) {
-      items.add(
-        _buildDetailItem(
-          'Lembur',
-          '${(data.overtimeMinutes! / 60).toStringAsFixed(1)} jam',
-          Icons.access_time_filled,
-          Colors.amber,
-        ),
+      add(
+        'Lembur',
+        '${(data.overtimeMinutes! / 60).toStringAsFixed(1)} jam',
+        Icons.access_time_filled,
+        Colors.amber,
       );
     }
-
     if (data.checkInFaceConfidence != null) {
-      items.add(
-        _buildDetailItem(
-          'Confidence Check In',
-          '${(data.checkInFaceConfidence! * 100).toStringAsFixed(1)}%',
-          Icons.face,
-          Colors.blue,
-        ),
+      add(
+        'Confidence Check In',
+        '${(data.checkInFaceConfidence! * 100).toStringAsFixed(1)}%',
+        Icons.face,
+        Colors.blue,
       );
     }
 
@@ -873,8 +1946,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     Color color,
   ) {
     return Container(
-      margin: EdgeInsets.only(bottom: 16),
-      padding: EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -883,32 +1956,32 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       child: Row(
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(icon, color: color, size: 18),
           ),
-          SizedBox(width: 16),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 12,
+                  style: const TextStyle(
+                    fontSize: 11,
                     color: Color(0xFF64748B),
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   value,
-                  style: TextStyle(
-                    fontSize: 16,
+                  style: const TextStyle(
+                    fontSize: 14,
                     color: Color(0xFF1E293B),
                     fontWeight: FontWeight.w600,
                   ),
@@ -921,1084 +1994,11 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  String _formatTanggalFromDateTime(DateTime date) {
-    try {
-      return DateFormat('dd MMM yyyy', 'id_ID').format(date);
-    } catch (e) {
-      return date.toString().split(' ')[0];
-    }
-  }
-
-  Color _getStatusColor(String status) {
-    final statusLower = status.toLowerCase();
-    if (statusLower.contains('tepat waktu') || statusLower == 'on_time') {
-      return Colors.green;
-    } else if (statusLower.contains('terlambat') ||
-        statusLower == 'late' ||
-        statusLower == 'very_late') {
-      return Colors.orange;
-    } else if (statusLower.contains('cuti') || statusLower == 'leave') {
-      return Colors.blue;
-    } else if (statusLower.contains('absent') ||
-        statusLower.contains('tidak hadir')) {
-      return Colors.red;
-    } else {
-      return Colors.grey;
-    }
-  }
-
-  IconData _getStatusIcon(String status) {
-    final statusLower = status.toLowerCase();
-    if (statusLower.contains('tepat waktu') || statusLower == 'on_time') {
-      return Icons.check_circle;
-    } else if (statusLower.contains('terlambat') ||
-        statusLower == 'late' ||
-        statusLower == 'very_late') {
-      return Icons.access_time;
-    } else if (statusLower.contains('cuti') || statusLower == 'leave') {
-      return Icons.event_busy;
-    } else if (statusLower.contains('absent') ||
-        statusLower.contains('tidak hadir')) {
-      return Icons.cancel;
-    } else {
-      return Icons.help;
-    }
-  }
-
-  Widget _buildHRDStatsGrid() {
-    final currentStats = stats ?? AdminAttendanceStats();
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 600;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Main Stats Cards - Responsive grid
-        LayoutBuilder(
-          builder: (context, constraints) {
-            // Calculate number of columns based on screen width
-            int crossAxisCount = isSmallScreen ? 2 : 4;
-            double childAspectRatio = isSmallScreen ? 1.2 : 1.5;
-
-            return GridView.count(
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              crossAxisCount: crossAxisCount,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: childAspectRatio,
-              children: [
-                _buildHRDStatCard(
-                  'Total Karyawan',
-                  currentStats.totalKaryawan.toString(),
-                  Icons.people,
-                  Color(0xFF3B82F6),
-                  subtitle: 'Terdaftar',
-                ),
-                _buildHRDStatCard(
-                  'Tepat Waktu',
-                  currentStats.tepatWaktu.toString(),
-                  Icons.check_circle,
-                  Color(0xFF10B981),
-                  subtitle: 'Karyawan',
-                ),
-                _buildHRDStatCard(
-                  'Terlambat',
-                  currentStats.terlambat.toString(),
-                  Icons.access_time,
-                  Color(0xFFF59E0B),
-                  subtitle: 'Karyawan',
-                  isWarning: currentStats.terlambat > 5,
-                ),
-                _buildHRDStatCard(
-                  'Tidak Hadir',
-                  currentStats.tidakHadir.toString(),
-                  Icons.cancel,
-                  Color(0xFFEF4444),
-                  subtitle: 'Karyawan',
-                  isWarning: currentStats.tidakHadir > 3,
-                ),
-              ],
-            );
-          },
-        ),
-
-        SizedBox(height: 20),
-
-        // Attendance Rate Card
-        Container(
-          padding: EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.analytics, color: Colors.white, size: 32),
-              SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Tingkat Kehadiran',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '${_calculateAttendanceRate()}%',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  _calculateAttendanceRate() > 90
-                      ? Icons.trending_up
-                      : Icons.trending_down,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHRDStatCard(
-    String title,
-    String value,
-    IconData icon,
-    Color color, {
-    String? subtitle,
-    bool isWarning = false,
-  }) {
-    return Container(
-      padding: EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isWarning ? color.withOpacity(0.5) : color.withOpacity(0.2),
-          width: isWarning ? 2 : 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: isWarning
-                ? color.withOpacity(0.1)
-                : Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: color, size: 18),
-              ),
-              if (isWarning)
-                Container(
-                  padding: EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.priority_high, size: 10, color: Colors.red),
-                ),
-            ],
-          ),
-          SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          SizedBox(height: 2),
-          if (subtitle != null)
-            Text(
-              subtitle,
-              style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
-            ),
-          SizedBox(height: 2),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Colors.black87,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDepartmentAnalytics() {
-    if (departmentStats.isEmpty) {
-      return Container();
-    }
-
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  'Analisis per Departemen',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-              ),
-              Icon(Icons.insights, color: Color(0xFF6366F1)),
-            ],
-          ),
-          SizedBox(height: 16),
-          ...departmentStats.entries.map((entry) {
-            double rate = attendanceRateByDepartment[entry.key] ?? 0;
-            return Container(
-              margin: EdgeInsets.only(bottom: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          entry.key,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Color(0xFF1E293B),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        '${entry.value} • ${rate.toStringAsFixed(1)}%',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF64748B),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 4),
-                  LinearProgressIndicator(
-                    value: rate / 100,
-                    backgroundColor: Color(0xFFE5E7EB),
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      rate > 90
-                          ? Color(0xFF10B981)
-                          : rate > 75
-                          ? Color(0xFFF59E0B)
-                          : Color(0xFFEF4444),
-                    ),
-                    minHeight: 6,
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProblematicEmployees() {
-    if (problematicEmployees.isEmpty) {
-      return Container();
-    }
-
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Color(0xFFFEF2F2),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Color(0xFFFCA5A5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.warning, color: Color(0xFFEF4444), size: 20),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Karyawan Perlu Perhatian',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF991B1B),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          ...problematicEmployees.take(5).map((employee) {
-            return Container(
-              margin: EdgeInsets.only(bottom: 8),
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Color(0xFFEF4444).withOpacity(0.1),
-                    child: Text(
-                      employee.name.isNotEmpty ? employee.name[0] : '?',
-                      style: TextStyle(
-                        color: Color(0xFFEF4444),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          employee.name,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Color(0xFF1E293B),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (employee.department != null)
-                          Text(
-                            employee.department!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF64748B),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        selectedEmployee = employee;
-                      });
-                      _loadAttendanceData(refresh: true);
-                      _tabController.animateTo(1);
-                    },
-                    child: Text('Detail', style: TextStyle(fontSize: 12)),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAttendanceCard(AdminAttendanceData data) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 600;
-
-    return GestureDetector(
-      onTap: () => _showDetailAbsensi(data),
-      child: Container(
-        margin: EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: _getStatusColor(
-                        data.displayStatus,
-                      ).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      _getStatusIcon(data.displayStatus),
-                      color: _getStatusColor(data.displayStatus),
-                      size: 24,
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    data.userName,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF1E293B),
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (data.department != null)
-                                    Text(
-                                      data.department!,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFF6366F1),
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                ],
-                              ),
-                            ),
-                            SizedBox(width: 8),
-                            Container(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _getStatusColor(
-                                  data.displayStatus,
-                                ).withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                data.displayStatus,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                  color: _getStatusColor(data.displayStatus),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 8),
-                        if (data.employeeId != null)
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.badge,
-                                size: 14,
-                                color: Color(0xFF64748B),
-                              ),
-                              SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  'ID: ${data.employeeId}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF64748B),
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today,
-                              size: 14,
-                              color: Color(0xFF64748B),
-                            ),
-                            SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                _formatTanggalFromDateTime(data.attendanceDate),
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFF64748B),
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 8),
-                        if (data.displayStatus != 'Cuti') ...[
-                          Container(
-                            padding: EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Color(0xFFF8FAFC),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: isSmallScreen
-                                ? Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.login,
-                                            size: 16,
-                                            color: Color(0xFF10B981),
-                                          ),
-                                          SizedBox(width: 4),
-                                          Expanded(
-                                            child: Text(
-                                              'Masuk: ${data.formattedCheckIn}',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: Color(0xFF64748B),
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.logout,
-                                            size: 16,
-                                            color: Color(0xFFF59E0B),
-                                          ),
-                                          SizedBox(width: 4),
-                                          Expanded(
-                                            child: Text(
-                                              'Keluar: ${data.formattedCheckOut}',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: Color(0xFF64748B),
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  )
-                                : Row(
-                                    children: [
-                                      Icon(
-                                        Icons.login,
-                                        size: 16,
-                                        color: Color(0xFF10B981),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        'Masuk: ${data.formattedCheckIn}',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          color: Color(0xFF64748B),
-                                        ),
-                                      ),
-                                      SizedBox(width: 16),
-                                      Icon(
-                                        Icons.logout,
-                                        size: 16,
-                                        color: Color(0xFFF59E0B),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          'Keluar: ${data.formattedCheckOut}',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Color(0xFF64748B),
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                          ),
-                        ],
-                        if (data.checkInOfficeName != null) ...[
-                          SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.location_city,
-                                size: 14,
-                                color: Color(0xFF64748B),
-                              ),
-                              SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  data.checkInOfficeName!,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF64748B),
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                        if (!isSmallScreen &&
-                            data.displayStatus.toLowerCase().contains(
-                              'terlambat',
-                            )) ...[
-                          SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton.icon(
-                                onPressed: () => _sendWarningToEmployee(data),
-                                icon: Icon(Icons.warning, size: 16),
-                                label: Text('Kirim Peringatan'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Color(0xFFEF4444),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFilterSection() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 600;
-
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  'Filter Data HRD',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-              ),
-              if (isExporting)
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                GestureDetector(
-                  onTap: _exportData,
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Color(0xFF10B981).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.download,
-                          size: 16,
-                          color: Color(0xFF10B981),
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          'Export',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF10B981),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          SizedBox(height: 16),
-
-          // Search bar
-          TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Cari nama karyawan, ID, atau departemen...',
-              prefixIcon: Icon(Icons.search, color: Color(0xFF64748B)),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Color(0xFFE2E8F0)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Color(0xFFE2E8F0)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Color(0xFF3B82F6)),
-              ),
-              filled: true,
-              fillColor: Color(0xFFF8FAFC),
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
-              ),
-            ),
-            onChanged: (value) {
-              Future.delayed(Duration(milliseconds: 500), () {
-                if (_searchController.text == value) {
-                  _performSearch(value);
-                }
-              });
-            },
-          ),
-
-          SizedBox(height: 16),
-
-          // Filter buttons - Made responsive
-          if (isSmallScreen) ...[
-            // For small screens, arrange filters in pairs
-            Row(
-              children: [
-                Expanded(
-                  child: _buildFilterButton(
-                    'Periode',
-                    selectedTimeRange == 'Pilih Periode' &&
-                            customDateRange != null
-                        ? '${customDateRange!.start.day}/${customDateRange!.start.month} - ${customDateRange!.end.day}/${customDateRange!.end.month}'
-                        : selectedTimeRange,
-                    Icons.calendar_today,
-                    Color(0xFF3B82F6),
-                    _showDateFilterSheet,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: _buildFilterButton(
-                    'Status',
-                    selectedStatusFilter,
-                    Icons.filter_alt,
-                    Color(0xFF10B981),
-                    _showStatusFilterSheet,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildFilterButton(
-                    'Karyawan',
-                    selectedEmployee?.name ?? 'Semua Karyawan',
-                    Icons.person,
-                    Color(0xFF8B5CF6),
-                    _showEmployeeFilterSheet,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: _buildFilterButton(
-                    'Departemen',
-                    selectedDepartment ?? 'Semua Dept',
-                    Icons.business,
-                    Color(0xFF6366F1),
-                    _showDepartmentFilterSheet,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildFilterButton(
-                    'Kantor',
-                    selectedOffice?.officeName ?? 'Semua Kantor',
-                    Icons.location_city,
-                    Color(0xFFEF4444),
-                    _showOfficeFilterSheet,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        selectedTimeRange = 'Semua Data';
-                        selectedStatusFilter = 'Semua';
-                        selectedEmployee = null;
-                        selectedOffice = null;
-                        selectedDepartment = null;
-                        customDateRange = null;
-                        _searchController.clear();
-                      });
-                      _loadAttendanceData(refresh: true);
-                    },
-                    icon: Icon(Icons.clear, size: 16),
-                    label: Text('Reset'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF6B7280),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ] else ...[
-            // For larger screens, keep original layout
-            Row(
-              children: [
-                Expanded(
-                  child: _buildFilterButton(
-                    'Periode',
-                    selectedTimeRange == 'Pilih Periode' &&
-                            customDateRange != null
-                        ? '${customDateRange!.start.day}/${customDateRange!.start.month} - ${customDateRange!.end.day}/${customDateRange!.end.month}'
-                        : selectedTimeRange,
-                    Icons.calendar_today,
-                    Color(0xFF3B82F6),
-                    _showDateFilterSheet,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: _buildFilterButton(
-                    'Status',
-                    selectedStatusFilter,
-                    Icons.filter_alt,
-                    Color(0xFF10B981),
-                    _showStatusFilterSheet,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildFilterButton(
-                    'Karyawan',
-                    selectedEmployee?.name ?? 'Semua Karyawan',
-                    Icons.person,
-                    Color(0xFF8B5CF6),
-                    _showEmployeeFilterSheet,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: _buildFilterButton(
-                    'Departemen',
-                    selectedDepartment ?? 'Semua Dept',
-                    Icons.business,
-                    Color(0xFF6366F1),
-                    _showDepartmentFilterSheet,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildFilterButton(
-                    'Kantor',
-                    selectedOffice?.officeName ?? 'Semua Kantor',
-                    Icons.location_city,
-                    Color(0xFFEF4444),
-                    _showOfficeFilterSheet,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        selectedTimeRange = 'Semua Data';
-                        selectedStatusFilter = 'Semua';
-                        selectedEmployee = null;
-                        selectedOffice = null;
-                        selectedDepartment = null;
-                        customDateRange = null;
-                        _searchController.clear();
-                      });
-                      _loadAttendanceData(refresh: true);
-                    },
-                    icon: Icon(Icons.clear, size: 16),
-                    label: Text('Reset'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF6B7280),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterButton(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          border: Border.all(color: color.withOpacity(0.3)),
-          borderRadius: BorderRadius.circular(8),
-          color: color.withOpacity(0.05),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 14, color: color),
-                SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: color,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 2),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 12,
-                color: Color(0xFF1E293B),
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────────────
   Widget _buildLoadingWidget() {
-    return Center(
+    return const Center(
       child: Padding(
         padding: EdgeInsets.all(32),
         child: Column(
@@ -2021,13 +2021,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   Widget _buildEmptyStateWidget() {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.assignment_outlined, size: 64, color: Colors.grey[400]),
-            SizedBox(height: 16),
-            Text(
+            const SizedBox(height: 16),
+            const Text(
               'Tidak ada data absensi',
               style: TextStyle(
                 fontSize: 16,
@@ -2035,19 +2035,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 color: Color(0xFF64748B),
               ),
             ),
-            SizedBox(height: 8),
-            Text(
+            const SizedBox(height: 8),
+            const Text(
               'Coba ubah filter atau periode waktu',
               style: TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
               textAlign: TextAlign.center,
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: _refreshData,
-              icon: Icon(Icons.refresh),
-              label: Text('Muat Ulang'),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Muat Ulang'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Color(0xFF6366F1),
+                backgroundColor: const Color(0xFF6366F1),
                 foregroundColor: Colors.white,
               ),
             ),
@@ -2057,237 +2057,246 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  Widget _buildAttendanceList() {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (ScrollNotification scrollInfo) {
-        if (!isLoading &&
-            hasMoreData &&
-            scrollInfo.metrics.pixels == scrollInfo.metrics.maxScrollExtent) {
-          _loadMoreData();
-        }
-        return false;
-      },
-      child: ListView.builder(
-        shrinkWrap: true,
-        physics: NeverScrollableScrollPhysics(),
-        itemCount: attendanceData.length + (hasMoreData ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index >= attendanceData.length) {
-            return Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: CircularProgressIndicator(),
-              ),
-            );
-          }
-          return _buildAttendanceCard(attendanceData[index]);
-        },
+  String _formatTanggalFromDateTime(DateTime date) {
+    try {
+      return DateFormat('dd MMM yyyy', 'id_ID').format(date);
+    } catch (e) {
+      return date.toString().split(' ')[0];
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    final s = status.toLowerCase();
+    if (s.contains('tepat waktu') || s == 'on_time') return Colors.green;
+    if (s.contains('terlambat') || s == 'late' || s == 'very_late') {
+      return Colors.orange;
+    }
+    if (s.contains('cuti') || s == 'leave') return Colors.blue;
+    if (s.contains('absent') || s.contains('tidak hadir')) return Colors.red;
+    return Colors.grey;
+  }
+
+  IconData _getStatusIcon(String status) {
+    final s = status.toLowerCase();
+    if (s.contains('tepat waktu') || s == 'on_time') {
+      return Icons.check_circle;
+    }
+    if (s.contains('terlambat') || s == 'late' || s == 'very_late') {
+      return Icons.access_time;
+    }
+    if (s.contains('cuti') || s == 'leave') return Icons.event_busy;
+    if (s.contains('absent') || s.contains('tidak hadir')) {
+      return Icons.cancel;
+    }
+    return Icons.help;
+  }
+
+  double _calculateAttendanceRate() {
+    if (stats == null || stats!.totalKaryawan == 0) return 0;
+    final present = stats!.tepatWaktu + stats!.masukKantor;
+    return (present / stats!.totalKaryawan * 100).clamp(0, 100);
+  }
+
+  void _showEditAttendanceDialog(AdminAttendanceData data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Absensi'),
+        content: const Text('Fitur edit absensi akan segera tersedia'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
 
+  void _generateAttendanceReport(AdminAttendanceData data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Generate Report'),
+        content: const Text('Laporan absensi akan segera tersedia'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sendWarningToEmployee(AdminAttendanceData data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Kirim Peringatan'),
+        content: Text('Kirim peringatan ke ${data.userName}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Peringatan telah dikirim'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Kirim'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Filter sheets (tidak berubah) ────────────────────────────────
   void _showDateFilterSheet() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
               ),
-              Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'Pilih Periode Waktu',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'Pilih Periode Waktu',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
-              ListTile(
-                leading: Icon(Icons.all_inbox, color: Color(0xFF6366F1)),
-                title: Text('Semua Data'),
+            ),
+            ...[
+              ('Semua Data', 'Semua Data', Icons.all_inbox),
+              ('Hari Ini', '1 Hari', Icons.today),
+              ('7 Hari Terakhir', '7 Hari Terakhir', Icons.date_range),
+              ('30 Hari Terakhir', '30 Hari Terakhir', Icons.date_range),
+            ].map(
+              (item) => ListTile(
+                leading: Icon(item.$3, color: const Color(0xFF6366F1)),
+                title: Text(item.$1),
+                selected: selectedTimeRange == item.$2,
                 onTap: () {
                   setState(() {
-                    selectedTimeRange = 'Semua Data';
+                    selectedTimeRange = item.$2;
                     customDateRange = null;
                   });
                   Navigator.pop(context);
                   _loadAttendanceData(refresh: true);
                   _loadDashboardStats();
                 },
-                selected: selectedTimeRange == 'Semua Data',
               ),
-              ListTile(
-                leading: Icon(Icons.today, color: Color(0xFF6366F1)),
-                title: Text('Hari Ini'),
-                onTap: () {
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.calendar_today,
+                color: Color(0xFF6366F1),
+              ),
+              title: const Text('Pilih Periode Custom'),
+              subtitle: customDateRange != null
+                  ? Text(
+                      '${DateFormat('dd/MM/yyyy').format(customDateRange!.start)} - ${DateFormat('dd/MM/yyyy').format(customDateRange!.end)}',
+                    )
+                  : null,
+              selected: selectedTimeRange == 'Pilih Periode',
+              onTap: () async {
+                final picked = await showDateRangePicker(
+                  context: context,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now(),
+                  initialDateRange: customDateRange,
+                );
+                if (picked != null) {
                   setState(() {
-                    selectedTimeRange = '1 Hari';
-                    customDateRange = null;
+                    customDateRange = picked;
+                    selectedTimeRange = 'Pilih Periode';
                   });
-                  Navigator.pop(context);
                   _loadAttendanceData(refresh: true);
                   _loadDashboardStats();
-                },
-                selected: selectedTimeRange == '1 Hari',
-              ),
-              ListTile(
-                leading: Icon(Icons.date_range, color: Color(0xFF6366F1)),
-                title: Text('7 Hari Terakhir'),
-                onTap: () {
-                  setState(() {
-                    selectedTimeRange = '7 Hari Terakhir';
-                    customDateRange = null;
-                  });
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                  _loadDashboardStats();
-                },
-                selected: selectedTimeRange == '7 Hari Terakhir',
-              ),
-              ListTile(
-                leading: Icon(Icons.date_range, color: Color(0xFF6366F1)),
-                title: Text('30 Hari Terakhir'),
-                onTap: () {
-                  setState(() {
-                    selectedTimeRange = '30 Hari Terakhir';
-                    customDateRange = null;
-                  });
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                  _loadDashboardStats();
-                },
-                selected: selectedTimeRange == '30 Hari Terakhir',
-              ),
-              ListTile(
-                leading: Icon(Icons.calendar_today, color: Color(0xFF6366F1)),
-                title: Text('Pilih Periode Custom'),
-                subtitle: customDateRange != null
-                    ? Text(
-                        '${DateFormat('dd/MM/yyyy').format(customDateRange!.start)} - ${DateFormat('dd/MM/yyyy').format(customDateRange!.end)}',
-                      )
-                    : null,
-                onTap: () async {
-                  final picked = await showDateRangePicker(
-                    context: context,
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime.now(),
-                    initialDateRange: customDateRange,
-                  );
-                  if (picked != null) {
-                    setState(() {
-                      customDateRange = picked;
-                      selectedTimeRange = 'Pilih Periode';
-                    });
-                    _loadAttendanceData(refresh: true);
-                    _loadDashboardStats();
-                  }
-                  Navigator.pop(context);
-                },
-                selected: selectedTimeRange == 'Pilih Periode',
-              ),
-              SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
+                }
+                Navigator.pop(context);
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 
   void _showStatusFilterSheet() {
+    final options = [
+      ('Semua', Icons.all_inclusive, Colors.blue),
+      ('Tepat Waktu', Icons.check_circle, Colors.green),
+      ('Terlambat', Icons.access_time, Colors.orange),
+      ('Cuti', Icons.event_busy, Colors.blue),
+      ('Tidak Hadir', Icons.cancel, Colors.red),
+    ];
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
               ),
-              Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'Filter Status Absensi',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'Filter Status Absensi',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
-              ListTile(
-                leading: Icon(Icons.all_inclusive, color: Colors.blue),
-                title: Text('Semua'),
+            ),
+            ...options.map(
+              (opt) => ListTile(
+                leading: Icon(opt.$2, color: opt.$3),
+                title: Text(opt.$1),
+                selected: selectedStatusFilter == opt.$1,
                 onTap: () {
-                  setState(() => selectedStatusFilter = 'Semua');
+                  setState(() => selectedStatusFilter = opt.$1);
                   Navigator.pop(context);
                   _loadAttendanceData(refresh: true);
                 },
-                selected: selectedStatusFilter == 'Semua',
               ),
-              ListTile(
-                leading: Icon(Icons.check_circle, color: Colors.green),
-                title: Text('Tepat Waktu'),
-                onTap: () {
-                  setState(() => selectedStatusFilter = 'Tepat Waktu');
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                },
-                selected: selectedStatusFilter == 'Tepat Waktu',
-              ),
-              ListTile(
-                leading: Icon(Icons.access_time, color: Colors.orange),
-                title: Text('Terlambat'),
-                onTap: () {
-                  setState(() => selectedStatusFilter = 'Terlambat');
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                },
-                selected: selectedStatusFilter == 'Terlambat',
-              ),
-              ListTile(
-                leading: Icon(Icons.event_busy, color: Colors.blue),
-                title: Text('Cuti'),
-                onTap: () {
-                  setState(() => selectedStatusFilter = 'Cuti');
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                },
-                selected: selectedStatusFilter == 'Cuti',
-              ),
-              ListTile(
-                leading: Icon(Icons.cancel, color: Colors.red),
-                title: Text('Tidak Hadir'),
-                onTap: () {
-                  setState(() => selectedStatusFilter = 'Tidak Hadir');
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                },
-                selected: selectedStatusFilter == 'Tidak Hadir',
-              ),
-              SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2296,93 +2305,85 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          maxChildSize: 0.9,
-          minChildSize: 0.5,
-          expand: false,
-          builder: (context, scrollController) {
-            return SafeArea(
-              child: Column(
-                children: [
-                  Container(
-                    margin: EdgeInsets.only(top: 12),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.5,
+        expand: false,
+        builder: (context, scrollController) => SafeArea(
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Pilih Karyawan',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: [
+                    ListTile(
+                      leading: const Icon(
+                        Icons.all_inclusive,
+                        color: Colors.blue,
+                      ),
+                      title: const Text('Semua Karyawan'),
+                      selected: selectedEmployee == null,
+                      onTap: () {
+                        setState(() => selectedEmployee = null);
+                        Navigator.pop(context);
+                        _loadAttendanceData(refresh: true);
+                      },
                     ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text(
-                      'Pilih Karyawan',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
+                    ...employees.map(
+                      (emp) => ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: const Color(
+                            0xFF8B5CF6,
+                          ).withOpacity(0.1),
+                          child: Text(
+                            emp.name.isNotEmpty
+                                ? emp.name[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              color: Color(0xFF8B5CF6),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        title: Text(emp.name),
+                        subtitle: Text(
+                          '${emp.employeeId ?? ""} • ${emp.department ?? ""}',
+                        ),
+                        selected: selectedEmployee?.userId == emp.userId,
+                        onTap: () {
+                          setState(() => selectedEmployee = emp);
+                          Navigator.pop(context);
+                          _loadAttendanceData(refresh: true);
+                        },
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      controller: scrollController,
-                      children: [
-                        ListTile(
-                          leading: Icon(
-                            Icons.all_inclusive,
-                            color: Colors.blue,
-                          ),
-                          title: Text('Semua Karyawan'),
-                          onTap: () {
-                            setState(() => selectedEmployee = null);
-                            Navigator.pop(context);
-                            _loadAttendanceData(refresh: true);
-                          },
-                          selected: selectedEmployee == null,
-                        ),
-                        ...employees.map(
-                          (employee) => ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: Color(
-                                0xFF8B5CF6,
-                              ).withOpacity(0.1),
-                              child: Text(
-                                employee.name.isNotEmpty
-                                    ? employee.name[0].toUpperCase()
-                                    : '?',
-                                style: TextStyle(
-                                  color: Color(0xFF8B5CF6),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            title: Text(employee.name),
-                            subtitle: Text(
-                              '${employee.employeeId ?? ""} • ${employee.department ?? ""}',
-                            ),
-                            onTap: () {
-                              setState(() => selectedEmployee = employee);
-                              Navigator.pop(context);
-                              _loadAttendanceData(refresh: true);
-                            },
-                            selected:
-                                selectedEmployee?.userId == employee.userId,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            );
-          },
-        );
-      },
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -2390,57 +2391,58 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
               ),
-              Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'Pilih Departemen',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'Pilih Departemen',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
-              ListTile(
-                leading: Icon(Icons.all_inclusive, color: Color(0xFF6366F1)),
-                title: Text('Semua Departemen'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.all_inclusive,
+                color: Color(0xFF6366F1),
+              ),
+              title: const Text('Semua Departemen'),
+              selected: selectedDepartment == null,
+              onTap: () {
+                setState(() => selectedDepartment = null);
+                Navigator.pop(context);
+                _loadAttendanceData(refresh: true);
+              },
+            ),
+            ...departments.map(
+              (dept) => ListTile(
+                leading: const Icon(Icons.business, color: Color(0xFF6366F1)),
+                title: Text(dept),
+                selected: selectedDepartment == dept,
                 onTap: () {
-                  setState(() => selectedDepartment = null);
+                  setState(() => selectedDepartment = dept);
                   Navigator.pop(context);
                   _loadAttendanceData(refresh: true);
                 },
-                selected: selectedDepartment == null,
               ),
-              ...departments.map(
-                (dept) => ListTile(
-                  leading: Icon(Icons.business, color: Color(0xFF6366F1)),
-                  title: Text(dept),
-                  onTap: () {
-                    setState(() => selectedDepartment = dept);
-                    Navigator.pop(context);
-                    _loadAttendanceData(refresh: true);
-                  },
-                  selected: selectedDepartment == dept,
-                ),
-              ),
-              SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2448,373 +2450,67 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'Pilih Kantor',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-              ),
-              ListTile(
-                leading: Icon(Icons.all_inclusive, color: Colors.blue),
-                title: Text('Semua Kantor'),
-                onTap: () {
-                  setState(() => selectedOffice = null);
-                  Navigator.pop(context);
-                  _loadAttendanceData(refresh: true);
-                },
-                selected: selectedOffice == null,
-              ),
-              ...offices.map(
-                (office) => ListTile(
-                  leading: Icon(Icons.location_city, color: Color(0xFFEF4444)),
-                  title: Text(office.officeName),
-                  subtitle: office.address != null
-                      ? Text(office.address!)
-                      : null,
-                  onTap: () {
-                    setState(() => selectedOffice = office);
-                    Navigator.pop(context);
-                    _loadAttendanceData(refresh: true);
-                  },
-                  selected: selectedOffice?.id == office.id,
-                ),
-              ),
-              SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // HRD Specific Methods
-  double _calculateAttendanceRate() {
-    if (stats == null || stats!.totalKaryawan == 0) return 0;
-
-    // Menggunakan tepatWaktu + masukKantor sebagai total hadir
-    final present = stats!.tepatWaktu + stats!.masukKantor;
-    return (present / stats!.totalKaryawan * 100).clamp(0, 100);
-  }
-
-  void _showEditAttendanceDialog(AdminAttendanceData data) {
-    // Implementation for editing attendance
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Edit Absensi'),
-        content: Text('Fitur edit absensi akan segera tersedia'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _generateAttendanceReport(AdminAttendanceData data) {
-    // Implementation for generating report
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Generate Report'),
-        content: Text('Laporan absensi akan segera tersedia'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _sendWarningToEmployee(AdminAttendanceData data) {
-    // Implementation for sending warning
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Kirim Peringatan'),
-        content: Text('Kirim peringatan ke ${data.userName}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Batal'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Peringatan telah dikirim'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Color(0xFFEF4444),
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Kirim'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDashboardTab() {
-    return RefreshIndicator(
-      onRefresh: _refreshData,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(16),
+      builder: (_) => SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Dashboard HRD - Absensi',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1E293B),
-              ),
-            ),
-            SizedBox(height: 16),
-            _buildHRDStatsGrid(),
-            SizedBox(height: 20),
-            _buildDepartmentAnalytics(),
-            SizedBox(height: 20),
-            _buildProblematicEmployees(),
-            SizedBox(height: 20), // Extra padding at bottom
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAttendanceTab() {
-    return RefreshIndicator(
-      onRefresh: _refreshData,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildFilterSection(),
-            SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Data Absensi Karyawan',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1E293B),
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '${attendanceData.length} data',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF64748B),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 20),
-            if (isLoading && attendanceData.isEmpty)
-              _buildLoadingWidget()
-            else if (errorMessage.isNotEmpty && attendanceData.isEmpty)
-              Column(
-                children: [
-                  Icon(Icons.error_outline, size: 48, color: Colors.red),
-                  SizedBox(height: 16),
-                  Text(
-                    errorMessage,
-                    style: TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _refreshData,
-                    child: Text('Coba Lagi'),
-                  ),
-                ],
-              )
-            else if (attendanceData.isEmpty)
-              _buildEmptyStateWidget()
-            else
-              _buildAttendanceList(),
-            SizedBox(height: 20), // Extra padding at bottom
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAnalyticsTab() {
-    return RefreshIndicator(
-      onRefresh: _refreshData,
-      child: SingleChildScrollView(
-        physics: AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.analytics, color: Colors.white, size: 32),
-                  SizedBox(height: 12),
-                  Text(
-                    'Analitik HRD',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Analisis mendalam data absensi karyawan',
-                    style: TextStyle(fontSize: 14, color: Colors.white70),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: 20),
-            _buildDepartmentAnalytics(),
-            SizedBox(height: 20),
-            _buildProblematicEmployees(),
-            SizedBox(height: 20), // Extra padding at bottom
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Color(0xFFF8FAFC),
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: EdgeInsets.all(6),
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
               decoration: BoxDecoration(
-                color: Color(0xFF6366F1).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.assignment_ind,
-                color: Color(0xFF6366F1),
-                size: 20,
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            SizedBox(width: 10),
-            Flexible(
+            const Padding(
+              padding: EdgeInsets.all(20),
               child: Text(
-                'HRD - Data Absensi',
-                style: TextStyle(
-                  color: Color(0xFF1E293B),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 18,
-                ),
-                overflow: TextOverflow.ellipsis,
+                'Pilih Kantor',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
             ),
-          ],
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        actions: [
-          Container(
-            margin: EdgeInsets.only(right: 16),
-            child: IconButton(
-              icon: Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.refresh_rounded,
-                  color: Color(0xFF6366F1),
-                  size: 20,
-                ),
-              ),
-              onPressed: _refreshData,
+            ListTile(
+              leading: const Icon(Icons.all_inclusive, color: Colors.blue),
+              title: const Text('Semua Kantor'),
+              selected: selectedOffice == null,
+              onTap: () {
+                setState(() => selectedOffice = null);
+                Navigator.pop(context);
+                _loadAttendanceData(refresh: true);
+              },
             ),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: Color(0xFF6366F1),
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: Color(0xFF6366F1),
-          isScrollable: MediaQuery.of(context).size.width < 400,
-          tabs: [
-            Tab(icon: Icon(Icons.dashboard, size: 18), text: 'Dashboard'),
-            Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Absensi'),
-            Tab(icon: Icon(Icons.analytics, size: 18), text: 'Analitik'),
-          ],
-        ),
-      ),
-      body: SafeArea(
-        child: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildDashboardTab(),
-            _buildAttendanceTab(),
-            _buildAnalyticsTab(),
+            ...offices.map(
+              (office) => ListTile(
+                leading: const Icon(
+                  Icons.location_city,
+                  color: Color(0xFFEF4444),
+                ),
+                title: Text(office.officeName),
+                subtitle: office.address != null ? Text(office.address!) : null,
+                selected: selectedOffice?.id == office.id,
+                onTap: () {
+                  setState(() => selectedOffice = office);
+                  Navigator.pop(context);
+                  _loadAttendanceData(refresh: true);
+                },
+              ),
+            ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
+}
+
+// ── model helper ──────────────────────────────────────────────────
+class _WebNavItem {
+  final IconData icon;
+  final String label;
+  final int index;
+  const _WebNavItem(this.icon, this.label, this.index);
 }

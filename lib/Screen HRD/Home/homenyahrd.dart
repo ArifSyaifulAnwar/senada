@@ -1,4 +1,5 @@
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
+
 import 'dart:convert';
 import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
@@ -18,6 +19,13 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
+// ─────────────────────────────────────────────
+// Helper: deteksi layar lebar (web/tablet)
+// ─────────────────────────────────────────────
+bool _isWideScreen(BuildContext context) {
+  return MediaQuery.of(context).size.width >= 768;
+}
+
 class HomeScreenHRD extends StatefulWidget {
   const HomeScreenHRD({super.key});
 
@@ -31,14 +39,12 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  // Enhanced attendance status tracking
   bool _hasCheckedIn = false;
   bool _hasCheckedOut = false;
   bool _isLoadingAttendance = false;
   Map<String, dynamic>? _todayAttendanceData;
   String _attendanceStatusMessage = '';
 
-  // FIXED: Add GlobalKey for SlideAction and track its state
   final GlobalKey<SlideActionState> _slideActionKey =
       GlobalKey<SlideActionState>();
   bool _isSlideActionProcessing = false;
@@ -46,6 +52,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   bool _isLoadingNotifications = false;
   String? _notificationError;
   String? userID;
+
   @override
   void initState() {
     super.initState();
@@ -89,31 +96,21 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
 
   Future<void> _loadUnreadNotificationCount() async {
     if (!mounted) return;
-
     setState(() {
       _isLoadingNotifications = true;
       _notificationError = null;
     });
-
     try {
-      // Ambil access token terlebih dahulu
       String? currentToken = _accessToken;
-
       if (currentToken == null) {
         currentToken = await _getToken();
-        if (currentToken == null) {
-          throw Exception('Failed to get access token');
-        }
+        if (currentToken == null) throw Exception('Failed to get access token');
       }
-
-      // Pastikan userID sudah ada
-      if (userID == null) {
-        await loadUserId();
-      }
-
+      if (userID == null) await loadUserId();
       if (userID == null || userID!.isEmpty) {
         throw Exception('User ID not found');
       }
+
       final response = await http
           .post(
             Uri.parse('$baseURL/api/admin/notifications/stats'),
@@ -122,41 +119,33 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
-            // PERBAIKAN: Gunakan json.encode untuk mengubah Map menjadi JSON string
-            //body: json.encode({"UserId": userID}),
           )
           .timeout(
             const Duration(seconds: 10),
             onTimeout: () {
-              throw Exception(
-                'Request timeout - server took too long to respond',
-              );
+              throw Exception('Request timeout');
             },
           );
+
       if (mounted) {
         if (response.statusCode == 200) {
           final responseData = json.decode(response.body);
           if (responseData['Success'] == true) {
-            final unreadCount = responseData['Data']['UnreadCount'] ?? 0;
-            // ignore: avoid_print
-            print(unreadCount);
             setState(() {
-              _unreadNotificationCount = unreadCount;
+              _unreadNotificationCount =
+                  responseData['Data']['UnreadCount'] ?? 0;
               _isLoadingNotifications = false;
               _notificationError = null;
             });
           } else {
-            final errorMsg =
-                responseData['Message'] ?? 'Unknown error from API';
             setState(() {
               _isLoadingNotifications = false;
-              _notificationError = errorMsg;
+              _notificationError = responseData['Message'] ?? 'Unknown error';
             });
           }
         } else if (response.statusCode == 401) {
           final newToken = await _getToken();
           if (newToken != null && mounted) {
-            // Retry with new token
             await _loadUnreadNotificationCount();
           } else {
             setState(() {
@@ -165,10 +154,9 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             });
           }
         } else {
-          final errorMsg = 'HTTP Error: ${response.statusCode}';
           setState(() {
             _isLoadingNotifications = false;
-            _notificationError = errorMsg;
+            _notificationError = 'HTTP Error: ${response.statusCode}';
           });
         }
       }
@@ -182,23 +170,16 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     }
   }
 
-  // NEW: Method untuk refresh notification count
   Future<void> refreshNotificationCount() async {
     await _loadUnreadNotificationCount();
   }
 
-  // ENHANCED: Method untuk cek status attendance dari API
   Future<void> _checkTodayAttendanceStatus() async {
     if (!mounted) return;
-
-    setState(() {
-      _isLoadingAttendance = true;
-    });
-
+    setState(() => _isLoadingAttendance = true);
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID') ?? '';
-
       if (userId.isEmpty) {
         if (mounted) {
           setState(() {
@@ -211,18 +192,14 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       final result = await FaceRecognitionService.getTodayAttendance(
         userId: userId,
       );
-
       if (mounted) {
         if (result['success']) {
           final attendanceData = result['data'];
-
           setState(() {
             _todayAttendanceData = attendanceData;
-
             if (attendanceData != null) {
               _hasCheckedIn = attendanceData['CheckInTime'] != null;
               _hasCheckedOut = attendanceData['CheckOutTime'] != null;
-
               if (_hasCheckedOut) {
                 _attendanceStatusMessage = 'Anda sudah check out hari ini';
               } else if (_hasCheckedIn) {
@@ -235,7 +212,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               _hasCheckedOut = false;
               _attendanceStatusMessage = 'Siap untuk check in';
             }
-
             _isLoadingAttendance = false;
           });
         } else {
@@ -244,7 +220,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             _hasCheckedOut = false;
             _isLoadingAttendance = false;
             _attendanceStatusMessage =
-                result['message'] ?? 'Gagal mengambil status absensi karyawan';
+                result['message'] ?? 'Gagal mengambil status absensi';
           });
         }
       }
@@ -259,9 +235,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   }
 
   void _safeSetState(VoidCallback callback) {
-    if (mounted) {
-      setState(callback);
-    }
+    if (mounted) setState(callback);
   }
 
   Future<void> _initializeUserInfo() async {
@@ -270,13 +244,11 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         _isLoading = true;
         _errorMessage = null;
       });
-
       final token = await _getToken();
       if (token != null) {
         _accessToken = token;
         await _loadProfileData();
       }
-
       if (_accessToken != null) {
         await _loadProfileData();
       } else {
@@ -299,14 +271,12 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       final email = prefs.getString('Email');
       if (email == null) {
         _safeSetState(() {
-          _errorMessage = 'Email tidak ditemukan di SharedPreferences';
+          _errorMessage = 'Email tidak ditemukan';
           _isLoading = false;
         });
         return;
       }
-
       final accessToken = await _getToken();
-      ();
       if (accessToken == null) {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan access token';
@@ -323,9 +293,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         },
         body: json.encode({'Email': email}),
       );
-
       if (!mounted) return;
-
       if (userResponse.statusCode == 200) {
         final responseJson = json.decode(userResponse.body);
         if (responseJson['data'] != null) {
@@ -336,14 +304,13 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           });
         } else {
           _safeSetState(() {
-            _errorMessage = 'Data user tidak ditemukan dalam response';
+            _errorMessage = 'Data user tidak ditemukan';
             _isLoading = false;
           });
         }
       } else {
-        final errorBody = userResponse.body;
         _safeSetState(() {
-          _errorMessage = 'Error API: ${userResponse.statusCode} - $errorBody';
+          _errorMessage = 'Error API: ${userResponse.statusCode}';
           _isLoading = false;
         });
       }
@@ -356,10 +323,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   }
 
   Future<void> _handleAttendanceAction() async {
-    if (_isSlideActionProcessing) {
-      return;
-    }
-
+    if (_isSlideActionProcessing) return;
     try {
       _isSlideActionProcessing = true;
       if (_hasCheckedOut) {
@@ -374,7 +338,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         return;
       }
       if (!mounted) return;
-
       final result = await Navigator.push(
         context,
         MaterialPageRoute(
@@ -382,7 +345,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               AbsensiScreen(isCheckOut: _hasCheckedIn, showBackButton: true),
         ),
       );
-
       if (mounted && (result == true || result != null)) {
         await _checkTodayAttendanceStatus();
         _safeResetSlider();
@@ -405,7 +367,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
 
   void _safeResetSlider() {
     if (!mounted) return;
-
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted &&
           _slideActionKey.currentState != null &&
@@ -420,49 +381,270 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   }
 
   Future<void> refreshAttendanceStatus() async {
-    if (mounted) {
-      await _checkTodayAttendanceStatus();
-    }
+    if (mounted) await _checkTodayAttendanceStatus();
   }
 
   Color _getSliderColor() {
-    if (_hasCheckedOut) {
-      return Colors.grey;
-    } else if (_hasCheckedIn) {
-      return const Color(0xFFFC8980);
-    } else {
-      return Colors.blue;
-    }
+    if (_hasCheckedOut) return Colors.grey;
+    if (_hasCheckedIn) return const Color(0xFFFC8980);
+    return Colors.blue;
   }
 
   String _getSliderText() {
-    if (_isLoadingAttendance) {
-      return 'Memuat status...';
-    } else if (_hasCheckedOut) {
-      return 'Anda sudah check out hari ini';
-    } else if (_hasCheckedIn) {
-      return 'Geser untuk Check Out';
-    } else {
-      return 'Geser untuk Check In';
-    }
+    if (_isLoadingAttendance) return 'Memuat status...';
+    if (_hasCheckedOut) return 'Anda sudah check out hari ini';
+    if (_hasCheckedIn) return 'Geser untuk Check Out';
+    return 'Geser untuk Check In';
   }
 
   IconData _getSliderIcon() {
-    if (_hasCheckedOut) {
-      return Icons.check_circle;
-    } else if (_hasCheckedIn) {
-      return Icons.logout;
-    } else {
-      return Icons.login;
-    }
+    if (_hasCheckedOut) return Icons.check_circle;
+    if (_hasCheckedIn) return Icons.logout;
+    return Icons.login;
   }
 
+  // ─────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final screenWidth = screenSize.width;
+    final screenHeight = screenSize.height;
+    final bool isWeb = _isWideScreen(context);
+
+    const double baseWidth = 375;
+    const double baseHeight = 812;
+    final double widthScale = screenWidth / baseWidth;
+    final double heightScale = screenHeight / baseHeight;
+    final double scale = isWeb ? 1.0 : (widthScale + heightScale) / 2;
+
+    final double horizontalPadding = isWeb ? 32 : screenWidth * 0.04;
+    final double verticalPadding = isWeb ? 24 : screenHeight * 0.02;
+    final double bottomSafeArea = MediaQuery.of(context).padding.bottom;
+    final double slideButtonBottomPadding = bottomSafeArea > 0
+        ? bottomSafeArea + 16
+        : 40;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAFAFA),
+      body: SafeArea(
+        child: isWeb
+            ? _buildWebLayout(scale, horizontalPadding, verticalPadding)
+            : _buildMobileLayout(
+                scale,
+                horizontalPadding,
+                verticalPadding,
+                slideButtonBottomPadding,
+              ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli, tidak berubah)
+  // ─────────────────────────────────────────────
+  Widget _buildMobileLayout(
+    double scale,
+    double horizontalPadding,
+    double verticalPadding,
+    double slideButtonBottomPadding,
+  ) {
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.symmetric(
+              vertical: verticalPadding,
+              horizontal: horizontalPadding,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildProfileSection(scale, horizontalPadding),
+                SizedBox(height: 20 * scale),
+                _buildAttendanceStatusInfo(scale),
+                SizedBox(height: 20 * scale),
+                const TanggalanHorizontal(),
+                SizedBox(height: 20 * scale),
+                const AttendanceSummaryAdmin(),
+                SizedBox(height: 20 * scale),
+                _buildServiceIconsSection(scale),
+                SizedBox(height: 20 * scale),
+                _buildActivitiesSection(scale),
+                SizedBox(height: 20 * scale),
+                _buildTasksAndTimesheetSection(scale),
+              ],
+            ),
+          ),
+        ),
+        _buildSlideButton(scale, horizontalPadding, slideButtonBottomPadding),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: sidebar kiri + konten kanan)
+  // ─────────────────────────────────────────────
+  Widget _buildWebLayout(
+    double scale,
+    double horizontalPadding,
+    double verticalPadding,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Panel Kiri
+        SizedBox(
+          width: 300,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildProfileSection(scale, 0),
+                        const SizedBox(height: 16),
+                        _buildAttendanceStatusInfo(scale),
+                        const SizedBox(height: 16),
+                        _buildActivitiesSection(scale),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(color: Colors.grey.shade100),
+                    ),
+                  ),
+                  child: _buildSlideButton(scale, 20, 20),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Konten Kanan
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const TanggalanHorizontal(),
+                const SizedBox(height: 16),
+                const AttendanceSummaryAdmin(),
+                const SizedBox(height: 16),
+                _buildServiceIconsSection(scale),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _buildTasksSection(scale)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _buildTimesheetSection(scale)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // SLIDE BUTTON (dipakai ulang mobile & web)
+  // ─────────────────────────────────────────────
+  Widget _buildSlideButton(
+    double scale,
+    double horizontalPadding,
+    double bottomPadding,
+  ) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        16,
+        horizontalPadding,
+        bottomPadding,
+      ),
+      child: Column(
+        children: [
+          if (_attendanceStatusMessage.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(bottom: 8 * scale),
+              child: Text(
+                _attendanceStatusMessage,
+                style: TextStyle(
+                  fontSize: 12 * scale,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          SlideAction(
+            key: _slideActionKey,
+            onSubmit: (_hasCheckedOut || _isSlideActionProcessing)
+                ? null
+                : () async {
+                    if (_isSlideActionProcessing) return null;
+                    try {
+                      await _handleAttendanceAction();
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Terjadi kesalahan: ${e.toString()}'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                    return null;
+                  },
+            sliderButtonIcon: Icon(_getSliderIcon(), color: Colors.white),
+            innerColor: _getSliderColor(),
+            outerColor: _getSliderColor().withOpacity(0.2),
+            elevation: _hasCheckedOut ? 1 : 4,
+            text: _getSliderText(),
+            textStyle: TextStyle(
+              color: _hasCheckedOut
+                  ? Colors.grey[600]
+                  : (_hasCheckedIn ? Colors.white : _getSliderColor()),
+              fontWeight: FontWeight.bold,
+              fontSize: 16 * scale,
+            ),
+            height: screenHeight * 0.07,
+            borderRadius: 12,
+            enabled:
+                !_hasCheckedOut &&
+                !_isLoadingAttendance &&
+                !_isSlideActionProcessing,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // NOTIFICATION ICON
+  // ─────────────────────────────────────────────
   Widget _buildNotificationIcon(double scale) {
-    // Get screen size for responsive calculations
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
-
-    // Responsive adjustments
     final iconSize = 28.0 * scale;
     final badgeSize = isSmallScreen ? 16.0 * scale : 18.0 * scale;
     final badgeFontSize = isSmallScreen ? 9.0 * scale : 10.0 * scale;
@@ -474,10 +656,9 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
-          // Main notification icon button
           IconButton(
             padding: EdgeInsets.zero,
-            constraints: BoxConstraints(),
+            constraints: const BoxConstraints(),
             icon: Icon(
               Icons.notifications_none,
               color: Colors.grey[800],
@@ -493,8 +674,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               await refreshNotificationCount();
             },
           ),
-
-          // Notification badge - positioned relative to icon
           if (_unreadNotificationCount > 0)
             Positioned(
               right: (48 - iconSize) / 2 - (badgeSize * 0.3),
@@ -510,7 +689,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                     BoxShadow(
                       color: Colors.black.withOpacity(0.2),
                       blurRadius: 2,
-                      offset: Offset(0, 1),
+                      offset: const Offset(0, 1),
                     ),
                   ],
                 ),
@@ -530,8 +709,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                 ),
               ),
             ),
-
-          // Loading and error indicators dengan positioning yang sama
           if (_isLoadingNotifications)
             Positioned(
               right: (48 - iconSize) / 2 - (badgeSize * 0.3),
@@ -546,14 +723,13 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                 ),
                 child: Padding(
                   padding: EdgeInsets.all(badgeSize * 0.2),
-                  child: CircularProgressIndicator(
+                  child: const CircularProgressIndicator(
                     strokeWidth: 1.5,
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                   ),
                 ),
               ),
             ),
-
           if (_notificationError != null &&
               !_isLoadingNotifications &&
               _unreadNotificationCount == 0)
@@ -580,150 +756,78 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // Responsive setup
-    final screenSize = MediaQuery.of(context).size;
-    final screenWidth = screenSize.width;
-    final screenHeight = screenSize.height;
-
-    const double baseWidth = 375;
-    const double baseHeight = 812;
-
-    final double widthScale = screenWidth / baseWidth;
-    final double heightScale = screenHeight / baseHeight;
-    final double scale = (widthScale + heightScale) / 2;
-
-    final double horizontalPadding = screenWidth * 0.04;
-    final double verticalPadding = screenHeight * 0.02;
-    final double bottomSafeArea = MediaQuery.of(context).padding.bottom;
-    final double slideButtonBottomPadding = bottomSafeArea > 0
-        ? bottomSafeArea + 16
-        : 40;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAFAFA),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Main content area
-            Expanded(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.symmetric(
-                  vertical: verticalPadding,
-                  horizontal: horizontalPadding,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildProfileSection(scale, horizontalPadding),
-                    SizedBox(height: 20 * scale),
-
-                    _buildAttendanceStatusInfo(scale),
-                    SizedBox(height: 20 * scale),
-
-                    TanggalanHorizontal(),
-                    SizedBox(height: 20 * scale),
-
-                    AttendanceSummaryAdmin(),
-                    SizedBox(height: 20 * scale),
-
-                    _buildServiceIconsSection(scale),
-                    SizedBox(height: 20 * scale),
-
-                    _buildActivitiesSection(scale),
-                    SizedBox(height: 20 * scale),
-
-                    _buildTasksAndTimesheetSection(scale),
-                    // if (_notificationError != null)
-                    //   if (_errorMessage != null)
-                    //_buildDebugInfo(scale, horizontalPadding),
-                  ],
-                ),
-              ),
+  // ─────────────────────────────────────────────
+  // PROFILE SECTION
+  // ─────────────────────────────────────────────
+  Widget _buildProfileSection(double scale, double horizontalPadding) {
+    return Row(
+      children: [
+        Container(
+          padding: EdgeInsets.all(4 * scale),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Colors.lightBlue.shade200,
+              width: 2 * scale,
             ),
-
-            // Slide Action Button
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                16,
-                horizontalPadding,
-                slideButtonBottomPadding,
-              ),
-              child: Column(
-                children: [
-                  if (_attendanceStatusMessage.isNotEmpty)
-                    Padding(
-                      padding: EdgeInsets.only(bottom: 8 * scale),
-                      child: Text(
-                        _attendanceStatusMessage,
-                        style: TextStyle(
-                          fontSize: 12 * scale,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-
-                  SlideAction(
-                    key: _slideActionKey,
-                    onSubmit: (_hasCheckedOut || _isSlideActionProcessing)
-                        ? null
-                        : () async {
-                            if (_isSlideActionProcessing) {
-                              return null;
-                            }
-
-                            try {
-                              await _handleAttendanceAction();
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Terjadi kesalahan: ${e.toString()}',
-                                    ),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
-                              }
-                            }
-                            return null;
-                          },
-                    sliderButtonIcon: Icon(
-                      _getSliderIcon(),
-                      color: Colors.white,
-                    ),
-                    innerColor: _getSliderColor(),
-                    outerColor: _getSliderColor().withOpacity(0.2),
-                    elevation: _hasCheckedOut ? 1 : 4,
-                    text: _getSliderText(),
-                    textStyle: TextStyle(
-                      color: _hasCheckedOut
-                          ? Colors.grey[600]
-                          : (_hasCheckedIn ? Colors.white : _getSliderColor()),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16 * scale,
-                    ),
-                    height: screenHeight * 0.07,
-                    borderRadius: 12,
-                    enabled:
-                        !_hasCheckedOut &&
-                        !_isLoadingAttendance &&
-                        !_isSlideActionProcessing,
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
+          child: CircleAvatar(
+            radius: 28 * scale,
+            backgroundColor: Colors.grey.shade200,
+            backgroundImage: _profileDisplay?.fotoProfil != null
+                ? MemoryImage(_profileDisplay!.fotoProfil!)
+                : null,
+            child: _profileDisplay?.fotoProfil == null
+                ? Icon(Icons.person, size: 28 * scale, color: Colors.grey[600])
+                : null,
+          ),
         ),
-      ),
+        SizedBox(width: 12 * scale),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_isLoading)
+                Text(
+                  'Memuat...',
+                  style: TextStyle(
+                    fontSize: 16 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                  ),
+                )
+              else if (_errorMessage != null)
+                Text(
+                  'Error loading data',
+                  style: TextStyle(
+                    fontSize: 16 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.red,
+                  ),
+                )
+              else
+                NamaDisplay(
+                  nama: _profileDisplay?.displayName ?? 'Nama tidak tersedia',
+                  scale: scale,
+                ),
+              SizedBox(height: 4 * scale),
+              Text(
+                _isLoading
+                    ? 'Memuat...'
+                    : (_profileDisplay?.jobs ?? 'Pekerjaan tidak tersedia'),
+                style: TextStyle(fontSize: 12 * scale, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+        _buildNotificationIcon(scale),
+      ],
     );
   }
 
+  // ─────────────────────────────────────────────
+  // ATTENDANCE STATUS INFO
+  // ─────────────────────────────────────────────
   Widget _buildAttendanceStatusInfo(double scale) {
     if (_isLoadingAttendance) {
       return Container(
@@ -738,7 +842,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             SizedBox(
               width: 20 * scale,
               height: 20 * scale,
-              child: CircularProgressIndicator(
+              child: const CircularProgressIndicator(
                 strokeWidth: 2,
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
               ),
@@ -809,7 +913,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                 ),
               ],
             ),
-
             if (_hasCheckedIn) ...[
               SizedBox(height: 8 * scale),
               Row(
@@ -845,7 +948,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                 ],
               ),
             ],
-
             if (_hasCheckedOut) ...[
               SizedBox(height: 4 * scale),
               Row(
@@ -886,105 +988,58 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       );
     }
 
-    return SizedBox.shrink();
+    return const SizedBox.shrink();
   }
 
-  String _formatTime(String? timeString) {
-    if (timeString == null) return '-';
-    try {
-      DateTime dateTime = DateTime.parse(timeString);
-      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return timeString;
-    }
-  }
-
-  String _formatStatus(String? status) {
-    switch (status) {
-      case 'on_time':
-        return 'Tepat Waktu';
-      case 'late':
-        return 'Terlambat';
-      case 'very_late':
-        return 'Sangat Terlambat';
-      case 'early':
-        return 'Pulang Awal';
-      case 'overtime':
-        return 'Lembur';
-      default:
-        return status ?? '-';
-    }
-  }
-
-  Color _getStatusColor(String? status) {
-    switch (status) {
-      case 'on_time':
-        return Colors.green;
-      case 'late':
-        return Colors.orange;
-      case 'very_late':
-        return Colors.red;
-      case 'early':
-        return Colors.blue;
-      case 'overtime':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  void refreshPage() {
-    if (mounted) {
-      _checkTodayAttendanceStatus();
-    }
-  }
-
+  // ─────────────────────────────────────────────
+  // SERVICE ICONS SECTION
+  // ─────────────────────────────────────────────
   Widget _buildServiceIconsSection(double scale) {
+    final bool isWeb = _isWideScreen(context);
+
     final List<ServiceIconData> firstRowServices = [
       _buildServiceIconData(
         Icons.receipt_long,
-        "Reimbursement",
+        'Reimbursement',
         const Color(0xFF4ECDC4),
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (context) => const HalamanHRDReimbursement(),
-            ),
+            MaterialPageRoute(builder: (_) => const HalamanHRDReimbursement()),
           );
         },
       ),
       _buildServiceIconData(
         Icons.calendar_today,
-        "Kalender",
+        'Kalender',
         const Color(0xFF007AFF),
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const HalamanCalendar()),
+            MaterialPageRoute(builder: (_) => const HalamanCalendar()),
           );
         },
       ),
       _buildServiceIconData(
         Icons.schedule,
-        "Cuti",
+        'Izin',
         const Color(0xFF007AFF),
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => TimeOffHRDScreen()),
+            MaterialPageRoute(builder: (_) => TimeOffHRDScreen()),
           );
         },
       ),
       _buildServiceIconData(
         Icons.location_on,
-        "Live Attendance",
+        'Live Attendance',
         const Color(0xFFFF9500),
         onTap: () {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => const LiveAttendanceScreenAdmin(),
+              builder: (_) => const LiveAttendanceScreenAdmin(),
             ),
           );
         },
@@ -994,45 +1049,35 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     final List<ServiceIconData> secondRowServices = [
       _buildServiceIconData(
         Icons.access_time_filled,
-        "Lembur",
+        'Lembur',
         const Color(0xFFFF6B35),
         onTap: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => OvertimeHRDScreen()),
+            MaterialPageRoute(builder: (_) => OvertimeHRDScreen()),
           );
         },
       ),
       _buildServiceIconData(
         Icons.folder_open,
-        "File Saya",
+        'File Saya',
         const Color(0xFFFFCC02),
-        onTap: () {
-          // Navigator.push(
-          //   context,
-          //   MaterialPageRoute(
-          //     builder: (context) => const InfoProfileScreen(initialTabIndex: 2),
-          //   ),
-          // );
-        },
       ),
       _buildServiceIconData(
         Icons.flag,
-        "Goal",
+        'Goal',
         const Color(0xFF795548),
-        onTap: () {
-          _showComingSoonDialog(context);
-        },
+        onTap: () => _showComingSoonDialog(context),
       ),
       _buildServiceIconData(
         Icons.inventory,
-        "Asset",
+        'Asset',
         const Color(0xFF607D8B),
-        onTap: () {
-          _showComingSoonDialog(context);
-        },
+        onTap: () => _showComingSoonDialog(context),
       ),
     ];
+
+    final allServices = [...firstRowServices, ...secondRowServices];
 
     return Container(
       padding: EdgeInsets.all(16 * scale),
@@ -1060,55 +1105,126 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           ),
           SizedBox(height: 16 * scale),
 
-          SizedBox(
-            height: 176 * scale,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Column(
-                children: [
-                  Row(
-                    children: firstRowServices
-                        .map(
-                          (service) => Container(
-                            width: 70 * scale,
-                            height: 80 * scale,
-                            margin: EdgeInsets.only(right: 12 * scale),
-                            child: _buildServiceIcon(
-                              service.icon,
-                              service.label,
-                              service.color,
-                              service.color,
-                              scale,
-                              onTap: service.onTap,
+          // ── WEB: Wrap dengan item lebih lebar, teks tidak terpotong ──
+          if (isWeb)
+            Wrap(
+              spacing: 8,
+              runSpacing: 12,
+              children: allServices
+                  .map((service) => _buildServiceIconWeb(service))
+                  .toList(),
+            )
+          // ── MOBILE: scroll horizontal dua baris (layout asli) ──
+          else
+            SizedBox(
+              height: 176 * scale,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Column(
+                  children: [
+                    Row(
+                      children: firstRowServices
+                          .map(
+                            (service) => Container(
+                              width: 70 * scale,
+                              height: 80 * scale,
+                              margin: EdgeInsets.only(right: 12 * scale),
+                              child: _buildServiceIconMobile(service, scale),
                             ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-
-                  SizedBox(height: 16 * scale),
-
-                  Row(
-                    children: secondRowServices
-                        .map(
-                          (service) => Container(
-                            width: 70 * scale,
-                            height: 80 * scale,
-                            margin: EdgeInsets.only(right: 12 * scale),
-                            child: _buildServiceIcon(
-                              service.icon,
-                              service.label,
-                              service.color,
-                              service.color,
-                              scale,
-                              onTap: service.onTap,
+                          )
+                          .toList(),
+                    ),
+                    SizedBox(height: 16 * scale),
+                    Row(
+                      children: secondRowServices
+                          .map(
+                            (service) => Container(
+                              width: 70 * scale,
+                              height: 80 * scale,
+                              margin: EdgeInsets.only(right: 12 * scale),
+                              child: _buildServiceIconMobile(service, scale),
                             ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ],
+                          )
+                          .toList(),
+                    ),
+                  ],
+                ),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Item layanan versi WEB: lebar 90px, teks tidak terpotong ──
+  Widget _buildServiceIconWeb(ServiceIconData service) {
+    return GestureDetector(
+      onTap: service.onTap,
+      child: SizedBox(
+        width: 90,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: service.color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(service.icon, size: 24, color: service.color),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              service.label,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 11,
+                color: Colors.grey[800],
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Item layanan versi MOBILE (tidak berubah) ──
+  Widget _buildServiceIconMobile(ServiceIconData service, double scale) {
+    return GestureDetector(
+      onTap: service.onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            flex: 3,
+            child: Container(
+              width: 45 * scale,
+              height: 45 * scale,
+              decoration: BoxDecoration(
+                color: service.color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12 * scale),
+              ),
+              child: Icon(service.icon, size: 22 * scale, color: service.color),
+            ),
+          ),
+          SizedBox(height: 6 * scale),
+          Flexible(
+            flex: 2,
+            child: Text(
+              service.label,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 10 * scale,
+                color: Colors.grey[800],
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -1133,118 +1249,9 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  Widget _buildServiceIcon(
-    IconData icon,
-    String label,
-    Color bgColor,
-    Color iconColor,
-    double scale, {
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            flex: 3,
-            child: Container(
-              width: 45 * scale,
-              height: 45 * scale,
-              decoration: BoxDecoration(
-                color: bgColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12 * scale),
-              ),
-              child: Icon(icon, size: 22 * scale, color: iconColor),
-            ),
-          ),
-          SizedBox(height: 6 * scale),
-          Flexible(
-            flex: 2,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 10 * scale,
-                color: Colors.grey[800],
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileSection(double scale, double horizontalPadding) {
-    return Row(
-      children: [
-        Container(
-          padding: EdgeInsets.all(4 * scale),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: Colors.lightBlue.shade200,
-              width: 2 * scale,
-            ),
-          ),
-          child: CircleAvatar(
-            radius: 28 * scale,
-            backgroundColor: Colors.grey.shade200,
-            backgroundImage: _profileDisplay?.fotoProfil != null
-                ? MemoryImage(_profileDisplay!.fotoProfil!)
-                : null,
-            child: _profileDisplay?.fotoProfil == null
-                ? Icon(Icons.person, size: 28 * scale, color: Colors.grey[600])
-                : null,
-          ),
-        ),
-        SizedBox(width: 12 * scale),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_isLoading)
-                Text(
-                  'Memuat...',
-                  style: TextStyle(
-                    fontSize: 16 * scale,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[700],
-                  ),
-                )
-              else if (_errorMessage != null)
-                Text(
-                  'Error loading data',
-                  style: TextStyle(
-                    fontSize: 16 * scale,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.red,
-                  ),
-                )
-              else
-                NamaDisplay(
-                  nama: _profileDisplay?.displayName ?? 'Nama tidak tersedia',
-                  scale: scale,
-                ),
-              SizedBox(height: 4 * scale),
-              Text(
-                _isLoading
-                    ? 'Memuat...'
-                    : (_profileDisplay?.jobs ?? 'Pekerjaan tidak tersedia'),
-                style: TextStyle(fontSize: 12 * scale, color: Colors.grey[600]),
-              ),
-            ],
-          ),
-        ),
-        _buildNotificationIcon(scale),
-      ],
-    );
-  }
-
+  // ─────────────────────────────────────────────
+  // ACTIVITIES SECTION
+  // ─────────────────────────────────────────────
   Widget _buildActivitiesSection(double scale) {
     return Container(
       padding: EdgeInsets.all(16 * scale),
@@ -1274,9 +1281,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             ],
           ),
           SizedBox(height: 16 * scale),
-
           if (_isLoadingAttendance)
-            Center(child: CircularProgressIndicator())
+            const Center(child: CircularProgressIndicator())
           else if (_todayAttendanceData != null)
             Column(
               children: [
@@ -1367,173 +1373,165 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // TASKS & TIMESHEET (mobile: stacked, web: side-by-side via Row)
+  // ─────────────────────────────────────────────
   Widget _buildTasksAndTimesheetSection(double scale) {
     return Column(
       children: [
-        Container(
-          margin: EdgeInsets.only(bottom: 12 * scale),
-          padding: EdgeInsets.all(16 * scale),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12 * scale),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 4 * scale,
-                offset: Offset(0, 2 * scale),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Tugas',
-                    style: TextStyle(
-                      fontSize: 16 * scale,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () {},
-                    child: Text(
-                      'Lihat Semua',
-                      style: TextStyle(
-                        fontSize: 12 * scale,
-                        color: Colors.blue,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 16 * scale),
-              Center(
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.assignment_outlined,
-                      size: 48 * scale,
-                      color: Colors.grey[400],
-                    ),
-                    SizedBox(height: 8 * scale),
-                    Text(
-                      'Tidak ada tugas',
-                      style: TextStyle(
-                        fontSize: 14 * scale,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                    SizedBox(height: 4 * scale),
-                    Text(
-                      'Anda tidak memiliki tugas yang tertunda',
-                      style: TextStyle(
-                        fontSize: 12 * scale,
-                        color: Colors.grey[500],
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        _buildTasksSection(scale),
         SizedBox(height: 12 * scale),
-        Container(
-          padding: EdgeInsets.all(16 * scale),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12 * scale),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 4 * scale,
-                offset: Offset(0, 2 * scale),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Timesheet',
-                    style: TextStyle(
-                      fontSize: 16 * scale,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () {},
-                    child: Text(
-                      'Ke Time Tracker',
-                      style: TextStyle(
-                        fontSize: 12 * scale,
-                        color: Colors.blue,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 16 * scale),
-              Center(
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.schedule_outlined,
-                      size: 48 * scale,
-                      color: Colors.grey[400],
-                    ),
-                    SizedBox(height: 8 * scale),
-                    Text(
-                      'Tidak ada timesheet',
-                      style: TextStyle(
-                        fontSize: 14 * scale,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                    SizedBox(height: 4 * scale),
-                    Text(
-                      'Setelah Anda mengisi timesheet, akan muncul di sini.',
-                      style: TextStyle(
-                        fontSize: 12 * scale,
-                        color: Colors.grey[500],
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        _buildTimesheetSection(scale),
       ],
     );
   }
 
-  // Widget _buildDebugInfo(double scale, double horizontalPadding) {
-  //   return Container(
-  //     margin: EdgeInsets.only(top: 16 * scale),
-  //     padding: EdgeInsets.all(12 * scale),
-  //     decoration: BoxDecoration(
-  //       color: Colors.red.shade50,
-  //       border: Border.all(color: Colors.red.shade200),
-  //       borderRadius: BorderRadius.circular(8 * scale),
-  //     ),
-  //     child: Text(
-  //       'Debug: $_errorMessage',
-  //       style: TextStyle(fontSize: 12 * scale, color: Colors.red.shade700),
-  //     ),
-  //   );
-  // }
+  Widget _buildTasksSection(double scale) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 0),
+      padding: EdgeInsets.all(16 * scale),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12 * scale),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 4 * scale,
+            offset: Offset(0, 2 * scale),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Tugas',
+                style: TextStyle(
+                  fontSize: 16 * scale,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              GestureDetector(
+                onTap: () {},
+                child: Text(
+                  'Lihat Semua',
+                  style: TextStyle(fontSize: 12 * scale, color: Colors.blue),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 16 * scale),
+          Center(
+            child: Column(
+              children: [
+                Icon(
+                  Icons.assignment_outlined,
+                  size: 48 * scale,
+                  color: Colors.grey[400],
+                ),
+                SizedBox(height: 8 * scale),
+                Text(
+                  'Tidak ada tugas',
+                  style: TextStyle(
+                    fontSize: 14 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                SizedBox(height: 4 * scale),
+                Text(
+                  'Anda tidak memiliki tugas yang tertunda',
+                  style: TextStyle(
+                    fontSize: 12 * scale,
+                    color: Colors.grey[500],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
+  Widget _buildTimesheetSection(double scale) {
+    return Container(
+      padding: EdgeInsets.all(16 * scale),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12 * scale),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 4 * scale,
+            offset: Offset(0, 2 * scale),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Timesheet',
+                style: TextStyle(
+                  fontSize: 16 * scale,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              GestureDetector(
+                onTap: () {},
+                child: Text(
+                  'Ke Time Tracker',
+                  style: TextStyle(fontSize: 12 * scale, color: Colors.blue),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 16 * scale),
+          Center(
+            child: Column(
+              children: [
+                Icon(
+                  Icons.schedule_outlined,
+                  size: 48 * scale,
+                  color: Colors.grey[400],
+                ),
+                SizedBox(height: 8 * scale),
+                Text(
+                  'Tidak ada timesheet',
+                  style: TextStyle(
+                    fontSize: 14 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                SizedBox(height: 4 * scale),
+                Text(
+                  'Setelah Anda mengisi timesheet, akan muncul di sini.',
+                  style: TextStyle(
+                    fontSize: 12 * scale,
+                    color: Colors.grey[500],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // ACTIVITY ITEM
+  // ─────────────────────────────────────────────
   Widget _buildActivityItem({
     required IconData icon,
     required String title,
@@ -1605,8 +1603,62 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       ),
     );
   }
+
+  // ─────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────
+  String _formatTime(String? timeString) {
+    if (timeString == null) return '-';
+    try {
+      final dateTime = DateTime.parse(timeString);
+      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return timeString;
+    }
+  }
+
+  String _formatStatus(String? status) {
+    switch (status) {
+      case 'on_time':
+        return 'Tepat Waktu';
+      case 'late':
+        return 'Terlambat';
+      case 'very_late':
+        return 'Sangat Terlambat';
+      case 'early':
+        return 'Pulang Awal';
+      case 'overtime':
+        return 'Lembur';
+      default:
+        return status ?? '-';
+    }
+  }
+
+  Color _getStatusColor(String? status) {
+    switch (status) {
+      case 'on_time':
+        return Colors.green;
+      case 'late':
+        return Colors.orange;
+      case 'very_late':
+        return Colors.red;
+      case 'early':
+        return Colors.blue;
+      case 'overtime':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  void refreshPage() {
+    if (mounted) _checkTodayAttendanceStatus();
+  }
 }
 
+// ─────────────────────────────────────────────
+// ServiceIconData model
+// ─────────────────────────────────────────────
 class ServiceIconData {
   final IconData icon;
   final String label;

@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -20,6 +21,10 @@ import '../../Screen User/splash_screen.dart';
 import '../../Services/config.dart';
 import '../../Services/profile.dart';
 
+// ── helper ──────────────────────────────────────────────────────────
+bool _isWebLayout(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
+
 class ProfileScreenAdmin extends StatefulWidget {
   const ProfileScreenAdmin({super.key});
 
@@ -28,15 +33,14 @@ class ProfileScreenAdmin extends StatefulWidget {
 }
 
 class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
-  bool isDarkTheme = false;
   bool _isLoadingDisplay = true;
   bool _isUploadingPhoto = false;
+  bool _isDeletingAccount = false;
   String _email = '';
   ProfileDisplay? _profileDisplay;
   final ImagePicker _picker = ImagePicker();
-  String _selectedLanguage = 'system'; // 'system', 'id', 'en'
+  String _selectedLanguage = 'system';
 
-  // Localization Maps
   final Map<String, Map<String, String>> _localizedStrings = {
     'system': {
       'profile': 'Profil',
@@ -52,9 +56,8 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'reprimand': 'Teguran',
       'settings': 'Pengaturan',
       'changeSecurity': 'Ubah Keamanan',
-      'attendanceReminder': 'Pengingat Absen Masuk/Keluar',
+      'attendanceReminder': 'Pengingat Absen',
       'language': 'Bahasa',
-      'deviceDefault': 'Bawaan Perangkat',
       'switchToUserMode': 'Masuk ke Mode User',
       'helpSupport': 'Bantuan & Dukungan',
       'privacyPolicy': 'Kebijakan Privasi',
@@ -67,42 +70,17 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'yesSwitch': 'Ya, Beralih',
       'selectFromGallery': 'Pilih dari Galeri',
       'takePhoto': 'Ambil Foto Kamera',
-      'selectLanguage': 'Pilih Bahasa',
-      'indonesian': 'Bahasa Indonesia',
-      'english': 'English',
-    },
-    'id': {
-      'profile': 'Profil',
-      'username': 'Nama Pengguna',
-      'position': 'Jabatan',
-      'myInfo': 'Informasi Saya',
-      'personalInfo': 'Informasi Pribadi',
-      'emergencyContact': 'Kontak Darurat',
-      'familyInfo': 'Informasi Keluarga',
-      'education': 'Pendidikan dan Pengalaman',
-      'salaryInfo': 'Informasi Gaji',
-      'additionalInfo': 'Informasi Tambahan',
-      'reprimand': 'Teguran',
-      'settings': 'Pengaturan',
-      'changeSecurity': 'Ubah Keamanan',
-      'attendanceReminder': 'Pengingat Absen Masuk/Keluar',
-      'language': 'Bahasa',
-      'deviceDefault': 'Bawaan Perangkat',
-      'switchToUserMode': 'Masuk ke Mode User',
-      'helpSupport': 'Bantuan & Dukungan',
-      'privacyPolicy': 'Kebijakan Privasi',
-      'contactUs': 'Hubungi Kami',
-      'logout': 'Keluar',
-      'logoutConfirm': 'Apakah Anda yakin ingin keluar?',
-      'switchModeConfirm': 'Apakah Anda yakin ingin beralih ke mode user?',
-      'cancel': 'Batal',
-      'yes': 'Ya, Keluar',
-      'yesSwitch': 'Ya, Beralih',
-      'selectFromGallery': 'Pilih dari Galeri',
-      'takePhoto': 'Ambil Foto Kamera',
-      'selectLanguage': 'Pilih Bahasa',
-      'indonesian': 'Bahasa Indonesia',
-      'english': 'English',
+      'deleteAccount': 'Hapus Akun',
+      'deleteAccountConfirm':
+          'Apakah Anda yakin ingin menghapus akun ini secara permanen?',
+      'deleteAccountWarning':
+          'Peringatan: Akun Anda akan dihapus secara permanen dan semua data terkait akan hilang. Tindakan ini tidak dapat dibatalkan.',
+      'deleteAccountPassword': 'Masukkan password Anda untuk konfirmasi',
+      'passwordHint': 'Password',
+      'yesDelete': 'Ya, Hapus Akun',
+      'errorDeleteAccount': 'Gagal menghapus akun',
+      'successDeleteAccount': 'Akun berhasil dihapus',
+      'accountDeletedRedirect': 'Anda akan dialihkan ke halaman login...',
     },
     'en': {
       'profile': 'Profile',
@@ -112,7 +90,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'personalInfo': 'Personal Information',
       'emergencyContact': 'Emergency Contact',
       'familyInfo': 'Family Information',
-      'education': 'Education and Experience',
+      'education': 'Education & Experience',
       'salaryInfo': 'Salary Information',
       'additionalInfo': 'Additional Information',
       'reprimand': 'Reprimand',
@@ -120,7 +98,6 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'changeSecurity': 'Change Security',
       'attendanceReminder': 'Attendance Reminder',
       'language': 'Language',
-      'deviceDefault': 'Device Default',
       'switchToUserMode': 'Switch to User Mode',
       'helpSupport': 'Help & Support',
       'privacyPolicy': 'Privacy Policy',
@@ -133,9 +110,17 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'yesSwitch': 'Yes, Switch',
       'selectFromGallery': 'Select from Gallery',
       'takePhoto': 'Take Photo',
-      'selectLanguage': 'Select Language',
-      'indonesian': 'Bahasa Indonesia',
-      'english': 'English',
+      'deleteAccount': 'Delete Account',
+      'deleteAccountConfirm':
+          'Are you sure you want to permanently delete this account?',
+      'deleteAccountWarning':
+          'Warning: Your account will be permanently deleted and all associated data will be lost. This action cannot be undone.',
+      'deleteAccountPassword': 'Enter your password to confirm',
+      'passwordHint': 'Password',
+      'yesDelete': 'Yes, Delete Account',
+      'errorDeleteAccount': 'Failed to delete account',
+      'successDeleteAccount': 'Account successfully deleted',
+      'accountDeletedRedirect': 'You will be redirected to login page...',
     },
   };
 
@@ -174,48 +159,33 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     });
   }
 
-  String _getLocalizedString(String key) {
-    return _localizedStrings[_selectedLanguage]?[key] ?? key;
-  }
+  String _t(String key) =>
+      _localizedStrings[_selectedLanguage]?[key] ??
+      _localizedStrings['system']?[key] ??
+      key;
 
   Future<void> _initializeUserInfo() async {
-    setState(() {
-      _isLoadingDisplay = true;
-    });
-
+    setState(() => _isLoadingDisplay = true);
     final token = await _getToken();
     if (token == null) {
-      // Token gagal didapat
-      setState(() {
-        _isLoadingDisplay = false;
-      });
-      // Bisa tampilkan pesan error
+      setState(() => _isLoadingDisplay = false);
       return;
     }
-
     await _loadProfileData(token);
   }
 
   Future<void> _loadProfileData(String token) async {
-    setState(() {
-      _isLoadingDisplay = true;
-    });
-
+    setState(() => _isLoadingDisplay = true);
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('Email');
     if (email == null) {
-      setState(() {
-        _isLoadingDisplay = false;
-      });
+      setState(() => _isLoadingDisplay = false);
       return;
     }
-
-    setState(() {
-      _email = email;
-    });
+    setState(() => _email = email);
 
     try {
-      final userResponse = await http.post(
+      final resp = await http.post(
         Uri.parse('$baseURL/api/asn/getDataUser'),
         headers: {
           'Authorization': 'Bearer $token',
@@ -224,85 +194,71 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
         },
         body: json.encode({'Email': email}),
       );
-
       if (!mounted) return;
-
-      if (userResponse.statusCode == 200) {
-        final data = json.decode(userResponse.body);
+      if (resp.statusCode == 200) {
         setState(() {
-          _profileDisplay = ProfileDisplay.fromJson(data);
+          _profileDisplay = ProfileDisplay.fromJson(json.decode(resp.body));
           _isLoadingDisplay = false;
         });
-      } else if (userResponse.statusCode == 401) {
-        // Token mungkin expired → refresh dan coba lagi
+      } else if (resp.statusCode == 401) {
         final newToken = await _getToken();
         if (newToken != null) {
           await _loadProfileData(newToken);
         } else {
-          setState(() {
-            _isLoadingDisplay = false;
-          });
+          setState(() => _isLoadingDisplay = false);
         }
       } else {
-        setState(() {
-          _isLoadingDisplay = false;
-        });
+        setState(() => _isLoadingDisplay = false);
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoadingDisplay = false;
-          // Bisa simpan error message juga
-        });
-      }
+      if (mounted) setState(() => _isLoadingDisplay = false);
     }
   }
 
+  // ─── Foto Profil ───────────────────────────────────────────────
   Future<void> _pickImageFromGallery() async {
     try {
-      final permission = await _checkGalleryPermission();
-      if (!permission) {
-        _showErrorSnackBar('Permission galeri tidak diberikan');
-        return;
+      if (!kIsWeb) {
+        final ok = await _checkGalleryPermission();
+        if (!ok) {
+          _showErrorSnackBar('Permission galeri tidak diberikan');
+          return;
+        }
       }
-
       final XFile? image = await _picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: 800,
         maxHeight: 800,
         imageQuality: 80,
       );
-
       if (image != null) {
-        File imageFile = File(image.path);
-        await _uploadProfilePhotoBase64(imageFile);
+        await _uploadProfilePhotoBase64(File(image.path));
       }
     } catch (e) {
-      _showErrorSnackBar('Gagal memilih gambar dari galeri: ${e.toString()}');
+      _showErrorSnackBar('Gagal memilih gambar: ${e.toString()}');
     }
   }
 
   Future<void> _pickImageFromCamera() async {
     try {
-      final permission = await _checkCameraPermission();
-      if (!permission) {
-        _showErrorSnackBar('Permission kamera tidak diberikan');
-        return;
+      if (!kIsWeb) {
+        final ok = await _checkCameraPermission();
+        if (!ok) {
+          _showErrorSnackBar('Permission kamera tidak diberikan');
+          return;
+        }
       }
-
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
         maxWidth: 800,
         maxHeight: 800,
         imageQuality: 80,
       );
-
       if (photo != null) {
-        File imageFile = File(photo.path);
-        await _uploadProfilePhotoBase64(imageFile);
+        await _uploadProfilePhotoBase64(File(photo.path));
       }
     } catch (e) {
-      _showErrorSnackBar('Gagal mengambil foto dari kamera: ${e.toString()}');
+      _showErrorSnackBar('Gagal mengambil foto: ${e.toString()}');
     }
   }
 
@@ -311,782 +267,634 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     if (status.isDenied || status.isPermanentlyDenied) {
       status = await Permission.camera.request();
     }
-
     if (status.isPermanentlyDenied) {
       _showPermissionDialog('Kamera', 'kamera');
       return false;
     }
-
     return status.isGranted;
   }
 
   Future<bool> _checkGalleryPermission() async {
     Permission permission;
-
     if (Platform.isAndroid) {
-      final androidInfo = await DeviceInfoPlugin().androidInfo;
-      if (androidInfo.version.sdkInt >= 33) {
-        permission = Permission.photos;
-      } else {
-        permission = Permission.storage;
-      }
+      final info = await DeviceInfoPlugin().androidInfo;
+      permission = info.version.sdkInt >= 33
+          ? Permission.photos
+          : Permission.storage;
     } else {
       permission = Permission.photos;
     }
-
     var status = await permission.status;
     if (status.isDenied || status.isPermanentlyDenied) {
       status = await permission.request();
     }
-
     if (status.isPermanentlyDenied) {
       _showPermissionDialog('Galeri', 'mengakses galeri');
       return false;
     }
-
     return status.isGranted;
   }
 
-  void _showPermissionDialog(String permissionName, String action) {
+  void _showPermissionDialog(String name, String action) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Permission $permissionName Diperlukan'),
-          content: Text(
-            'Aplikasi memerlukan akses $action untuk mengubah foto profil. '
-            'Silakan aktifkan permission di pengaturan aplikasi.',
+      builder: (context) => AlertDialog(
+        title: Text('Permission $name Diperlukan'),
+        content: Text(
+          'Aplikasi memerlukan akses $action untuk mengubah foto profil.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(_t('cancel')),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text(_getLocalizedString('cancel')),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                openAppSettings();
-              },
-              child: const Text('Buka Pengaturan'),
-            ),
-          ],
-        );
-      },
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              openAppSettings();
+            },
+            child: const Text('Buka Pengaturan'),
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _uploadProfilePhotoBase64(File imageFile) async {
-    setState(() {
-      _isUploadingPhoto = true;
-    });
-
+    setState(() => _isUploadingPhoto = true);
     try {
       final bytes = await imageFile.readAsBytes();
-      final String base64Image = base64Encode(bytes);
-
+      final b64 = base64Encode(bytes);
       final prefs = await SharedPreferences.getInstance();
       final email = prefs.getString('Email') ?? '';
       if (email.isEmpty) {
         _showErrorSnackBar('Email tidak ditemukan');
         return;
       }
-
       final token = await _getToken();
       if (token == null) {
-        _showErrorSnackBar('Gagal mendapatkan token akses');
+        _showErrorSnackBar('Gagal mendapatkan token');
         return;
       }
-
-      final response = await http.post(
+      final resp = await http.post(
         Uri.parse('$baseURL/api/asn/user/profile/photo/upload-base64'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email, 'FotoProfilBase64': base64Image}),
+        body: json.encode({'Email': email, 'FotoProfilBase64': b64}),
       );
-
       if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final responseBody = json.decode(response.body);
-        if (responseBody['success'] == true) {
-          _showSuccessSnackBar(
-            responseBody['message'] ?? 'Foto profil berhasil diperbarui',
-          );
-          // reload profile
+      if (resp.statusCode == 200) {
+        final body = json.decode(resp.body);
+        if (body['success'] == true) {
+          _showSuccessSnackBar(body['message'] ?? 'Foto berhasil diperbarui');
           await _loadProfileData(token);
         } else {
-          _showErrorSnackBar(
-            responseBody['message'] ?? 'Gagal memperbarui foto profil',
-          );
+          _showErrorSnackBar(body['message'] ?? 'Gagal memperbarui foto');
         }
-      } else if (response.statusCode == 401) {
-        // token expired, coba refresh dan upload ulang
+      } else if (resp.statusCode == 401) {
         final newToken = await _getToken();
         if (newToken != null) {
-          // ulangi upload
           await _uploadProfilePhotoBase64(imageFile);
         } else {
           _showErrorSnackBar('Authentication gagal');
         }
       } else {
-        // error status lain
-        final responseBody = json.decode(response.body);
-        _showErrorSnackBar(
-          responseBody['message'] ?? 'Gagal memperbarui foto profil',
-        );
+        _showErrorSnackBar('Gagal memperbarui foto');
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar(
-          'Terjadi kesalahan saat mengunggah foto: ${e.toString()}',
-        );
-      }
+      if (mounted) _showErrorSnackBar('Error: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isUploadingPhoto = false;
-        });
-      }
+      if (mounted) setState(() => _isUploadingPhoto = false);
     }
   }
 
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
+  void _showSuccessSnackBar(String msg) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.green));
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
+  void _showErrorSnackBar(String msg) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
 
-  void _showLogoutBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      backgroundColor: Colors.white,
-      isScrollControlled: false,
-      builder: (BuildContext context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Text(
-                  _getLocalizedString('logout'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                    color: Colors.red[600],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Center(
-                child: Text(
-                  _getLocalizedString('logoutConfirm'),
-                  style: const TextStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 30),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        backgroundColor: Colors.blue[100],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        foregroundColor: Colors.blue[800],
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(
-                        _getLocalizedString('cancel'),
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        _performLogout();
-                      },
-                      child: Text(
-                        _getLocalizedString('yes'),
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _showSwitchModeBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      backgroundColor: Colors.white,
-      isScrollControlled: false,
-      builder: (BuildContext context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Text(
-                  _getLocalizedString('switchToUserMode'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                    color: Colors.orange[600],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Center(
-                child: Text(
-                  _getLocalizedString('switchModeConfirm'),
-                  style: const TextStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 30),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        backgroundColor: Colors.orange[100],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        foregroundColor: Colors.orange[800],
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(
-                        _getLocalizedString('cancel'),
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        _performSwitchToUserMode();
-                      },
-                      child: Text(
-                        _getLocalizedString('yesSwitch'),
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _performLogout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // Menghapus semua data tersimpan
-
-    if (!mounted) return;
-
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const SplashScreen()),
-    );
-  }
-
-  void _performSwitchToUserMode() async {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const HomePage()),
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final isMediumScreen = screenWidth >= 360 && screenWidth < 600;
-
-    // Responsive values
-    final double horizontalPadding = isSmallScreen
-        ? 16
-        : (isMediumScreen ? 24 : 32);
-    final double verticalPadding = isSmallScreen ? 12 : 16;
-    final double avatarRadius = isSmallScreen ? 40 : (isMediumScreen ? 50 : 60);
-    final double titleFontSize = isSmallScreen
-        ? 20
-        : (isMediumScreen ? 24 : 28);
-    final double sectionTitleFontSize = isSmallScreen
-        ? 16
-        : (isMediumScreen ? 18 : 20);
-    final double menuItemFontSize = isSmallScreen
-        ? 14
-        : (isMediumScreen ? 16 : 18);
-    final double iconSize = isSmallScreen ? 20 : (isMediumScreen ? 22 : 24);
-
+    final isWeb = _isWebLayout(context);
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      body: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding.toDouble(),
-            vertical: verticalPadding.toDouble(),
+      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      children: [
+        Center(
+          child: Text(
+            _t('profile'),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
-          children: [
-            // Header
-            Center(
-              child: Text(
-                _getLocalizedString('profile'),
-                style: TextStyle(
-                  fontSize: titleFontSize,
-                  fontWeight: FontWeight.bold,
+        ),
+        const SizedBox(height: 24),
+        _buildAvatarSection(avatarRadius: 50),
+        const SizedBox(height: 28),
+        _buildSectionTitle(_t('myInfo')),
+        const SizedBox(height: 8),
+        _buildMenuSection(_myInfoItems()),
+        const SizedBox(height: 24),
+        _buildSectionTitle(_t('settings')),
+        const SizedBox(height: 8),
+        _buildMenuSection(_settingsItems()),
+        const SizedBox(height: 24),
+        _buildSectionTitle(_t('helpSupport')),
+        const SizedBox(height: 8),
+        _buildMenuSection(_helpItems()),
+        const SizedBox(height: 20),
+        _buildLogoutButton(),
+        const SizedBox(height: 8),
+        _buildDeleteAccountButton(),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: profil kiri + menu kanan)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Panel kiri: Avatar + Info ──────────────────────
+        Container(
+          width: 280,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(right: BorderSide(color: Colors.grey.shade200)),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                _buildAvatarSection(avatarRadius: 56),
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 16),
+                // Info ringkas
+                _buildWebInfoRow(
+                  Icons.badge_outlined,
+                  _profileDisplay?.userId ?? '-',
                 ),
-              ),
-            ),
-
-            SizedBox(height: isSmallScreen ? 16 : 24),
-
-            // Profile Picture dan Info
-            if (_isLoadingDisplay)
-              const Center(child: CircularProgressIndicator())
-            else
-              Center(
-                child: Column(
-                  children: [
-                    Stack(
-                      children: [
-                        CircleAvatar(
-                          radius: avatarRadius,
-                          backgroundColor: Colors.grey.shade200,
-                          backgroundImage: _profileDisplay?.fotoProfil != null
-                              ? MemoryImage(_profileDisplay!.fotoProfil!)
-                              : null,
-                          child: _profileDisplay?.fotoProfil == null
-                              ? Icon(
-                                  Icons.person,
-                                  size: avatarRadius * 0.6,
-                                  color: Colors.grey[600],
-                                )
-                              : null,
-                        ),
-                        if (_isUploadingPhoto)
-                          Container(
-                            width: avatarRadius * 2,
-                            height: avatarRadius * 2,
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.5),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            ),
-                          ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(30),
-                            onTap: _isUploadingPhoto
-                                ? null
-                                : () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      builder: (context) {
-                                        return SafeArea(
-                                          child: Wrap(
-                                            children: [
-                                              ListTile(
-                                                leading: const Icon(
-                                                  Icons.photo_library,
-                                                ),
-                                                title: Text(
-                                                  _getLocalizedString(
-                                                    'selectFromGallery',
-                                                  ),
-                                                ),
-                                                onTap: () {
-                                                  Navigator.of(context).pop();
-                                                  _pickImageFromGallery();
-                                                },
-                                              ),
-                                              ListTile(
-                                                leading: const Icon(
-                                                  Icons.camera_alt,
-                                                ),
-                                                title: Text(
-                                                  _getLocalizedString(
-                                                    'takePhoto',
-                                                  ),
-                                                ),
-                                                onTap: () {
-                                                  Navigator.of(context).pop();
-                                                  _pickImageFromCamera();
-                                                },
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
-                            child: CircleAvatar(
-                              radius: isSmallScreen ? 12 : 14,
-                              backgroundColor: _isUploadingPhoto
-                                  ? Colors.grey
-                                  : Colors.blue,
-                              child: Icon(
-                                Icons.edit,
-                                color: Colors.white,
-                                size: isSmallScreen ? 14 : 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                const SizedBox(height: 8),
+                _buildWebInfoRow(Icons.email_outlined, _email),
+                const SizedBox(height: 8),
+                _buildWebInfoRow(
+                  Icons.work_outline,
+                  _profileDisplay?.jobs ?? _t('position'),
+                ),
+                const SizedBox(height: 24),
+                // Logout di bawah panel kiri
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _showLogoutBottomSheet,
+                    icon: const Icon(Icons.logout, color: Colors.red, size: 16),
+                    label: Text(
+                      _t('logout'),
+                      style: const TextStyle(color: Colors.red, fontSize: 14),
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _profileDisplay?.displayName ??
-                          _getLocalizedString('username'),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.red.withOpacity(0.4)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isDeletingAccount
+                        ? null
+                        : _showDeleteAccountBottomSheet,
+                    icon: Icon(
+                      Icons.delete_forever,
+                      color: _isDeletingAccount ? Colors.grey : Colors.red,
+                      size: 16,
+                    ),
+                    label: Text(
+                      _t('deleteAccount'),
                       style: TextStyle(
-                        fontSize: menuItemFontSize + 2,
-                        fontWeight: FontWeight.w600,
+                        color: _isDeletingAccount ? Colors.grey : Colors.red,
+                        fontSize: 14,
                       ),
                     ),
-                    Text(
-                      _email.isNotEmpty ? _email : "email@domain.com",
-                      style: const TextStyle(color: Colors.grey),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                        color: _isDeletingAccount
+                            ? Colors.grey.withOpacity(0.4)
+                            : Colors.red.withOpacity(0.4),
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    Text(
-                      _profileDisplay?.jobs ?? _getLocalizedString('position'),
-                      style: const TextStyle(color: Colors.grey),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Panel kanan: Menu sections ─────────────────────
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _t('profile'),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // 2 kolom: Informasi Saya | Pengaturan
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildWebSectionHeader(
+                            _t('myInfo'),
+                            Icons.person_outline,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildWebMenuGrid(_myInfoItems()),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildWebSectionHeader(
+                            _t('settings'),
+                            Icons.settings_outlined,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildWebMenuGrid(_settingsItems()),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-              ),
 
-            SizedBox(height: isSmallScreen ? 20 : 30),
+                const SizedBox(height: 24),
 
-            // My Info Section
-            _buildSectionTitle(
-              _getLocalizedString('myInfo'),
-              sectionTitleFontSize,
+                // Bantuan full-width
+                _buildWebSectionHeader(_t('helpSupport'), Icons.help_outline),
+                const SizedBox(height: 10),
+                Row(
+                  children: _helpItems()
+                      .map(
+                        (item) => Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: _buildWebMenuCard(item),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            _buildMenuSection([
-              _buildMenuItem(
-                Icons.person_outline,
-                _getLocalizedString('personalInfo'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const InfoProfileScreen(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.emergency,
-                _getLocalizedString('emergencyContact'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => EmergencyContactScreen(
-                        userId: _profileDisplay?.userId ?? '',
-                      ),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.family_restroom,
-                _getLocalizedString('familyInfo'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  // Navigate to family info
-                  // Navigator.push(
-                  //   context,
-                  //   MaterialPageRoute(
-                  //     builder: (context) => const FamilyInfoScreen(),
-                  //   ),
-                  // );
-                  _showComingSoonDialog(context);
-                },
-              ),
-              _buildMenuItem(
-                Icons.school_outlined,
-                _getLocalizedString('education'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  // Navigator.push(
-                  //   context,
-                  //   MaterialPageRoute(
-                  //     builder: (context) => const EducationExperienceScreen(),
-                  //   ),
-                  // );
-                  _showComingSoonDialog(context);
-                },
-              ),
-              _buildMenuItem(
-                Icons.payment_outlined,
-                _getLocalizedString('salaryInfo'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  // Navigate to payroll info
-                  // Navigator.push(
-                  //   context,
-                  //   MaterialPageRoute(builder: (context) => SalaryScreen()),
-                  // );
-                  _showComingSoonDialog(context);
-                },
-              ),
-              // _buildMenuItem(
-              //   Icons.info_outline,
-              //   _getLocalizedString('additionalInfo'),
-              //   iconSize: iconSize,
-              //   fontSize: menuItemFontSize,
-              //   onTap: () {
-              //     // Navigate to additional info
-              //     Navigator.push(
-              //       context,
-              //       MaterialPageRoute(
-              //         builder: (context) => const AdditionalInfoScreen(),
-              //       ),
-              //     );
-              //   },
-              // ),
-              _buildMenuItem(
-                Icons.warning_amber_outlined,
-                _getLocalizedString('reprimand'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  // Navigate to reprimand
-                  // Navigator.push(
-                  //   context,
-                  //   MaterialPageRoute(
-                  //     builder: (context) => WarningLetterScreen(),
-                  //   ),
-                  // );
-                  _showComingSoonDialog(context);
-                },
-              ),
-            ]),
+          ),
+        ),
+      ],
+    );
+  }
 
-            const SizedBox(height: 24),
+  // ── Info row di sidebar web ───────────────────────────
+  Widget _buildWebInfoRow(IconData icon, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: Colors.grey[500]),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
 
-            // Settings Section
-            _buildSectionTitle(
-              _getLocalizedString('settings'),
-              sectionTitleFontSize,
+  // ── Section header web ────────────────────────────────
+  Widget _buildWebSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: const Color(0xFF3B82F6)),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Grid menu di web ──────────────────────────────────
+  Widget _buildWebMenuGrid(List<_MenuItem> items) {
+    return Column(
+      children: items
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildWebMenuCard(item),
             ),
-            const SizedBox(height: 8),
-            _buildMenuSection([
-              _buildMenuItem(
-                Icons.lock_outline,
-                _getLocalizedString('changeSecurity'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanPengaturanKeamanan(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.access_time_outlined,
-                _getLocalizedString('attendanceReminder'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  // Navigate to reminder settings
-                  _showComingSoonDialog(context);
-                },
-              ),
-              // Button Masuk ke Mode User
-              _buildMenuItem(
-                Icons.person_outline,
-                _getLocalizedString('switchToUserMode'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  _showSwitchModeBottomSheet();
-                },
-              ),
-              // _buildMenuItem(
-              //   Icons.language_outlined,
-              //   _getLocalizedString('language'),
-              //   iconSize: iconSize,
-              //   fontSize: menuItemFontSize,
-              //   trailingText: _getLanguageDisplayName(_selectedLanguage),
-              //   onTap: () {
-              //     _showLanguageBottomSheet();
-              //   },
-              // ),
-            ]),
+          )
+          .toList(),
+    );
+  }
 
-            const SizedBox(height: 24),
-            _buildSectionTitle(
-              _getLocalizedString('helpSupport'),
-              sectionTitleFontSize,
+  Widget _buildWebMenuCard(_MenuItem item) {
+    return GestureDetector(
+      onTap: item.onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
             ),
-            const SizedBox(height: 8),
-            // Additional Menu Items
-            _buildMenuSection([
-              _buildMenuItem(
-                Icons.privacy_tip_outlined,
-                _getLocalizedString('privacyPolicy'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanKebijakanPrivasi(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.help_outline,
-                _getLocalizedString('helpSupport'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanBantuanDukungan(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.contact_mail_outlined,
-                _getLocalizedString('contactUs'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanHubungiKami(),
-                    ),
-                  );
-                },
-              ),
-            ]),
-
-            const SizedBox(height: 20),
-
-            // Logout Button
+          ],
+        ),
+        child: Row(
+          children: [
             Container(
-              margin: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 16),
-              child: TextButton.icon(
-                onPressed: _showLogoutBottomSheet,
-                icon: const Icon(Icons.logout, color: Colors.red),
-                label: Text(
-                  _getLocalizedString('logout'),
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontSize: menuItemFontSize,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.symmetric(
-                    vertical: isSmallScreen ? 10 : 12,
-                  ),
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B82F6).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(item.icon, size: 16, color: const Color(0xFF3B82F6)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                item.title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF1E293B),
                 ),
               ),
             ),
-            SizedBox(height: isSmallScreen ? 16 : 20),
+            Icon(Icons.chevron_right, size: 16, color: Colors.grey[400]),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title, double fontSize) {
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: MediaQuery.of(context).size.width < 360 ? 8 : 16,
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED: Avatar Section
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildAvatarSection({required double avatarRadius}) {
+    if (_isLoadingDisplay) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Column(
+      children: [
+        Stack(
+          children: [
+            CircleAvatar(
+              radius: avatarRadius,
+              backgroundColor: Colors.grey.shade200,
+              backgroundImage: _profileDisplay?.fotoProfil != null
+                  ? MemoryImage(_profileDisplay!.fotoProfil!)
+                  : null,
+              child: _profileDisplay?.fotoProfil == null
+                  ? Icon(
+                      Icons.person,
+                      size: avatarRadius * 0.6,
+                      color: Colors.grey[600],
+                    )
+                  : null,
+            ),
+            if (_isUploadingPhoto)
+              Container(
+                width: avatarRadius * 2,
+                height: avatarRadius * 2,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: GestureDetector(
+                onTap: _isUploadingPhoto ? null : _showPhotoOptions,
+                child: CircleAvatar(
+                  radius: 14,
+                  backgroundColor: _isUploadingPhoto
+                      ? Colors.grey
+                      : Colors.blue,
+                  child: const Icon(Icons.edit, color: Colors.white, size: 15),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _profileDisplay?.displayName ?? _t('username'),
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          textAlign: TextAlign.center,
+        ),
+        Text(
+          _email.isNotEmpty ? _email : 'email@domain.com',
+          style: const TextStyle(color: Colors.grey, fontSize: 13),
+        ),
+        Text(
+          _profileDisplay?.jobs ?? _t('position'),
+          style: const TextStyle(color: Colors.grey, fontSize: 13),
+        ),
+      ],
+    );
+  }
+
+  void _showPhotoOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: Text(_t('selectFromGallery')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _pickImageFromGallery();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: Text(_t('takePhoto')),
+              onTap: () {
+                Navigator.of(context).pop();
+                _pickImageFromCamera();
+              },
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MENU ITEM DEFINITIONS
+  // ─────────────────────────────────────────────────────────────────
+  List<_MenuItem> _myInfoItems() => [
+    _MenuItem(
+      icon: Icons.person_outline,
+      title: _t('personalInfo'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const InfoProfileScreen()),
+      ),
+    ),
+    _MenuItem(
+      icon: Icons.emergency,
+      title: _t('emergencyContact'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              EmergencyContactScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
+    ),
+    _MenuItem(
+      icon: Icons.family_restroom,
+      title: _t('familyInfo'),
+      onTap: () => _showComingSoonDialog(),
+    ),
+    _MenuItem(
+      icon: Icons.school_outlined,
+      title: _t('education'),
+      onTap: () => _showComingSoonDialog(),
+    ),
+    _MenuItem(
+      icon: Icons.payment_outlined,
+      title: _t('salaryInfo'),
+      onTap: () => _showComingSoonDialog(),
+    ),
+    _MenuItem(
+      icon: Icons.warning_amber_outlined,
+      title: _t('reprimand'),
+      onTap: () => _showComingSoonDialog(),
+    ),
+  ];
+
+  List<_MenuItem> _settingsItems() => [
+    _MenuItem(
+      icon: Icons.lock_outline,
+      title: _t('changeSecurity'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanPengaturanKeamanan()),
+      ),
+    ),
+    _MenuItem(
+      icon: Icons.access_time_outlined,
+      title: _t('attendanceReminder'),
+      onTap: () => _showComingSoonDialog(),
+    ),
+    _MenuItem(
+      icon: Icons.swap_horiz,
+      title: _t('switchToUserMode'),
+      onTap: () => _showSwitchModeBottomSheet(),
+    ),
+  ];
+
+  List<_MenuItem> _helpItems() => [
+    _MenuItem(
+      icon: Icons.privacy_tip_outlined,
+      title: _t('privacyPolicy'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanKebijakanPrivasi()),
+      ),
+    ),
+    _MenuItem(
+      icon: Icons.help_outline,
+      title: _t('helpSupport'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanBantuanDukungan()),
+      ),
+    ),
+    _MenuItem(
+      icon: Icons.contact_mail_outlined,
+      title: _t('contactUs'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanHubungiKami()),
+      ),
+    ),
+  ];
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED: Mobile widgets
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
         title,
-        style: TextStyle(
-          fontSize: fontSize,
+        style: const TextStyle(
+          fontSize: 16,
           fontWeight: FontWeight.w600,
           color: Colors.black87,
         ),
@@ -1094,7 +902,99 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     );
   }
 
-  void _showComingSoonDialog(BuildContext context) {
+  Widget _buildMenuSection(List<_MenuItem> items) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: items.map((item) => _buildMobileMenuItem(item)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildMobileMenuItem(_MenuItem item) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: item.onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(item.icon, color: Colors.grey.shade700, size: 22),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  item.title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: TextButton.icon(
+        onPressed: _showLogoutBottomSheet,
+        icon: const Icon(Icons.logout, color: Colors.red),
+        label: Text(
+          _t('logout'),
+          style: const TextStyle(color: Colors.red, fontSize: 15),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeleteAccountButton() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: TextButton.icon(
+        onPressed: _isDeletingAccount ? null : _showDeleteAccountBottomSheet,
+        icon: Icon(
+          Icons.delete_forever,
+          color: _isDeletingAccount ? Colors.grey : Colors.red,
+        ),
+        label: Text(
+          _t('deleteAccount'),
+          style: TextStyle(
+            color: _isDeletingAccount ? Colors.grey : Colors.red,
+            fontSize: 15,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // DIALOGS / BOTTOM SHEETS
+  // ─────────────────────────────────────────────────────────────────
+  void _showComingSoonDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1111,87 +1011,398 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     );
   }
 
-  Widget _buildMenuSection(List<Widget> items) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalMargin = screenWidth < 360 ? 8 : 16;
-
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: horizontalMargin.toDouble()),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 0,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+  void _showLogoutBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: Column(children: items),
-    );
-  }
-
-  Widget _buildMenuItem(
-    IconData icon,
-    String title, {
-    String? trailingText,
-    VoidCallback? onTap,
-    double iconSize = 22,
-    double fontSize = 16,
-  }) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final horizontalPadding = isSmallScreen ? 12 : 16;
-    final verticalPadding = isSmallScreen ? 12 : 16;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding.toDouble(),
-            vertical: verticalPadding.toDouble(),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: Colors.grey.shade700, size: iconSize),
-              SizedBox(width: isSmallScreen ? 12 : 16),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: fontSize,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  ),
-                ),
+      backgroundColor: Colors.white,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _t('logout'),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: Colors.red[600],
               ),
-              if (trailingText != null)
-                Flexible(
-                  child: Text(
-                    trailingText,
-                    style: TextStyle(
-                      fontSize: fontSize - 2,
-                      color: Colors.grey.shade600,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _t('logoutConfirm'),
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.blue[100],
+                      foregroundColor: Colors.blue[800],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    textAlign: TextAlign.end,
-                    overflow: TextOverflow.ellipsis,
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(_t('cancel')),
                   ),
                 ),
-              SizedBox(width: isSmallScreen ? 4 : 8),
-              Icon(
-                Icons.chevron_right,
-                color: Colors.grey.shade400,
-                size: isSmallScreen ? 18 : 20,
-              ),
-            ],
-          ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _performLogout();
+                    },
+                    child: Text(
+                      _t('yes'),
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
+
+  void _showSwitchModeBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: Colors.white,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _t('switchToUserMode'),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: Colors.orange[600],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _t('switchModeConfirm'),
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 28),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.orange[100],
+                      foregroundColor: Colors.orange[800],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(_t('cancel')),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _performSwitchToUserMode();
+                    },
+                    child: Text(
+                      _t('yesSwitch'),
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // HAPUS AKUN
+  // ─────────────────────────────────────────────────────────────────
+  void _showDeleteAccountBottomSheet() {
+    final TextEditingController passwordController = TextEditingController();
+    bool hidePassword = true;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  24,
+                  24,
+                  24,
+                  MediaQuery.of(context).viewInsets.bottom + 40,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.red[600],
+                      size: 40,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _t('deleteAccount'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                        color: Colors.red[600],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red[200]!),
+                      ),
+                      child: Text(
+                        _t('deleteAccountWarning'),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.red[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _t('deleteAccountConfirm'),
+                      style: const TextStyle(fontSize: 15),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: passwordController,
+                      obscureText: hidePassword,
+                      decoration: InputDecoration(
+                        hintText: _t('passwordHint'),
+                        labelText: _t('deleteAccountPassword'),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            hidePassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                          onPressed: () =>
+                              setModalState(() => hidePassword = !hidePassword),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              backgroundColor: Colors.grey[200],
+                              foregroundColor: Colors.grey[800],
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            onPressed: () {
+                              passwordController.dispose();
+                              Navigator.of(context).pop();
+                            },
+                            child: Text(_t('cancel')),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                            onPressed: _isDeletingAccount
+                                ? null
+                                : () {
+                                    if (passwordController.text.isEmpty) {
+                                      _showErrorSnackBar(
+                                        'Silakan masukkan password Anda',
+                                      );
+                                      return;
+                                    }
+                                    Navigator.of(context).pop();
+                                    passwordController.dispose();
+                                    _performDeleteAccount();
+                                  },
+                            child: _isDeletingAccount
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white,
+                                      ),
+                                    ),
+                                  )
+                                : Text(
+                                    _t('yesDelete'),
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _performDeleteAccount() async {
+    if (_profileDisplay == null) {
+      _showErrorSnackBar('Data profil tidak ditemukan');
+      return;
+    }
+    setState(() => _isDeletingAccount = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('Email') ?? '';
+      final token = await _getToken();
+      if (token == null) {
+        _showErrorSnackBar('Gagal mendapatkan token');
+        setState(() => _isDeletingAccount = false);
+        return;
+      }
+
+      final resp = await http
+          .post(
+            Uri.parse('$baseURL/api/asn/user/deleteAccount'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: json.encode({
+              'UserId': _profileDisplay!.id.toString(),
+              'UpdatedBy': email,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (!mounted) return;
+
+      if (resp.statusCode == 200) {
+        final body = json.decode(resp.body);
+        final message = body['Message'] ?? body['message'] ?? '';
+        if (message.toLowerCase().contains('successfully')) {
+          _showSuccessSnackBar(_t('successDeleteAccount'));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_t('accountDeletedRedirect')),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          await Future.delayed(const Duration(seconds: 2));
+          await prefs.clear();
+          if (!mounted) return;
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const SplashScreen()),
+          );
+        } else {
+          _showErrorSnackBar(
+            message.isNotEmpty ? message : _t('errorDeleteAccount'),
+          );
+        }
+      } else {
+        final body = json.decode(resp.body);
+        _showErrorSnackBar(
+          body['Message'] ?? body['message'] ?? _t('errorDeleteAccount'),
+        );
+      }
+    } catch (e) {
+      if (mounted) _showErrorSnackBar('Kesalahan: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isDeletingAccount = false);
+    }
+  }
+
+  void _performLogout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (!mounted) return;
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const SplashScreen()));
+  }
+
+  void _performSwitchToUserMode() {
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const HomePage()));
+  }
+}
+
+// ── Data class menu item ──────────────────────────────────────────
+class _MenuItem {
+  final IconData icon;
+  final String title;
+  final VoidCallback? onTap;
+
+  const _MenuItem({required this.icon, required this.title, this.onTap});
 }

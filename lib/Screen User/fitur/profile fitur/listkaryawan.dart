@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// ── helper ──────────────────────────────────────────────────────────
+bool _isWeb(BuildContext context) => MediaQuery.of(context).size.width >= 768;
+
 class HalamanListEmployee extends StatefulWidget {
   const HalamanListEmployee({super.key});
 
@@ -15,7 +18,6 @@ class HalamanListEmployee extends StatefulWidget {
   _HalamanListEmployeeState createState() => _HalamanListEmployeeState();
 }
 
-// UI Model untuk kompatibilitas dengan UI
 class EmployeeData {
   final int id;
   final String nama;
@@ -30,8 +32,6 @@ class EmployeeData {
   final String nomorKaryawan;
   final String manager;
   final List<String> skills;
-
-  // Additional fields dari detail API
   final String? additionalPhone;
   final String? citizenIdAddress;
   final String? residentialAddress;
@@ -112,15 +112,17 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
   String selectedStatus = 'Semua';
   String sortBy = 'Nama A-Z';
 
-  // API Data
   List<EmployeeData> allEmployeeData = [];
   EmployeeStats? employeeStats;
   int currentPage = 1;
   int totalPages = 1;
   int totalCount = 0;
 
-  // Text editing controller untuk search
   final TextEditingController _searchController = TextEditingController();
+
+  // Web: karyawan yang sedang dipilih untuk ditampilkan di panel kanan
+  EmployeeData? _selectedEmployee;
+  bool _isLoadingDetail = false;
 
   @override
   void initState() {
@@ -128,7 +130,12 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     _loadEmployeeData();
   }
 
-  // Load data dari API
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadEmployeeData() async {
     setState(() {
       isLoading = true;
@@ -136,14 +143,11 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     });
 
     try {
-      // Convert sortBy to API format
-      String apiSortBy = _convertSortByToApi(sortBy);
-
       final response = await EmployeeService.getEmployeeList(
         searchQuery: searchQuery.isEmpty ? null : searchQuery,
         department: selectedDepartment == 'Semua' ? null : selectedDepartment,
         status: selectedStatus == 'Semua' ? null : selectedStatus,
-        sortBy: apiSortBy,
+        sortBy: _convertSortByToApi(sortBy),
         page: currentPage,
         pageSize: 50,
       );
@@ -151,7 +155,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
       if (response.success && response.data != null) {
         setState(() {
           allEmployeeData = response.data!.data
-              .map((apiData) => apiData.toEmployeeData())
+              .map((e) => e.toEmployeeData())
               .toList();
           employeeStats = response.data!.stats;
           totalPages = response.data!.totalPages;
@@ -205,20 +209,15 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
   }
 
   void _onSearchChanged(String value) {
-    setState(() {
-      searchQuery = value;
-    });
-
-    Future.delayed(Duration(milliseconds: 500), () {
+    setState(() => searchQuery = value);
+    Future.delayed(const Duration(milliseconds: 500), () {
       if (searchQuery == value) {
         _refreshData();
       }
     });
   }
 
-  List<EmployeeData> getFilteredEmployeeData() {
-    return allEmployeeData;
-  }
+  List<EmployeeData> getFilteredEmployeeData() => allEmployeeData;
 
   Map<String, int> getEmployeeStats() {
     if (employeeStats != null) {
@@ -229,7 +228,6 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
         'Non-Aktif': employeeStats!.inactiveEmployees,
       };
     }
-
     return {
       'Total': allEmployeeData.length,
       'Aktif': 0,
@@ -241,8 +239,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
   String _formatTanggal(String tanggal) {
     try {
       if (tanggal.isEmpty) return '-';
-      DateTime date = DateTime.parse(tanggal);
-      return DateFormat('dd MMM yyyy', 'id_ID').format(date);
+      return DateFormat('dd MMM yyyy', 'id_ID').format(DateTime.parse(tanggal));
     } catch (e) {
       return tanggal;
     }
@@ -274,27 +271,921 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     }
   }
 
-  double _getResponsiveFontSize(BuildContext context, double baseFontSize) {
-    double screenWidth = MediaQuery.of(context).size.width;
-    double scale = screenWidth / 375;
-    return baseFontSize * scale.clamp(0.85, 1.15);
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final isWebLayout = _isWeb(context);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: _buildAppBar(),
+      body: SafeArea(
+        child: isWebLayout ? _buildWebLayout() : _buildMobileLayout(),
+      ),
+    );
   }
 
-  double _getResponsivePadding(BuildContext context, double basePadding) {
-    double screenWidth = MediaQuery.of(context).size.width;
-    double scale = screenWidth / 375;
-    return basePadding * scale.clamp(0.85, 1.1);
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: const Text(
+        'Daftar Karyawan',
+        style: TextStyle(
+          color: Color(0xFF1E293B),
+          fontWeight: FontWeight.w600,
+          fontSize: 18,
+        ),
+      ),
+      backgroundColor: Colors.white,
+      elevation: 0,
+      centerTitle: false,
+      actions: [
+        Container(
+          margin: const EdgeInsets.only(right: 16),
+          child: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.filter_list,
+                color: Color(0xFF3B82F6),
+                size: 20,
+              ),
+            ),
+            onPressed: _showFilterSheet,
+          ),
+        ),
+        Container(
+          margin: const EdgeInsets.only(right: 16),
+          child: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.refresh,
+                color: Color(0xFF3B82F6),
+                size: 20,
+              ),
+            ),
+            onPressed: _refreshData,
+          ),
+        ),
+      ],
+    );
   }
 
-  double _getResponsiveIconSize(BuildContext context, double baseIconSize) {
-    double screenWidth = MediaQuery.of(context).size.width;
-    double scale = screenWidth / 375;
-    return baseIconSize * scale.clamp(0.85, 1.1);
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    getEmployeeStats();
+    final filteredData = getFilteredEmployeeData();
+
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildErrorBanner(),
+            _buildStatsGrid(crossAxisCount: 2, ratio: 1.2),
+            const SizedBox(height: 20),
+            _buildSearchBar(),
+            const SizedBox(height: 16),
+            _buildListHeader(filteredData.length),
+            const SizedBox(height: 12),
+            if (isLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Color(0xFF3B82F6),
+                    ),
+                  ),
+                ),
+              )
+            else if (filteredData.isEmpty && errorMessage.isEmpty)
+              _buildEmptyState()
+            else
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: filteredData.length,
+                itemBuilder: (context, index) =>
+                    _buildEmployeeCard(filteredData[index], isWeb: false),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (3 kolom: filter | list | detail)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    final filteredData = getFilteredEmployeeData();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Kolom kiri: Filter + Stats ──────────────────
+        SizedBox(
+          width: 220,
+          child: Container(
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Stats ringkas
+                  _buildWebStatsColumn(),
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 12),
+                  // Filter
+                  _buildWebFilterPanel(),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // ── Kolom tengah: Search + List karyawan ─────────
+        SizedBox(
+          width: 340,
+          child: Container(
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              border: Border(right: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: Column(
+              children: [
+                // Search bar
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+                  child: Column(
+                    children: [
+                      _buildSearchBar(),
+                      const SizedBox(height: 8),
+                      _buildListHeader(filteredData.length),
+                    ],
+                  ),
+                ),
+                // List
+                Expanded(
+                  child: isLoading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Color(0xFF3B82F6),
+                            ),
+                          ),
+                        )
+                      : filteredData.isEmpty && errorMessage.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          itemCount: filteredData.length,
+                          itemBuilder: (context, index) => _buildEmployeeCard(
+                            filteredData[index],
+                            isWeb: true,
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Kolom kanan: Detail karyawan ──────────────────
+        Expanded(
+          child: _selectedEmployee == null
+              ? _buildWebDetailEmpty()
+              : _isLoadingDetail
+              ? const Center(child: CircularProgressIndicator())
+              : _buildWebDetailPanel(_selectedEmployee!),
+        ),
+      ],
+    );
+  }
+
+  // ── Stats ringkas di sidebar web ──────────────────────
+  Widget _buildWebStatsColumn() {
+    final stats = getEmployeeStats();
+    final items = [
+      {'title': 'Total', 'value': stats['Total'], 'color': Colors.blue},
+      {'title': 'Aktif', 'value': stats['Aktif'], 'color': Colors.green},
+      {'title': 'Cuti', 'value': stats['Cuti'], 'color': Colors.orange},
+      {'title': 'Non-Aktif', 'value': stats['Non-Aktif'], 'color': Colors.red},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Statistik',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...items.map((item) {
+          final color = item['color'] as Color;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withOpacity(0.15)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    item['title'] as String,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${item['value']}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ── Filter panel di sidebar web ───────────────────────
+  Widget _buildWebFilterPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Filter',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Departemen
+        const Text(
+          'Departemen',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children:
+              [
+                'Semua',
+                'IT Development',
+                'Design',
+                'Human Resources',
+                'Marketing',
+              ].map((dept) {
+                final isSelected = selectedDepartment == dept;
+                return GestureDetector(
+                  onTap: () {
+                    setState(() => selectedDepartment = dept);
+                    _refreshData();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? const Color(0xFF3B82F6)
+                          : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      dept,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: isSelected ? Colors.white : Colors.grey[700],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+        ),
+
+        const SizedBox(height: 14),
+
+        // Status
+        const Text(
+          'Status',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: ['Semua', 'Aktif', 'Cuti', 'Non-Aktif'].map((s) {
+            final isSelected = selectedStatus == s;
+            return GestureDetector(
+              onTap: () {
+                setState(() => selectedStatus = s);
+                _refreshData();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF3B82F6)
+                      : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  s,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: isSelected ? Colors.white : Colors.grey[700],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+
+        const SizedBox(height: 14),
+
+        // Urutkan
+        const Text(
+          'Urutkan',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+        ),
+        const SizedBox(height: 6),
+        ...['Nama A-Z', 'Nama Z-A', 'Terbaru', 'Terlama'].map((s) {
+          final apiKey = s == 'Terbaru'
+              ? 'Tanggal Bergabung (Terbaru)'
+              : s == 'Terlama'
+              ? 'Tanggal Bergabung (Terlama)'
+              : s;
+          final isSelected = sortBy == apiKey;
+          return GestureDetector(
+            onTap: () {
+              setState(() => sortBy = apiKey);
+              _refreshData();
+            },
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF3B82F6).withOpacity(0.08)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 14,
+                    color: isSelected
+                        ? const Color(0xFF3B82F6)
+                        : Colors.grey[400],
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    s,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isSelected
+                          ? const Color(0xFF3B82F6)
+                          : Colors.grey[700],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  // ── Placeholder detail kosong ──────────────────────────
+  Widget _buildWebDetailEmpty() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.person_outline,
+              size: 40,
+              color: Color(0xFF3B82F6),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Pilih karyawan',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Klik nama karyawan di kiri\nuntuk melihat detail',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Detail panel di kolom kanan (web) ─────────────────
+  Widget _buildWebDetailPanel(EmployeeData emp) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header profil
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(36),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(36),
+                  child: _buildProfileImage(emp.foto, 72),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      emp.nama,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      emp.jabatan,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Color(0xFF3B82F6),
+                      ),
+                    ),
+                    Text(
+                      emp.departemen,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildStatusBadge(emp.status),
+                  ],
+                ),
+              ),
+              // Action buttons
+              Row(
+                children: [
+                  _buildIconBtn(
+                    Icons.email_outlined,
+                    Colors.blue,
+                    () => _sendEmail(emp.email),
+                    tooltip: 'Email',
+                  ),
+                  const SizedBox(width: 6),
+                  if (emp.telepon.isNotEmpty)
+                    _buildIconBtn(
+                      Icons.chat,
+                      Colors.green,
+                      () => _sendWhatsApp(emp.telepon),
+                      tooltip: 'WhatsApp',
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // Info 2 kolom
+          _buildWebDetailGrid(emp),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String status) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _getStatusColor(status).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _getStatusIcon(status),
+            size: 12,
+            color: _getStatusColor(status),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            status,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: _getStatusColor(status),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIconBtn(
+    IconData icon,
+    Color color,
+    VoidCallback onTap, {
+    String? tooltip,
+  }) {
+    return Tooltip(
+      message: tooltip ?? '',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 18, color: color),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWebDetailGrid(EmployeeData emp) {
+    final sections = [
+      {
+        'title': 'Informasi Personal',
+        'items': [
+          _detailRow(
+            'ID Karyawan',
+            emp.nomorKaryawan,
+            Icons.badge,
+            Colors.blue,
+          ),
+          _detailRow('Email', emp.email, Icons.email, Colors.green),
+          _detailRow(
+            'Telepon',
+            emp.telepon.isNotEmpty ? emp.telepon : '-',
+            Icons.phone,
+            Colors.orange,
+          ),
+          if (emp.birthDate != null && emp.birthDate!.isNotEmpty)
+            _detailRow(
+              'Tanggal Lahir',
+              _formatTanggal(emp.birthDate!),
+              Icons.cake,
+              Colors.purple,
+            ),
+          if (emp.nik != null && emp.nik!.isNotEmpty)
+            _detailRow('NIK', emp.nik!, Icons.credit_card, Colors.indigo),
+          if (emp.alamat.isNotEmpty)
+            _detailRow('Alamat', emp.alamat, Icons.location_on, Colors.red),
+        ],
+      },
+      {
+        'title': 'Informasi Pekerjaan',
+        'items': [
+          _detailRow(
+            'Departemen',
+            emp.departemen,
+            Icons.business,
+            Colors.purple,
+          ),
+          _detailRow(
+            'Posisi',
+            emp.jabatan.isNotEmpty ? emp.jabatan : '-',
+            Icons.work,
+            Colors.blue,
+          ),
+          if (emp.jobLevel != null && emp.jobLevel!.isNotEmpty)
+            _detailRow('Level', emp.jobLevel!, Icons.trending_up, Colors.teal),
+          _detailRow(
+            'Manager',
+            emp.manager.isNotEmpty ? emp.manager : '-',
+            Icons.supervisor_account,
+            Colors.cyan,
+          ),
+          _detailRow(
+            'Bergabung',
+            emp.tanggalBergabung.isNotEmpty
+                ? _formatTanggal(emp.tanggalBergabung)
+                : '-',
+            Icons.calendar_today,
+            Colors.teal,
+          ),
+          if (emp.workingPeriodYear != null)
+            _detailRow(
+              'Masa Kerja',
+              '${emp.workingPeriodYear} thn ${emp.workingPeriodMonth} bln',
+              Icons.schedule,
+              Colors.amber,
+            ),
+        ],
+      },
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final section in sections) ...[
+          Text(
+            section['title'] as String,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...(section['items'] as List<Widget?>).whereType<Widget>(),
+          const SizedBox(height: 16),
+        ],
+        if (emp.skills.isNotEmpty) ...[
+          const Text(
+            'Skills',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: emp.skills.map((skill) {
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  skill,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.blue[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget? _detailRow(String label, String value, IconData icon, Color color) {
+    if (value.isEmpty || value == '-') {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: Colors.grey[400]),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF94A3B8),
+                    ),
+                  ),
+                  const Text(
+                    '-',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.15)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildErrorBanner() {
+    if (errorMessage.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              errorMessage,
+              style: const TextStyle(color: Colors.red, fontSize: 14),
+            ),
+          ),
+          IconButton(
+            onPressed: () => setState(() => errorMessage = ''),
+            icon: const Icon(Icons.close, color: Colors.red, size: 18),
+            constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsGrid({required int crossAxisCount, required double ratio}) {
+    final stats = getEmployeeStats();
+    final statData = [
+      {
+        'title': 'Total Karyawan',
+        'value': stats['Total'].toString(),
+        'color': Colors.blue,
+        'icon': Icons.people,
+      },
+      {
+        'title': 'Karyawan Aktif',
+        'value': stats['Aktif'].toString(),
+        'color': Colors.green,
+        'icon': Icons.check_circle,
+      },
+      {
+        'title': 'Sedang Cuti',
+        'value': stats['Cuti'].toString(),
+        'color': Colors.orange,
+        'icon': Icons.access_time,
+      },
+      {
+        'title': 'Non-Aktif',
+        'value': stats['Non-Aktif'].toString(),
+        'color': Colors.red,
+        'icon': Icons.cancel,
+      },
+    ];
+
+    return GridView.builder(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: ratio,
+      ),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: 4,
+      itemBuilder: (context, index) => _buildStatBox(
+        statData[index]['title'] as String,
+        statData[index]['value'] as String,
+        statData[index]['color'] as Color,
+        statData[index]['icon'] as IconData,
+      ),
+    );
   }
 
   Widget _buildStatBox(String title, String value, Color color, IconData icon) {
     return Container(
-      padding: EdgeInsets.all(_getResponsivePadding(context, 16)),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -321,23 +1212,23 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                 ),
                 child: Icon(icon, color: color, size: 18),
               ),
-              Spacer(),
+              const Spacer(),
               Text(
                 value,
                 style: TextStyle(
-                  fontSize: _getResponsiveFontSize(context, 20),
+                  fontSize: 20,
                   fontWeight: FontWeight.bold,
                   color: color,
                 ),
               ),
             ],
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             title,
-            style: TextStyle(
-              fontSize: _getResponsiveFontSize(context, 12),
-              color: const Color(0xFF64748B),
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF64748B),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -348,7 +1239,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
 
   Widget _buildSearchBar() {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -363,20 +1254,18 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
       ),
       child: Row(
         children: [
-          Icon(Icons.search, color: const Color(0xFF94A3B8), size: 20),
-          SizedBox(width: 12),
+          const Icon(Icons.search, color: Color(0xFF94A3B8), size: 18),
+          const SizedBox(width: 10),
           Expanded(
             child: TextField(
               controller: _searchController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 hintText: 'Cari karyawan...',
                 border: InputBorder.none,
-                hintStyle: TextStyle(
-                  color: const Color(0xFF94A3B8),
-                  fontSize: _getResponsiveFontSize(context, 14),
-                ),
+                isDense: true,
+                hintStyle: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
               ),
-              style: TextStyle(fontSize: _getResponsiveFontSize(context, 14)),
+              style: const TextStyle(fontSize: 13),
               onChanged: _onSearchChanged,
             ),
           ),
@@ -389,10 +1278,10 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                 });
                 _refreshData();
               },
-              child: Icon(
+              child: const Icon(
                 Icons.clear,
-                color: const Color(0xFF94A3B8),
-                size: 18,
+                color: Color(0xFF94A3B8),
+                size: 16,
               ),
             ),
         ],
@@ -400,253 +1289,194 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     );
   }
 
-  Widget _buildEmployeeCard(EmployeeData employee) {
-    return GestureDetector(
-      onTap: () => _showDetailEmployee(employee),
-      child: Container(
-        margin: EdgeInsets.only(bottom: _getResponsivePadding(context, 12)),
-        padding: EdgeInsets.all(_getResponsivePadding(context, 16)),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+  Widget _buildListHeader(int count) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          'Daftar Karyawan',
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$count karyawan',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF64748B),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: _showSortSheet,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: const Icon(
+                  Icons.sort,
+                  size: 16,
+                  color: Color(0xFF64748B),
+                ),
+              ),
             ),
           ],
         ),
-        child: Column(
+      ],
+    );
+  }
+
+  // ── Employee card — compact di web, full di mobile ────
+  Widget _buildEmployeeCard(EmployeeData emp, {required bool isWeb}) {
+    final isSelected = isWeb && _selectedEmployee?.id == emp.id;
+
+    return GestureDetector(
+      onTap: () {
+        if (isWeb) {
+          _selectEmployeeWeb(emp);
+        } else {
+          _showDetailEmployee(emp);
+        }
+      },
+      child: Container(
+        margin: EdgeInsets.only(bottom: isWeb ? 6 : 10),
+        padding: EdgeInsets.all(isWeb ? 12 : 14),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF3B82F6).withOpacity(0.06)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF3B82F6).withOpacity(0.3)
+                : Colors.transparent,
+          ),
+          boxShadow: isWeb
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+        ),
+        child: Row(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(30),
-                    child: _buildProfileImage(employee.foto, 60),
-                  ),
-                ),
-                SizedBox(width: _getResponsivePadding(context, 16)),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              employee.nama,
-                              style: TextStyle(
-                                fontSize: _getResponsiveFontSize(context, 16),
-                                fontWeight: FontWeight.w600,
-                                color: const Color(0xFF1E293B),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: _getResponsivePadding(context, 8),
-                              vertical: _getResponsivePadding(context, 4),
-                            ),
-                            decoration: BoxDecoration(
-                              color: _getStatusColor(
-                                employee.status,
-                              ).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _getStatusIcon(employee.status),
-                                  size: 12,
-                                  color: _getStatusColor(employee.status),
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  employee.status,
-                                  style: TextStyle(
-                                    fontSize: _getResponsiveFontSize(
-                                      context,
-                                      10,
-                                    ),
-                                    fontWeight: FontWeight.w500,
-                                    color: _getStatusColor(employee.status),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        employee.jabatan,
-                        style: TextStyle(
-                          fontSize: _getResponsiveFontSize(context, 14),
-                          fontWeight: FontWeight.w500,
-                          color: const Color(0xFF3B82F6),
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        employee.departemen,
-                        style: TextStyle(
-                          fontSize: _getResponsiveFontSize(context, 12),
-                          color: const Color(0xFF64748B),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            // Avatar
+            Container(
+              width: isWeb ? 40 : 52,
+              height: isWeb ? 40 : 52,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(isWeb ? 20 : 26),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(isWeb ? 20 : 26),
+                child: _buildProfileImage(emp.foto, isWeb ? 40 : 52),
+              ),
             ),
-            SizedBox(height: _getResponsivePadding(context, 12)),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.badge,
-                            size: _getResponsiveIconSize(context, 14),
-                            color: const Color(0xFF64748B),
-                          ),
-                          SizedBox(width: 4),
-                          Text(
-                            employee.nomorKaryawan,
-                            style: TextStyle(
-                              fontSize: _getResponsiveFontSize(context, 12),
-                              color: const Color(0xFF64748B),
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.email,
-                            size: _getResponsiveIconSize(context, 14),
-                            color: const Color(0xFF64748B),
-                          ),
-                          SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              employee.email,
-                              style: TextStyle(
-                                fontSize: _getResponsiveFontSize(context, 12),
-                                color: const Color(0xFF64748B),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+            SizedBox(width: isWeb ? 10 : 12),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    emp.nama,
+                    style: TextStyle(
+                      fontSize: isWeb ? 13 : 15,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF1E293B),
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                SizedBox(width: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.calendar_today,
-                          size: _getResponsiveIconSize(context, 14),
-                          color: const Color(0xFF64748B),
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          employee.tanggalBergabung.isNotEmpty
-                              ? _formatTanggal(employee.tanggalBergabung)
-                              : '-',
-                          style: TextStyle(
-                            fontSize: _getResponsiveFontSize(context, 12),
-                            color: const Color(0xFF64748B),
-                          ),
-                        ),
-                      ],
+                  Text(
+                    emp.jabatan,
+                    style: TextStyle(
+                      fontSize: isWeb ? 11 : 12,
+                      color: const Color(0xFF3B82F6),
+                      fontWeight: FontWeight.w500,
                     ),
-                    SizedBox(height: 4),
-                    Icon(
-                      Icons.arrow_forward_ios,
-                      size: 12,
-                      color: Colors.grey[400],
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (!isWeb)
+                    Text(
+                      emp.departemen,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF64748B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
+            // Status badge (mobile) / chevron (web)
+            if (isWeb)
+              Icon(Icons.chevron_right, size: 16, color: Colors.grey[400])
+            else
+              _buildStatusBadge(emp.status),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProfileImage(String? photoBase64, double size) {
-    if (photoBase64 != null && photoBase64.isNotEmpty) {
-      try {
-        final bytes = base64Decode(photoBase64);
-        return Image.memory(
-          bytes,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return _buildDefaultAvatar(size);
-          },
-        );
-      } catch (e) {
-        return _buildDefaultAvatar(size);
+  // ── Pilih karyawan di web (load detail) ───────────────
+  Future<void> _selectEmployeeWeb(EmployeeData emp) async {
+    setState(() {
+      _selectedEmployee = emp;
+      _isLoadingDetail = true;
+    });
+
+    try {
+      final response = await EmployeeService.getEmployeeDetail(id: emp.id);
+      if (response.success && response.data != null) {
+        setState(() {
+          _selectedEmployee = response.data!.toEmployeeData();
+          _isLoadingDetail = false;
+        });
+      } else {
+        setState(() => _isLoadingDetail = false);
       }
-    } else {
-      return _buildDefaultAvatar(size);
+    } catch (e) {
+      setState(() => _isLoadingDetail = false);
     }
   }
 
-  Widget _buildDefaultAvatar(double size) {
-    return Container(
-      width: size,
-      height: size,
-      color: Colors.blue[100],
-      child: Icon(Icons.person, size: size * 0.5, color: Colors.blue[600]),
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE: detail bottom sheet (tidak berubah)
+  // ─────────────────────────────────────────────────────────────────
   void _showDetailEmployee(EmployeeData employee) async {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => Center(child: CircularProgressIndicator()),
+      builder: (context) => const Center(child: CircularProgressIndicator()),
     );
 
     try {
       final response = await EmployeeService.getEmployeeDetail(id: employee.id);
-
       Navigator.pop(context);
-
       if (response.success && response.data != null) {
-        final detailedEmployee = response.data!.toEmployeeData();
-        _showDetailBottomSheet(detailedEmployee);
+        _showDetailBottomSheet(response.data!.toEmployeeData());
       } else {
-        _showErrorSnackBar(
-          'Gagal mengambil detail karyawan: ${response.message}',
-        );
+        _showErrorSnackBar('Gagal mengambil detail: ${response.message}');
         _showDetailBottomSheet(employee);
       }
     } catch (e) {
@@ -656,11 +1486,11 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     }
   }
 
-  void _showDetailBottomSheet(EmployeeData employee) {
+  void _showDetailBottomSheet(EmployeeData emp) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => DraggableScrollableSheet(
@@ -669,7 +1499,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
         minChildSize: 0.6,
         expand: false,
         builder: (context, scrollController) => Container(
-          padding: EdgeInsets.all(20),
+          padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -683,87 +1513,57 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                   ),
                 ),
               ),
-              SizedBox(height: 20),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Container(
-                    width: 80,
-                    height: 80,
+                    width: 72,
+                    height: 72,
                     decoration: BoxDecoration(
                       color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(40),
+                      borderRadius: BorderRadius.circular(36),
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(40),
-                      child: _buildProfileImage(employee.foto, 80),
+                      borderRadius: BorderRadius.circular(36),
+                      child: _buildProfileImage(emp.foto, 72),
                     ),
                   ),
-                  SizedBox(width: 20),
+                  const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          employee.nama,
-                          style: TextStyle(
-                            fontSize: 22,
+                          emp.nama,
+                          style: const TextStyle(
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF1E293B),
                           ),
                         ),
                         Text(
-                          employee.jabatan,
-                          style: TextStyle(
-                            fontSize: 16,
+                          emp.jabatan,
+                          style: const TextStyle(
+                            fontSize: 14,
                             fontWeight: FontWeight.w500,
                             color: Color(0xFF3B82F6),
                           ),
                         ),
                         Text(
-                          employee.departemen,
-                          style: TextStyle(
-                            fontSize: 14,
+                          emp.departemen,
+                          style: const TextStyle(
+                            fontSize: 13,
                             color: Color(0xFF64748B),
                           ),
                         ),
-                        SizedBox(height: 8),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getStatusColor(
-                              employee.status,
-                            ).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _getStatusIcon(employee.status),
-                                size: 16,
-                                color: _getStatusColor(employee.status),
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                employee.status,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: _getStatusColor(employee.status),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        const SizedBox(height: 6),
+                        _buildStatusBadge(emp.status),
                       ],
                     ),
                   ),
                 ],
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 20),
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -771,157 +1571,211 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                     _buildDetailSection('Informasi Personal', [
                       _buildDetailItem(
                         'ID Karyawan',
-                        employee.nomorKaryawan,
+                        emp.nomorKaryawan,
                         Icons.badge,
                         Colors.blue,
                       ),
                       _buildDetailItemWithAction(
                         'Email',
-                        employee.email,
+                        emp.email,
                         Icons.email,
                         Colors.green,
-                        onTap: () => _sendEmail(employee.email),
+                        onTap: () => _sendEmail(emp.email),
                         actionIcon: Icons.mail_outline,
                         actionColor: Colors.blue,
                       ),
                       _buildDetailItemWithAction(
                         'Telepon',
-                        employee.telepon.isNotEmpty
-                            ? employee.telepon
-                            : 'Tidak ada data',
+                        emp.telepon.isNotEmpty ? emp.telepon : 'Tidak ada data',
                         Icons.phone,
                         Colors.orange,
-                        onTap: employee.telepon.isNotEmpty
-                            ? () => _sendWhatsApp(employee.telepon)
+                        onTap: emp.telepon.isNotEmpty
+                            ? () => _sendWhatsApp(emp.telepon)
                             : null,
                         actionIcon: Icons.chat,
                         actionColor: Colors.green,
                       ),
-                      if (employee.birthDate != null &&
-                          employee.birthDate!.isNotEmpty)
+                      if (emp.birthDate != null && emp.birthDate!.isNotEmpty)
                         _buildDetailItem(
                           'Tanggal Lahir',
-                          _formatTanggal(employee.birthDate!),
+                          _formatTanggal(emp.birthDate!),
                           Icons.cake,
                           Colors.purple,
                         ),
-                      if (employee.nik != null && employee.nik!.isNotEmpty)
+                      if (emp.nik != null && emp.nik!.isNotEmpty)
                         _buildDetailItem(
                           'NIK',
-                          employee.nik!,
+                          emp.nik!,
                           Icons.credit_card,
                           Colors.indigo,
                         ),
-                      if (employee.alamat.isNotEmpty)
+                      if (emp.alamat.isNotEmpty)
                         _buildDetailItem(
                           'Alamat',
-                          employee.alamat,
+                          emp.alamat,
                           Icons.location_on,
                           Colors.red,
                         ),
                     ]),
-                    SizedBox(height: 16),
+                    const SizedBox(height: 16),
                     _buildDetailSection('Informasi Pekerjaan', [
                       _buildDetailItem(
                         'Departemen',
-                        employee.departemen,
+                        emp.departemen,
                         Icons.business,
                         Colors.purple,
                       ),
                       _buildDetailItem(
                         'Posisi',
-                        employee.jabatan.isNotEmpty
-                            ? employee.jabatan
-                            : 'Tidak ada data',
+                        emp.jabatan.isNotEmpty ? emp.jabatan : '-',
                         Icons.work,
                         Colors.blue,
                       ),
-                      if (employee.jobLevel != null &&
-                          employee.jobLevel!.isNotEmpty)
+                      if (emp.jobLevel != null && emp.jobLevel!.isNotEmpty)
                         _buildDetailItem(
                           'Level',
-                          employee.jobLevel!,
+                          emp.jobLevel!,
                           Icons.trending_up,
                           Colors.teal,
                         ),
                       _buildDetailItem(
                         'Manager',
-                        employee.manager.isNotEmpty
-                            ? employee.manager
-                            : 'Tidak ada data',
+                        emp.manager.isNotEmpty ? emp.manager : '-',
                         Icons.supervisor_account,
                         Colors.cyan,
                       ),
                       _buildDetailItem(
                         'Tanggal Bergabung',
-                        employee.tanggalBergabung.isNotEmpty
-                            ? _formatTanggal(employee.tanggalBergabung)
-                            : 'Tidak ada data',
+                        emp.tanggalBergabung.isNotEmpty
+                            ? _formatTanggal(emp.tanggalBergabung)
+                            : '-',
                         Icons.calendar_today,
                         Colors.teal,
                       ),
-                      if (employee.workingPeriodYear != null)
+                      if (emp.workingPeriodYear != null)
                         _buildDetailItem(
                           'Masa Kerja',
-                          '${employee.workingPeriodYear} tahun ${employee.workingPeriodMonth} bulan',
+                          '${emp.workingPeriodYear} tahun ${emp.workingPeriodMonth} bulan',
                           Icons.schedule,
                           Colors.amber,
                         ),
                     ]),
-                    SizedBox(height: 16),
-                    if (employee.skills.isNotEmpty)
-                      _buildDetailSection('Skills & Keahlian', [
-                        _buildSkillsList(employee.skills),
+                    if (emp.skills.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _buildDetailSection('Skills', [
+                        _buildSkillsList(emp.skills),
                       ]),
+                    ],
                   ],
                 ),
               ),
-              SizedBox(height: 20),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.close),
-                      label: Text('Tutup'),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Tutup'),
                       style: OutlinedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                     ),
                   ),
-                  SizedBox(width: 16),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      onPressed: () => _sendEmail(employee.email),
-                      icon: Icon(Icons.email_outlined, color: Colors.blue),
-                      tooltip: 'Kirim Email',
-                    ),
+                  const SizedBox(width: 12),
+                  _buildIconBtn(
+                    Icons.email_outlined,
+                    Colors.blue,
+                    () => _sendEmail(emp.email),
                   ),
-                  SizedBox(width: 8),
-                  if (employee.telepon.isNotEmpty)
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: IconButton(
-                        onPressed: () => _sendWhatsApp(employee.telepon),
-                        icon: Icon(Icons.chat, color: Colors.green),
-                        tooltip: 'WhatsApp',
-                      ),
+                  const SizedBox(width: 6),
+                  if (emp.telepon.isNotEmpty)
+                    _buildIconBtn(
+                      Icons.chat,
+                      Colors.green,
+                      () => _sendWhatsApp(emp.telepon),
                     ),
                 ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildDetailSection(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1E293B),
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...children,
+      ],
+    );
+  }
+
+  Widget _buildDetailItem(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF1E293B),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -936,8 +1790,8 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     Color? actionColor,
   }) {
     return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -946,32 +1800,32 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
       child: Row(
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(icon, color: color, size: 18),
           ),
-          SizedBox(width: 16),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 12,
+                  style: const TextStyle(
+                    fontSize: 11,
                     color: Color(0xFF64748B),
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   value,
-                  style: TextStyle(
-                    fontSize: 16,
+                  style: const TextStyle(
+                    fontSize: 14,
                     color: Color(0xFF1E293B),
                     fontWeight: FontWeight.w600,
                   ),
@@ -983,129 +1837,14 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
             GestureDetector(
               onTap: onTap,
               child: Container(
-                padding: EdgeInsets.all(8),
+                padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
                   color: (actionColor ?? color).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(actionIcon, size: 20, color: actionColor ?? color),
+                child: Icon(actionIcon, size: 18, color: actionColor ?? color),
               ),
             ),
-        ],
-      ),
-    );
-  }
-
-  void _sendEmail(String email) async {
-    try {
-      final Uri emailUri = Uri(
-        scheme: 'mailto',
-        path: email,
-        queryParameters: {'subject': 'Hello', 'body': 'Hi there!'},
-      );
-
-      if (await launchUrl(emailUri)) {
-      } else {
-        _showErrorSnackBar('Tidak dapat membuka aplikasi email');
-      }
-    } catch (e) {
-      _showErrorSnackBar('Error: $e');
-    }
-  }
-
-  void _sendWhatsApp(String phoneNumber) async {
-    try {
-      String cleanPhone = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
-
-      if (!cleanPhone.startsWith('+')) {
-        if (cleanPhone.startsWith('0')) {
-          cleanPhone = '+62${cleanPhone.substring(1)}';
-        } else if (cleanPhone.startsWith('62')) {
-          cleanPhone = '+$cleanPhone';
-        } else {
-          cleanPhone = '+62$cleanPhone';
-        }
-      }
-
-      final Uri whatsappUri = Uri.parse('https://wa.me/$cleanPhone');
-
-      if (await launchUrl(whatsappUri, mode: LaunchMode.externalApplication)) {
-      } else {
-        _showErrorSnackBar('WhatsApp tidak terinstall atau nomor tidak valid');
-      }
-    } catch (e) {
-      _showErrorSnackBar('Error: $e');
-    }
-  }
-
-  Widget _buildDetailSection(String title, List<Widget> children) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF1E293B),
-          ),
-        ),
-        SizedBox(height: 12),
-        ...children,
-      ],
-    );
-  }
-
-  Widget _buildDetailItem(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: color, size: 20),
-          ),
-          SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF64748B),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF1E293B),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -1113,272 +1852,59 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
 
   Widget _buildSkillsList(List<String> skills) {
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.blue.withOpacity(0.2)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.psychology, color: Colors.blue, size: 20),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: skills.map((skill) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              skill,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.blue[700],
+                fontWeight: FontWeight.w500,
               ),
-              SizedBox(width: 16),
-              Text(
-                'Skills & Keahlian',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Color(0xFF1E293B),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: skills.map((skill) {
-              return Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  skill,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.blue[700],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
+            ),
+          );
+        }).toList(),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    Map<String, int> stats = getEmployeeStats();
-    List<EmployeeData> filteredData = getFilteredEmployeeData();
+  Widget _buildProfileImage(String? photoBase64, double size) {
+    if (photoBase64 != null && photoBase64.isNotEmpty) {
+      try {
+        return Image.memory(
+          base64Decode(photoBase64),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildDefaultAvatar(size),
+        );
+      } catch (e) {
+        return _buildDefaultAvatar(size);
+      }
+    }
+    return _buildDefaultAvatar(size);
+  }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: Text(
-          'Daftar Karyawan',
-          style: TextStyle(
-            color: const Color(0xFF1E293B),
-            fontWeight: FontWeight.w600,
-            fontSize: _getResponsiveFontSize(context, 18),
-          ),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        actions: [
-          Container(
-            margin: EdgeInsets.only(right: _getResponsivePadding(context, 16)),
-            child: IconButton(
-              icon: Container(
-                padding: EdgeInsets.all(_getResponsivePadding(context, 8)),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.filter_list,
-                  color: const Color(0xFF3B82F6),
-                  size: _getResponsiveIconSize(context, 20),
-                ),
-              ),
-              onPressed: _showFilterSheet,
-            ),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: _refreshData,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.all(_getResponsivePadding(context, 20)),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (errorMessage.isNotEmpty)
-                Container(
-                  margin: EdgeInsets.only(bottom: 16),
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.withOpacity(0.2)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red, size: 20),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          errorMessage,
-                          style: TextStyle(color: Colors.red, fontSize: 14),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () {
-                          setState(() {
-                            errorMessage = '';
-                          });
-                        },
-                        icon: Icon(Icons.close, color: Colors.red, size: 18),
-                        constraints: BoxConstraints(),
-                        padding: EdgeInsets.zero,
-                      ),
-                    ],
-                  ),
-                ),
-              GridView.builder(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 1.2,
-                ),
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: 4,
-                itemBuilder: (context, index) {
-                  final statData = [
-                    {
-                      'title': 'Total Karyawan',
-                      'value': stats['Total'].toString(),
-                      'color': Colors.blue,
-                      'icon': Icons.people,
-                    },
-                    {
-                      'title': 'Karyawan Aktif',
-                      'value': stats['Aktif'].toString(),
-                      'color': Colors.green,
-                      'icon': Icons.check_circle,
-                    },
-                    {
-                      'title': 'Sedang Cuti',
-                      'value': stats['Cuti'].toString(),
-                      'color': Colors.orange,
-                      'icon': Icons.access_time,
-                    },
-                    {
-                      'title': 'Non-Aktif',
-                      'value': stats['Non-Aktif'].toString(),
-                      'color': Colors.red,
-                      'icon': Icons.cancel,
-                    },
-                  ];
-
-                  return _buildStatBox(
-                    statData[index]['title'] as String,
-                    statData[index]['value'] as String,
-                    statData[index]['color'] as Color,
-                    statData[index]['icon'] as IconData,
-                  );
-                },
-              ),
-              SizedBox(height: _getResponsivePadding(context, 24)),
-              _buildSearchBar(),
-              SizedBox(height: _getResponsivePadding(context, 20)),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Daftar Karyawan',
-                    style: TextStyle(
-                      fontSize: _getResponsiveFontSize(context, 18),
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF1E293B),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: _getResponsivePadding(context, 12),
-                          vertical: _getResponsivePadding(context, 6),
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '${filteredData.length} karyawan',
-                          style: TextStyle(
-                            fontSize: _getResponsiveFontSize(context, 12),
-                            color: const Color(0xFF64748B),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: _showSortSheet,
-                        child: Container(
-                          padding: EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: Icon(
-                            Icons.sort,
-                            size: 18,
-                            color: const Color(0xFF64748B),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              SizedBox(height: _getResponsivePadding(context, 16)),
-              if (isLoading)
-                Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(40),
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Color(0xFF3B82F6),
-                      ),
-                    ),
-                  ),
-                )
-              else if (filteredData.isEmpty && errorMessage.isEmpty)
-                _buildEmptyState()
-              else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: filteredData.length,
-                  itemBuilder: (context, index) {
-                    return _buildEmployeeCard(filteredData[index]);
-                  },
-                ),
-            ],
-          ),
-        ),
-      ),
+  Widget _buildDefaultAvatar(double size) {
+    return Container(
+      width: size,
+      height: size,
+      color: Colors.blue[100],
+      child: Icon(Icons.person, size: size * 0.5, color: Colors.blue[600]),
     );
   }
 
@@ -1386,35 +1912,31 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     return Center(
       child: Column(
         children: [
-          SizedBox(height: 40),
-          Icon(Icons.people_outline, size: 80, color: Colors.grey[400]),
-          SizedBox(height: 16),
-          Text(
+          const SizedBox(height: 40),
+          Icon(Icons.people_outline, size: 72, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          const Text(
             'Tidak ada karyawan ditemukan',
             style: TextStyle(
-              fontSize: _getResponsiveFontSize(context, 16),
+              fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF64748B),
+              color: Color(0xFF64748B),
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             'Coba ubah filter atau kata kunci pencarian',
-            style: TextStyle(
-              fontSize: _getResponsiveFontSize(context, 14),
-              color: const Color(0xFF94A3B8),
-            ),
+            style: TextStyle(fontSize: 13, color: Colors.grey[400]),
             textAlign: TextAlign.center,
           ),
-          SizedBox(height: 20),
+          const SizedBox(height: 20),
           ElevatedButton.icon(
             onPressed: _refreshData,
-            icon: Icon(Icons.refresh),
-            label: Text('Muat Ulang'),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Muat Ulang'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Color(0xFF3B82F6),
+              backgroundColor: const Color(0xFF3B82F6),
               foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -1425,194 +1947,214 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     );
   }
 
+  void _sendEmail(String email) async {
+    try {
+      final uri = Uri(
+        scheme: 'mailto',
+        path: email,
+        queryParameters: {'subject': 'Hello'},
+      );
+      if (!await launchUrl(uri)) {
+        _showErrorSnackBar('Tidak dapat membuka aplikasi email');
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error: $e');
+    }
+  }
+
+  void _sendWhatsApp(String phoneNumber) async {
+    try {
+      String clean = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+      if (!clean.startsWith('+')) {
+        if (clean.startsWith('0')) {
+          clean = '+62${clean.substring(1)}';
+        } else if (clean.startsWith('62')) {
+          clean = '+$clean';
+        } else {
+          clean = '+62$clean';
+        }
+      }
+      if (!await launchUrl(
+        Uri.parse('https://wa.me/$clean'),
+        mode: LaunchMode.externalApplication,
+      )) {
+        _showErrorSnackBar('WhatsApp tidak terinstall');
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error: $e');
+    }
+  }
+
   void _showFilterSheet() {
     showModalBottomSheet(
       context: context,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[300],
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
                     ),
-                    SizedBox(height: 20),
-                    Text(
-                      'Filter Karyawan',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    Text(
-                      'Departemen',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF64748B),
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children:
-                          [
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Filter Karyawan',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Departemen',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children:
+                      [
                             'Semua',
                             'IT Development',
                             'Design',
                             'Human Resources',
                             'Marketing',
-                          ].map((dept) {
-                            return FilterChip(
+                          ]
+                          .map(
+                            (dept) => FilterChip(
                               label: Text(dept),
                               selected: selectedDepartment == dept,
-                              onSelected: (selected) {
-                                setModalState(() {
-                                  selectedDepartment = dept;
-                                });
-                              },
-                            );
-                          }).toList(),
-                    ),
-                    SizedBox(height: 24),
-                    Text(
-                      'Status',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF64748B),
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: ['Semua', 'Aktif', 'Cuti', 'Non-Aktif'].map((
-                        status,
-                      ) {
-                        return FilterChip(
-                          label: Text(status),
-                          selected: selectedStatus == status,
-                          onSelected: (selected) {
-                            setModalState(() {
-                              selectedStatus = status;
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    SizedBox(height: 32),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          setState(() {});
-                          Navigator.pop(context);
-                          _refreshData();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Color(0xFF3B82F6),
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          'Terapkan Filter',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                              onSelected: (_) => setModalState(
+                                () => selectedDepartment = dept,
+                              ),
+                            ),
+                          )
+                          .toList(),
                 ),
-              ),
-            );
-          },
-        );
-      },
+                const SizedBox(height: 16),
+                const Text(
+                  'Status',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: ['Semua', 'Aktif', 'Cuti', 'Non-Aktif']
+                      .map(
+                        (s) => FilterChip(
+                          label: Text(s),
+                          selected: selectedStatus == s,
+                          onSelected: (_) =>
+                              setModalState(() => selectedStatus = s),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {});
+                      Navigator.pop(context);
+                      _refreshData();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Terapkan Filter',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
   void _showSortSheet() {
     showModalBottomSheet(
       context: context,
-      shape: RoundedRectangleBorder(
+      shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (BuildContext context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: EdgeInsets.only(top: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
               ),
-              Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  'Urutkan Berdasarkan',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Urutkan Berdasarkan',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
-              ...[
-                'Nama A-Z',
-                'Nama Z-A',
-                'Tanggal Bergabung (Terbaru)',
-                'Tanggal Bergabung (Terlama)',
-              ].map((sort) {
-                return ListTile(
-                  leading: Icon(
-                    sortBy == sort
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                    color: sortBy == sort ? Color(0xFF3B82F6) : Colors.grey,
-                  ),
-                  title: Text(sort),
-                  onTap: () {
-                    setState(() {
-                      sortBy = sort;
-                    });
-                    Navigator.pop(context);
-                    _refreshData();
-                  },
-                );
-              }),
-              SizedBox(height: 20),
-            ],
-          ),
-        );
-      },
+            ),
+            ...[
+              'Nama A-Z',
+              'Nama Z-A',
+              'Tanggal Bergabung (Terbaru)',
+              'Tanggal Bergabung (Terlama)',
+            ].map(
+              (sort) => ListTile(
+                leading: Icon(
+                  sortBy == sort
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: sortBy == sort ? const Color(0xFF3B82F6) : Colors.grey,
+                ),
+                title: Text(sort),
+                onTap: () {
+                  setState(() => sortBy = sort);
+                  Navigator.pop(context);
+                  _refreshData();
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 }

@@ -1057,7 +1057,7 @@ class _HomePageState extends State<HomeScreen> {
       ),
       _buildServiceIconData(
         Icons.schedule,
-        "Cuti",
+        "Izin",
         const Color(0xFF007AFF),
         onTap: () {
           Navigator.push(

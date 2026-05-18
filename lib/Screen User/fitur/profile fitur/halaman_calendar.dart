@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import '../../../Services/calendar_event_service.dart';
 import '../../../models/calendermodel.dart';
 
+// ── helper ──────────────────────────────────────────────────────────
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
+
 class HalamanCalendar extends StatefulWidget {
   const HalamanCalendar({super.key});
 
@@ -49,9 +53,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
   }
 
   Future<void> _loadEvents() async {
-    setState(() {
-      _isLoadingEvents = true;
-    });
+    setState(() => _isLoadingEvents = true);
     try {
       final events = await CalendarEventService.getDayoffEvents(
         _focusedDate.year,
@@ -61,9 +63,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         _isLoadingEvents = false;
       });
     } catch (e) {
-      setState(() {
-        _isLoadingEvents = false;
-      });
+      setState(() => _isLoadingEvents = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -97,34 +97,20 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
 
   void _previousMonth() {
     final newDate = DateTime(_focusedDate.year, _focusedDate.month - 1);
-    setState(() {
-      _focusedDate = newDate;
-    });
-
-    // Load events for new year if needed
-    if (newDate.year != _selectedDate.year) {
-      _loadEventsForYear(newDate.year);
-    }
+    setState(() => _focusedDate = newDate);
+    if (newDate.year != _selectedDate.year) _loadEventsForYear(newDate.year);
   }
 
   void _nextMonth() {
     final newDate = DateTime(_focusedDate.year, _focusedDate.month + 1);
-    setState(() {
-      _focusedDate = newDate;
-    });
-
-    // Load events for new year if needed
-    if (newDate.year != _selectedDate.year) {
-      _loadEventsForYear(newDate.year);
-    }
+    setState(() => _focusedDate = newDate);
+    if (newDate.year != _selectedDate.year) _loadEventsForYear(newDate.year);
   }
 
   Future<void> _loadEventsForYear(int year) async {
     try {
       final events = await CalendarEventService.getDayoffEvents(year);
-      setState(() {
-        _events.addAll(events);
-      });
+      setState(() => _events.addAll(events));
     } catch (e) {
       rethrow;
     }
@@ -137,102 +123,194 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final isWeb = _isWideScreen(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: const Text(
-          'Calendar',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: Colors.black87,
-            letterSpacing: 0.3,
-          ),
-        ),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Colors.white,
-        leading: Container(
-          margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios,
-              color: Colors.black87,
-              size: 18,
-            ),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.black87, size: 18),
-              onPressed: () async {
-                await CalendarEventService.refreshEvents(_focusedDate.year);
-                _loadEvents();
-              },
-              tooltip: 'Refresh Events',
-            ),
-          ),
-          Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.today, color: Colors.black87, size: 18),
-              onPressed: _goToToday,
-              tooltip: 'Go to Today',
-            ),
-          ),
-        ],
-      ),
+      appBar: _buildAppBar(),
       body: _isLoadingEvents
           ? const Center(
               child: CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
               ),
             )
-          : RefreshIndicator(
-              onRefresh: _loadEvents,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildCalendarHeader(),
-                    const SizedBox(height: 24),
-                    _buildCalendarGrid(),
-                    const SizedBox(height: 24),
-                    _buildEventsSection(),
-                  ],
-                ),
-              ),
-            ),
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: _showAddEventDialog,
-      //   backgroundColor: const Color(0xFF3B82F6),
-      //   tooltip: 'Add Event',
-      //   child: const Icon(Icons.add, color: Colors.white),
-      // ),
+          : isWeb
+          ? _buildWebLayout()
+          : _buildMobileLayout(),
     );
   }
 
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: const Text(
+        'Calendar',
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+          color: Colors.black87,
+          letterSpacing: 0.3,
+        ),
+      ),
+      centerTitle: true,
+      elevation: 0,
+      backgroundColor: Colors.white,
+      leading: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios,
+            color: Colors.black87,
+            size: 18,
+          ),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      actions: [
+        Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.black87, size: 18),
+            onPressed: () async {
+              await CalendarEventService.refreshEvents(_focusedDate.year);
+              _loadEvents();
+            },
+            tooltip: 'Refresh Events',
+          ),
+        ),
+        Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.today, color: Colors.black87, size: 18),
+            onPressed: _goToToday,
+            tooltip: 'Go to Today',
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli, scroll vertikal)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    return RefreshIndicator(
+      onRefresh: _loadEvents,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCalendarHeader(),
+            const SizedBox(height: 24),
+            _buildCalendarGrid(),
+            const SizedBox(height: 24),
+            _buildEventsSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: kalender kiri | event list kanan)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Kolom kiri: Header + Grid kalender ─────────────
+        Container(
+          width: 420,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(right: BorderSide(color: Colors.grey.shade200)),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                _buildCalendarHeader(),
+                const SizedBox(height: 20),
+                _buildCalendarGrid(),
+                const SizedBox(height: 16),
+                _buildWebLegend(),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Kolom kanan: Event list ─────────────────────────
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _loadEvents,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: _buildEventsSection(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Legend kecil di bawah kalender (web only) ─────────
+  Widget _buildWebLegend() {
+    final items = [
+      {'color': const Color(0xFF3B82F6), 'label': 'Hari ini'},
+      {'color': Colors.red, 'label': 'Minggu / Libur'},
+      {'color': Colors.orange, 'label': 'Cuti Bersama'},
+    ];
+
+    return Wrap(
+      spacing: 16,
+      runSpacing: 8,
+      children: items.map((item) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: item['color'] as Color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              item['label'] as String,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS
+  // ─────────────────────────────────────────────────────────────────
   Widget _buildCalendarHeader() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
@@ -260,7 +338,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
               Text(
                 '${_monthNames[_focusedDate.month - 1]} ${_focusedDate.year}',
                 style: const TextStyle(
-                  fontSize: 24,
+                  fontSize: 22,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
                   letterSpacing: -0.3,
@@ -272,7 +350,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
                         _focusedDate.month == DateTime.now().month
                     ? 'Bulan Ini'
                     : '',
-                style: const TextStyle(fontSize: 14, color: Colors.white70),
+                style: const TextStyle(fontSize: 13, color: Colors.white70),
               ),
             ],
           ),
@@ -294,7 +372,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -307,17 +385,16 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Day headers
             Row(
               children: _dayNames.map((dayName) {
                 return Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Text(
                       dayName,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: dayName == 'Min'
                             ? Colors.red
@@ -350,12 +427,10 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     List<Widget> weeks = [];
     List<Widget> days = [];
 
-    // Empty days before first day of month
     for (int i = 0; i < firstWeekday; i++) {
       days.add(const Expanded(child: SizedBox()));
     }
 
-    // Days of the month
     for (int day = 1; day <= lastDayOfMonth.day; day++) {
       final date = DateTime(_focusedDate.year, _focusedDate.month, day);
       final events = _getEventsForDay(date);
@@ -371,17 +446,11 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         Expanded(
           child: GestureDetector(
             onTap: () {
-              setState(() {
-                _selectedDate = date;
-              });
-
-              // Show events if any
-              if (events.isNotEmpty) {
-                _showEventDialog(date, events);
-              }
+              setState(() => _selectedDate = date);
+              if (events.isNotEmpty) _showEventDialog(date, events);
             },
             child: Container(
-              height: 60,
+              height: 56,
               margin: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 color: isToday
@@ -400,7 +469,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
                   Text(
                     day.toString(),
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
                       color: isToday
                           ? Colors.white
@@ -415,8 +484,8 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Container(
-                          width: 6,
-                          height: 6,
+                          width: 5,
+                          height: 5,
                           decoration: BoxDecoration(
                             color: isToday ? Colors.white : events.first.color,
                             shape: BoxShape.circle,
@@ -445,8 +514,14 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         ),
       );
 
-      // Start new week
       if ((firstWeekday + day) % 7 == 0 || day == lastDayOfMonth.day) {
+        // Padding sisa akhir minggu
+        if (day == lastDayOfMonth.day) {
+          final remaining = 7 - days.length;
+          for (int i = 0; i < remaining; i++) {
+            days.add(const Expanded(child: SizedBox()));
+          }
+        }
         weeks.add(Row(children: List.from(days)));
         days.clear();
       }
@@ -460,7 +535,6 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     final todayEvents = _getEventsForDay(today);
     final thisMonthEvents = <DateTime, List<CalendarEvent>>{};
 
-    // Get events for this month
     _events.forEach((date, events) {
       if (date.month == _focusedDate.month && date.year == _focusedDate.year) {
         thisMonthEvents[date] = events;
@@ -470,7 +544,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section Header
+        // Section header
         Row(
           children: [
             Container(
@@ -483,7 +557,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
             ),
             const SizedBox(width: 12),
             const Text(
-              "Event & Hari Penting",
+              'Event & Hari Penting',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 18,
@@ -493,7 +567,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
             ),
             const Spacer(),
             Text(
-              "${thisMonthEvents.length} event",
+              '${thisMonthEvents.length} event',
               style: const TextStyle(
                 fontSize: 14,
                 color: Color(0xFF6B7280),
@@ -504,573 +578,313 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         ),
         const SizedBox(height: 16),
 
-        // Today's events (if any)
+        // Hari ini
         if (todayEvents.isNotEmpty) ...[
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF3B82F6).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: const Color(0xFF3B82F6).withOpacity(0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Hari Ini',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF3B82F6),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ...todayEvents.map(
-                  (event) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      children: [
-                        Icon(event.typeIcon, size: 16, color: event.color),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            event.title,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Color(0xFF1F2937),
-                            ),
-                          ),
-                        ),
-                        if (event.isCutiBersama)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'Cuti',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.red,
-                              ),
-                            ),
-                          )
-                        else if (event.isHoliday)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'Libur',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.orange,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _buildTodayEventsCard(todayEvents),
           const SizedBox(height: 16),
         ],
 
-        // This month's events
+        // Event bulan ini
         if (thisMonthEvents.isNotEmpty)
-          ...thisMonthEvents.entries.map((entry) {
-            final date = entry.key;
-            final events = entry.value;
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: events.first.color.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Center(
-                        child: Text(
-                          date.day.toString(),
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: events.first.color,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            events.first.title,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF1F2937),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                events.first.typeIcon,
-                                size: 14,
-                                color: const Color(0xFF6B7280),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                events.first.typeDescription,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF6B7280),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${date.day} ${_monthNames[date.month - 1]} ${date.year}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF9CA3AF),
-                            ),
-                          ),
-                          if (events.length > 1)
-                            Text(
-                              '+${events.length - 1} event lainnya',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF9CA3AF),
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (_isSunday(date) ||
-                        events.any((e) => e.isHoliday || e.isCutiBersama))
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: events.any((e) => e.isCutiBersama)
-                              ? Colors.red.withOpacity(0.1)
-                              : Colors.orange.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          events.any((e) => e.isCutiBersama) ? 'Cuti' : 'Libur',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: events.any((e) => e.isCutiBersama)
-                                ? Colors.red
-                                : Colors.orange,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          })
+          ...thisMonthEvents.entries.map(
+            (entry) => _buildEventCard(entry.key, entry.value),
+          )
         else
-          Container(
-            padding: const EdgeInsets.all(32),
-            child: const Center(
-              child: Column(
+          _buildEmptyEvents(),
+      ],
+    );
+  }
+
+  Widget _buildTodayEventsCard(List<CalendarEvent> todayEvents) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF3B82F6).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Hari Ini',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF3B82F6),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...todayEvents.map(
+            (event) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
                 children: [
-                  Icon(Icons.event_busy, size: 60, color: Color(0xFF9CA3AF)),
-                  SizedBox(height: 16),
-                  Text(
-                    'Tidak ada event bulan ini',
-                    style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
+                  Icon(event.typeIcon, size: 16, color: event.color),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      event.title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF1F2937),
+                      ),
+                    ),
                   ),
+                  _buildEventBadge(event),
                 ],
               ),
             ),
           ),
-      ],
+        ],
+      ),
     );
+  }
+
+  Widget _buildEventCard(DateTime date, List<CalendarEvent> events) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: events.first.color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Center(
+                child: Text(
+                  date.day.toString(),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: events.first.color,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    events.first.title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Icon(
+                        events.first.typeIcon,
+                        size: 13,
+                        color: const Color(0xFF6B7280),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        events.first.typeDescription,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${date.day} ${_monthNames[date.month - 1]} ${date.year}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                  ),
+                  if (events.length > 1)
+                    Text(
+                      '+${events.length - 1} event lainnya',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF9CA3AF),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (_isSunday(date) ||
+                events.any((e) => e.isHoliday || e.isCutiBersama))
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: events.any((e) => e.isCutiBersama)
+                      ? Colors.red.withOpacity(0.1)
+                      : Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  events.any((e) => e.isCutiBersama) ? 'Cuti' : 'Libur',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: events.any((e) => e.isCutiBersama)
+                        ? Colors.red
+                        : Colors.orange,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyEvents() {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      child: const Center(
+        child: Column(
+          children: [
+            Icon(Icons.event_busy, size: 60, color: Color(0xFF9CA3AF)),
+            SizedBox(height: 16),
+            Text(
+              'Tidak ada event bulan ini',
+              style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEventBadge(CalendarEvent event) {
+    if (event.isCutiBersama) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: const Text(
+          'Cuti',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: Colors.red,
+          ),
+        ),
+      );
+    }
+    if (event.isHoliday) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.orange.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: const Text(
+          'Libur',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: Colors.orange,
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 
   void _showEventDialog(DateTime date, List<CalendarEvent> events) {
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${date.day} ${_monthNames[date.month - 1]} ${date.year}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            if (events.isNotEmpty && events.first.displayDate != null)
               Text(
-                '${date.day} ${_monthNames[date.month - 1]} ${date.year}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
+                events.first.displayDate!,
+                style: const TextStyle(fontSize: 14, color: Colors.grey),
               ),
-              if (events.isNotEmpty && events.first.displayDate != null)
-                Text(
-                  events.first.displayDate!,
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
-                ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: events.map((event) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(event.typeIcon, size: 18, color: event.color),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            event.title,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: events
+              .map(
+                (event) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(event.typeIcon, size: 18, color: event.color),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              event.title,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            event.typeDescription,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
+                            const SizedBox(height: 2),
+                            Text(
+                              event.typeDescription,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (event.isCutiBersama)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'Cuti',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.red,
-                          ),
-                        ),
-                      )
-                    else if (event.isHoliday)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'Libur',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.orange,
-                          ),
+                          ],
                         ),
                       ),
-                  ],
+                      _buildEventBadge(event),
+                    ],
+                  ),
                 ),
-              );
-            }).toList(),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text(
-                'Tutup',
-                style: TextStyle(
-                  color: Color(0xFF3B82F6),
-                  fontWeight: FontWeight.w600,
-                ),
+              )
+              .toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Tutup',
+              style: TextStyle(
+                color: Color(0xFF3B82F6),
+                fontWeight: FontWeight.w600,
               ),
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
-
-  // void _showAddEventDialog() {
-  //   final TextEditingController titleController = TextEditingController();
-  //   DateTime selectedDate = _selectedDate;
-  //   Color selectedColor = const Color(0xFF3B82F6);
-  //   String selectedType = 'personal';
-  //   bool isHoliday = false;
-
-  //   showDialog(
-  //     context: context,
-  //     builder: (context) {
-  //       return StatefulBuilder(
-  //         builder: (context, setState) {
-  //           return AlertDialog(
-  //             shape: RoundedRectangleBorder(
-  //               borderRadius: BorderRadius.circular(16),
-  //             ),
-  //             title: const Text(
-  //               'Tambah Event',
-  //               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-  //             ),
-  //             content: SingleChildScrollView(
-  //               child: Column(
-  //                 mainAxisSize: MainAxisSize.min,
-  //                 crossAxisAlignment: CrossAxisAlignment.start,
-  //                 children: [
-  //                   // Title input
-  //                   TextField(
-  //                     controller: titleController,
-  //                     decoration: InputDecoration(
-  //                       labelText: 'Nama Event',
-  //                       border: OutlineInputBorder(
-  //                         borderRadius: BorderRadius.circular(8),
-  //                       ),
-  //                       contentPadding: const EdgeInsets.symmetric(
-  //                         horizontal: 12,
-  //                         vertical: 8,
-  //                       ),
-  //                     ),
-  //                   ),
-  //                   const SizedBox(height: 16),
-
-  //                   // Date picker
-  //                   ListTile(
-  //                     contentPadding: EdgeInsets.zero,
-  //                     leading: const Icon(Icons.calendar_today),
-  //                     title: const Text('Tanggal'),
-  //                     subtitle: Text(
-  //                       '${selectedDate.day} ${_monthNames[selectedDate.month - 1]} ${selectedDate.year}',
-  //                     ),
-  //                     onTap: () async {
-  //                       final DateTime? picked = await showDatePicker(
-  //                         context: context,
-  //                         initialDate: selectedDate,
-  //                         firstDate: DateTime(2020),
-  //                         lastDate: DateTime(2030),
-  //                       );
-  //                       if (picked != null) {
-  //                         setState(() {
-  //                           selectedDate = picked;
-  //                         });
-  //                       }
-  //                     },
-  //                   ),
-  //                   const SizedBox(height: 16),
-
-  //                   // Color picker
-  //                   const Text(
-  //                     'Warna:',
-  //                     style: TextStyle(
-  //                       fontSize: 16,
-  //                       fontWeight: FontWeight.w500,
-  //                     ),
-  //                   ),
-  //                   const SizedBox(height: 8),
-  //                   Wrap(
-  //                     spacing: 8,
-  //                     children:
-  //                         [
-  //                           Colors.blue,
-  //                           Colors.red,
-  //                           Colors.green,
-  //                           Colors.orange,
-  //                           Colors.purple,
-  //                           Colors.teal,
-  //                         ].map((color) {
-  //                           return GestureDetector(
-  //                             onTap: () {
-  //                               setState(() {
-  //                                 selectedColor = color;
-  //                               });
-  //                             },
-  //                             child: Container(
-  //                               width: 30,
-  //                               height: 30,
-  //                               decoration: BoxDecoration(
-  //                                 color: color,
-  //                                 shape: BoxShape.circle,
-  //                                 border: selectedColor == color
-  //                                     ? Border.all(
-  //                                         color: Colors.black,
-  //                                         width: 2,
-  //                                       )
-  //                                     : null,
-  //                               ),
-  //                             ),
-  //                           );
-  //                         }).toList(),
-  //                   ),
-  //                   const SizedBox(height: 16),
-
-  //                   // Type selection
-  //                   DropdownButtonFormField<String>(
-  //                     value: selectedType,
-  //                     decoration: InputDecoration(
-  //                       labelText: 'Tipe Event',
-  //                       border: OutlineInputBorder(
-  //                         borderRadius: BorderRadius.circular(8),
-  //                       ),
-  //                       contentPadding: const EdgeInsets.symmetric(
-  //                         horizontal: 12,
-  //                         vertical: 8,
-  //                       ),
-  //                     ),
-  //                     items:
-  //                         [
-  //                           'personal',
-  //                           'work',
-  //                           'holiday',
-  //                           'birthday',
-  //                           'meeting',
-  //                           'other',
-  //                         ].map((type) {
-  //                           return DropdownMenuItem(
-  //                             value: type,
-  //                             child: Text(type.toUpperCase()),
-  //                           );
-  //                         }).toList(),
-  //                     onChanged: (value) {
-  //                       setState(() {
-  //                         selectedType = value!;
-  //                         if (value == 'holiday') {
-  //                           isHoliday = true;
-  //                           selectedColor = Colors.red;
-  //                         }
-  //                       });
-  //                     },
-  //                   ),
-  //                   const SizedBox(height: 16),
-
-  //                   // Holiday checkbox
-  //                   CheckboxListTile(
-  //                     contentPadding: EdgeInsets.zero,
-  //                     title: const Text('Hari Libur'),
-  //                     subtitle: const Text('Tandai sebagai hari libur'),
-  //                     value: isHoliday,
-  //                     onChanged: (value) {
-  //                       setState(() {
-  //                         isHoliday = value ?? false;
-  //                       });
-  //                     },
-  //                   ),
-  //                 ],
-  //               ),
-  //             ),
-  //             actions: [
-  //               TextButton(
-  //                 onPressed: () => Navigator.pop(context),
-  //                 child: const Text(
-  //                   'Batal',
-  //                   style: TextStyle(color: Colors.grey),
-  //                 ),
-  //               ),
-  //               ElevatedButton(
-  //                 onPressed: () {
-  //                   if (titleController.text.isNotEmpty) {
-  //                     final event = CalendarEvent(
-  //                       title: titleController.text,
-  //                       color: selectedColor,
-  //                       type: selectedType,
-  //                       isHoliday: isHoliday,
-  //                     );
-
-  //                     CalendarEventService.addCustomEvent(selectedDate, event);
-
-  //                     // Update local events
-  //                     final dateKey = DateTime(
-  //                       selectedDate.year,
-  //                       selectedDate.month,
-  //                       selectedDate.day,
-  //                     );
-  //                     if (_events.containsKey(dateKey)) {
-  //                       _events[dateKey]!.add(event);
-  //                     } else {
-  //                       _events[dateKey] = [event];
-  //                     }
-
-  //                     setState(() {});
-  //                     Navigator.pop(context);
-
-  //                     ScaffoldMessenger.of(context).showSnackBar(
-  //                       SnackBar(
-  //                         content: Text(
-  //                           'Event "${titleController.text}" berhasil ditambahkan',
-  //                         ),
-  //                         backgroundColor: Colors.green,
-  //                       ),
-  //                     );
-  //                   }
-  //                 },
-  //                 style: ElevatedButton.styleFrom(
-  //                   backgroundColor: const Color(0xFF3B82F6),
-  //                   foregroundColor: Colors.white,
-  //                 ),
-  //                 child: const Text('Simpan'),
-  //               ),
-  //             ],
-  //           );
-  //         },
-  //       );
-  //     },
-  //   );
-  // }
 }

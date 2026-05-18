@@ -16,6 +16,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../Services/dlservice.dart';
 
+// ── helper ──────────────────────────────────────────────────────────
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
+
 class AbsensiScreen extends StatefulWidget {
   final bool isCheckOut;
   final bool showBackButton;
@@ -32,14 +36,14 @@ class AbsensiScreen extends StatefulWidget {
 
 class _AbsensiScreenState extends State<AbsensiScreen>
     with TickerProviderStateMixin {
-  // Camera related
+  // Camera
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
   bool _isCameraInitialized = false;
   File? _capturedImage;
   Uint8List? _capturedImageBytes;
 
-  // Existing variables
+  // State
   String _locationInfo = "Memuat lokasi...";
   bool _isLoadingLocation = true;
   bool _isCheckOut = false;
@@ -49,25 +53,21 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   bool _isAttendanceSubmitted = false;
   bool _isCompanyUser = false;
 
-  // ─── AUTO-RETRY ────────────────────────────────────────────────────────────
-  // Ketika verifikasi gagal, sistem otomatis coba ulang hingga _maxAutoRetry kali
-  // tanpa interaksi user. Setiap retry ada jeda kecil agar kamera stable.
+  // Auto-retry
   static const int _maxAutoRetry = 3;
   int _autoRetryCount = 0;
   bool _isAutoRetrying = false;
   Timer? _autoRetryTimer;
-  int _retryCountdown = 0; // countdown detik sebelum retry
+  int _retryCountdown = 0;
 
-  // Location related
+  // Location
   List<Map<String, dynamic>> _officeLocations = [];
   Map<String, dynamic>? _nearestOfficeLocation;
   Position? _currentPosition;
 
-  // Timer dan stream controllers
   Timer? _locationTimer;
   StreamSubscription<Position>? _positionStream;
 
-  // Animation untuk pulse saat processing
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
@@ -91,12 +91,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Future<void> _detectUserMode() async {
     final prefs = await SharedPreferences.getInstance();
-
-    String userId = prefs.getString('UserID') ?? '';
-    String email = prefs.getString('Email') ?? '';
-
+    final userId = prefs.getString('UserID') ?? '';
+    final email = prefs.getString('Email') ?? '';
     _isCompanyUser = await isCompanyUser(userId, email);
-
     await prefs.setBool('isCompanyUser', _isCompanyUser);
   }
 
@@ -138,21 +135,18 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
       _cameraController = CameraController(
         camera,
-        ResolutionPreset.high, // ← Naikan ke HIGH agar gambar lebih jelas
+        ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
 
       await _cameraController!.initialize();
 
-      // ─── Set exposure ke auto agar pencahayaan adaptif ─────────────────────
       if (_cameraController!.value.isInitialized) {
         try {
           await _cameraController!.setExposureMode(ExposureMode.auto);
           await _cameraController!.setFocusMode(FocusMode.auto);
-        } catch (_) {
-          // Tidak semua device support, abaikan
-        }
+        } catch (_) {}
       }
 
       if (mounted) setState(() => _isCameraInitialized = true);
@@ -161,8 +155,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     }
   }
 
-  // ─── CAPTURE + PROCESS (dengan warm-up delay) ──────────────────────────────
-  // Tambah delay 800ms sebelum capture agar sensor kamera stabil
   Future<void> _captureImageFromCamera({bool isAutoRetry = false}) async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
@@ -177,11 +169,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             : "📸 Mengambil foto...";
       });
 
-      // Warm-up: beri kamera waktu adjust exposure sebelum capture
       await Future.delayed(Duration(milliseconds: isAutoRetry ? 1200 : 800));
 
       final XFile imageFile = await _cameraController!.takePicture();
-
       if (!mounted) return;
 
       final Uint8List imageBytes = await imageFile.readAsBytes();
@@ -208,7 +198,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Future<void> _loadOfficeLocations() async {
     try {
-      final tokenResponse = await http
+      final tokenResp = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -216,11 +206,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           )
           .timeout(const Duration(seconds: 10));
 
-      if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final token = tokenData['access_token'];
-
-        final response = await http
+      if (tokenResp.statusCode == 200) {
+        final token = json.decode(tokenResp.body)['access_token'];
+        final resp = await http
             .get(
               Uri.parse('$baseURL/api/asn/office/locations'),
               headers: {
@@ -230,9 +218,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             )
             .timeout(const Duration(seconds: 10));
 
-        if (response.statusCode == 200) {
-          final jsonData = json.decode(response.body);
-          final List<dynamic> data = jsonData['data'] ?? [];
+        if (resp.statusCode == 200) {
+          final data = (json.decode(resp.body)['data'] ?? []) as List<dynamic>;
           if (mounted) {
             setState(() {
               _officeLocations = data
@@ -270,7 +257,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   Future<void> _checkFaceRegistration() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      String userId = prefs.getString('UserID') ?? '';
+      final userId = prefs.getString('UserID') ?? '';
       if (userId.isNotEmpty) {
         final result = await FaceRecognitionService.checkFaceRegistration(
           userId: userId,
@@ -280,14 +267,13 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         }
       }
     } catch (e) {
-      // Abaikan, tetap lanjut
+      // abaikan
     }
   }
 
   Future<bool> isCompanyUser(String userId, String email) async {
     try {
-      // 🔑 Ambil token
-      final tokenResponse = await http
+      final tokenResp = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -295,19 +281,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           )
           .timeout(const Duration(seconds: 10));
 
-      if (tokenResponse.statusCode != 200) {
-        throw Exception('Gagal ambil token: ${tokenResponse.statusCode}');
-      }
+      if (tokenResp.statusCode != 200) return false;
+      final token = json.decode(tokenResp.body)['access_token'];
+      if (token == null || token.isEmpty) return false;
 
-      final tokenData = json.decode(tokenResponse.body);
-      final token = tokenData['access_token'];
-
-      if (token == null || token.isEmpty) {
-        throw Exception('Token kosong');
-      }
-
-      // 📡 Hit API company check
-      final response = await http
+      final resp = await http
           .post(
             Uri.parse('$baseURL/api/asn/getCompanyInfo'),
             headers: {
@@ -318,23 +296,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           )
           .timeout(const Duration(seconds: 10));
 
-      // ✅ Logic utama
-      if (response.statusCode == 200) {
-        final responseData = json.decode(response.body);
-
-        // 👉 Optional: cek isi data kalau API return payload
-        if (responseData != null) {
-          return true; // ✅ COMPANY
-        }
-      }
-
-      return false; // ❌ PUBLIC
+      return resp.statusCode == 200 && json.decode(resp.body) != null;
     } catch (e) {
       return false;
     }
   }
 
-  // ─── PROSES FACE RECOGNITION ───────────────────────────────────────────────
   Future<void> _processFaceRecognition() async {
     if ((_capturedImage == null && _capturedImageBytes == null) || !mounted) {
       return;
@@ -342,7 +309,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      String userId = prefs.getString('UserID') ?? '';
+      final userId = prefs.getString('UserID') ?? '';
 
       if (userId.isEmpty) {
         setState(() {
@@ -353,20 +320,17 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         return;
       }
 
-      // Convert ke base64
-      String imageBase64 = kIsWeb
+      final imageBase64 = kIsWeb
           ? base64Encode(_capturedImageBytes!)
           : FaceRecognitionService.fileToBase64(_capturedImage!);
 
       if (!FaceRecognitionService.isImageQualityGood(imageBase64)) {
-        // Kualitas buruk → langsung auto retry tanpa tampilkan error ke user
         _scheduleAutoRetry("Foto kurang jelas, mengambil ulang...");
         return;
       }
 
       if (!_isFaceRegistered) {
         setState(() => _faceVerificationMessage = "Mendaftarkan wajah...");
-
         final registerResult = await FaceRecognitionService.registerFace(
           userId: userId,
           faceImageBase64: imageBase64,
@@ -382,7 +346,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             await Future.delayed(const Duration(seconds: 1));
             await _submitAttendance(userId, imageBase64);
           } else {
-            // Registrasi gagal → retry jika masih ada kesempatan
             _scheduleAutoRetry(
               registerResult['message'] ?? "Gagal mendaftarkan wajah",
             );
@@ -392,9 +355,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         await _submitAttendance(userId, imageBase64);
       }
     } catch (e) {
-      if (mounted) {
-        _scheduleAutoRetry("Error: ${e.toString()}");
-      }
+      if (mounted) _scheduleAutoRetry("Error: ${e.toString()}");
     } finally {
       if (mounted && !_isAutoRetrying) {
         setState(() => _isProcessingFace = false);
@@ -402,16 +363,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     }
   }
 
-  // ─── AUTO-RETRY LOGIC ──────────────────────────────────────────────────────
-  /// Dijadwalkan setelah verifikasi gagal.
-  /// Jika masih ada sisa retry → countdown lalu ambil foto otomatis.
-  /// Jika sudah habis → tampilkan pesan error final.
   void _scheduleAutoRetry(String failReason) {
     if (!mounted) return;
 
     if (_autoRetryCount < _maxAutoRetry) {
       _autoRetryCount++;
-      _retryCountdown = 2; // 2 detik countdown
+      _retryCountdown = 2;
 
       setState(() {
         _isAutoRetrying = true;
@@ -421,7 +378,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         _capturedImageBytes = null;
       });
 
-      // Countdown timer
       _autoRetryTimer?.cancel();
       _autoRetryTimer = Timer.periodic(const Duration(seconds: 1), (t) {
         if (!mounted) {
@@ -439,7 +395,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         }
       });
     } else {
-      // Semua retry habis → tampilkan error, reset untuk manual retry
       _autoRetryCount = 0;
       setState(() {
         _isProcessingFace = false;
@@ -469,9 +424,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
       if (mounted) {
         if (verifyResult['success']) {
-          // Reset retry counter karena berhasil
           _autoRetryCount = 0;
-
           setState(() {
             _isAttendanceSubmitted = true;
             _isAutoRetrying = false;
@@ -479,12 +432,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             _faceVerificationMessage =
                 verifyResult['message'] ?? "Absensi berhasil";
           });
-
           _showSuccessDialog(verifyResult);
         } else {
-          // Gagal verify → auto retry / handle khusus
           final reason = verifyResult['message'] ?? "Verifikasi gagal";
-
           if (reason.contains('luar radius') ||
               reason.contains('radius kantor')) {
             _handleOutsideRadius(userId, imageBase64);
@@ -494,9 +444,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         }
       }
     } catch (e) {
-      if (mounted) {
-        _scheduleAutoRetry("Error koneksi: ${e.toString()}");
-      }
+      if (mounted) _scheduleAutoRetry("Error koneksi: ${e.toString()}");
     }
   }
 
@@ -527,12 +475,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            const Text(
               'Anda berada di luar radius kantor terdekat.\n\n'
               'Apakah Anda sedang dinas luar? '
               'Absensi Anda akan dicatat sebagai DINAS LUAR '
               'dan memerlukan persetujuan atasan serta upload bukti kegiatan.',
-              style: const TextStyle(fontSize: 13),
+              style: TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 12),
             Container(
@@ -817,13 +765,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
     for (var office in _officeLocations) {
       try {
-        final double officeLat = (office['latitude'] as num).toDouble();
-        final double officeLon = (office['longitude'] as num).toDouble();
         final double distance = Geolocator.distanceBetween(
           userPosition.latitude,
           userPosition.longitude,
-          officeLat,
-          officeLon,
+          (office['latitude'] as num).toDouble(),
+          (office['longitude'] as num).toDouble(),
         );
         if (distance < minDistance) {
           minDistance = distance;
@@ -902,21 +848,529 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     }
   }
 
-  // ─── WIDGETS ───────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final isWeb = _isWideScreen(context);
 
-  Widget _buildLocationInfo() {
+    return Scaffold(
+      appBar: _buildAppBar(),
+      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: Text(
+        _isCheckOut ? 'Check Out Face ID' : 'Check In Face ID',
+        style: const TextStyle(
+          color: Color(0xFF1E293B),
+          fontWeight: FontWeight.w600,
+          fontSize: 18,
+        ),
+      ),
+      backgroundColor: Colors.white,
+      elevation: 0,
+      centerTitle: true,
+      leading: widget.showBackButton
+          ? IconButton(
+              icon: Icon(Icons.arrow_back, color: Colors.grey[800]),
+              onPressed: _isAutoRetrying
+                  ? null
+                  : () => _goBackToHome(
+                      attendanceSuccess: _isAttendanceSubmitted,
+                    ),
+            )
+          : null,
+      actions: [
+        IconButton(
+          icon: Icon(
+            Icons.refresh,
+            color: _isCheckOut ? Colors.red[400] : Colors.blue,
+          ),
+          onPressed: (_isLoadingLocation || _isAutoRetrying)
+              ? null
+              : _refreshLocation,
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli — scroll vertikal)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildLocationInfo(),
+          _buildCameraPreview(),
+          _buildRetryIndicator(),
+          _buildActionButton(),
+          _buildTips(),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: kamera kiri | info + tombol kanan)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    final accentColor = _isCheckOut ? Colors.red[600]! : Colors.blue[700]!;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Kolom kiri: Kamera ─────────────────────────────
+        Expanded(
+          flex: 5,
+          child: Container(
+            color: Colors.black,
+            child: Column(
+              children: [
+                // Kamera — isi penuh kolom kiri
+                Expanded(child: _buildWebCameraArea()),
+                // Retry indicator
+                if (_autoRetryCount > 0 || _isAutoRetrying)
+                  _buildRetryIndicatorWeb(accentColor),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Kolom kanan: Info + Tombol ─────────────────────
+        SizedBox(
+          width: 320,
+          child: Container(
+            height: double.infinity,
+            color: Colors.white,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Header mode
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: accentColor.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: accentColor.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _isCheckOut ? Icons.logout : Icons.login,
+                          color: accentColor,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _isCheckOut ? 'Mode Check Out' : 'Mode Check In',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: accentColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Lokasi
+                  _buildLocationInfoWeb(),
+                  const SizedBox(height: 16),
+
+                  // Status verifikasi
+                  if (_faceVerificationMessage.isNotEmpty) ...[
+                    _buildVerificationStatusWeb(),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Tombol aksi
+                  _buildActionButtonWeb(accentColor),
+                  const SizedBox(height: 16),
+
+                  // Tips
+                  if (!_isAttendanceSubmitted && !_isProcessingFace)
+                    _buildTipsWeb(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Kamera area untuk web (full height kolom kiri) ────
+  Widget _buildWebCameraArea() {
+    return (_capturedImage != null || _capturedImageBytes != null)
+        ? _buildWebCapturedView()
+        : _buildWebLiveCameraView();
+  }
+
+  Widget _buildWebCapturedView() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        kIsWeb
+            ? Image.memory(_capturedImageBytes!, fit: BoxFit.cover)
+            : Image.file(_capturedImage!, fit: BoxFit.cover),
+        if (_isProcessingFace)
+          AnimatedBuilder(
+            animation: _pulseAnimation,
+            builder: (_, __) => Container(
+              color: Colors.black.withOpacity(0.55),
+              child: Center(
+                child: Transform.scale(
+                  scale: _pulseAnimation.value,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 3,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _isAutoRetrying
+                            ? "🔄 Mencoba ulang..."
+                            : "🔍 Memverifikasi wajah...",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildWebLiveCameraView() {
+    if (_isCameraInitialized && _cameraController != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          CameraPreview(_cameraController!),
+          RealtimeFaceGuide(
+            isProcessing: _isProcessingFace,
+            showRegistrationInfo: !_isFaceRegistered,
+            isCheckOut: _isCheckOut,
+          ),
+        ],
+      );
+    }
+    return Container(
+      color: Colors.black87,
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+            SizedBox(height: 16),
+            Text(
+              "Mempersiapkan kamera...",
+              style: TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Lokasi web ────────────────────────────────────────
+  Widget _buildLocationInfoWeb() {
     final isInside =
-        _locationInfo.contains("Dalam") ||
-        _locationInfo.contains("dalam") ||
-        _locationInfo.contains("✅");
+        _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
+    final isError =
+        _locationInfo.contains("Error") ||
+        _locationInfo.contains("Timeout") ||
+        _locationInfo.contains("❌");
+
+    final color = isInside
+        ? Colors.green
+        : isError
+        ? Colors.red
+        : Colors.orange;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isInside
+                    ? Icons.location_on
+                    : isError
+                    ? Icons.location_off
+                    : Icons.location_searching,
+                color: color,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Lokasi',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: (_isLoadingLocation || _isAutoRetrying)
+                    ? null
+                    : _refreshLocation,
+                child: Icon(
+                  Icons.refresh,
+                  size: 16,
+                  color: (_isLoadingLocation || _isAutoRetrying)
+                      ? Colors.grey
+                      : color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _locationInfo,
+            style: TextStyle(
+              fontSize: 12,
+              color: _isLoadingLocation ? Colors.grey[500] : Colors.black87,
+            ),
+          ),
+          if (_isLoadingLocation) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(color: color),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Status verifikasi web ─────────────────────────────
+  Widget _buildVerificationStatusWeb() {
+    final color = _isProcessingFace
+        ? Colors.blue
+        : _isAttendanceSubmitted
+        ? Colors.green
+        : _isAutoRetrying
+        ? Colors.orange
+        : Colors.red;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            _isProcessingFace
+                ? Icons.hourglass_top
+                : _isAttendanceSubmitted
+                ? Icons.check_circle
+                : Icons.info_outline,
+            color: color,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _faceVerificationMessage,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.black87,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Tombol aksi web ───────────────────────────────────
+  Widget _buildActionButtonWeb(Color accentColor) {
+    final bool isInside =
+        _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
+    final bool canTakePhoto =
+        !_isProcessingFace && !_isAutoRetrying && isInside;
+
+    final String label = _isProcessingFace
+        ? "Memproses..."
+        : _isAutoRetrying
+        ? "Mencoba ulang..."
+        : (_capturedImage == null && _capturedImageBytes == null)
+        ? "Ambil Foto"
+        : _isAttendanceSubmitted
+        ? "Foto Ulang"
+        : "Coba Lagi";
+
+    final IconData icon = _isProcessingFace
+        ? Icons.hourglass_empty
+        : Icons.camera_alt;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ElevatedButton.icon(
+          onPressed: !canTakePhoto ? null : () => _captureImageFromCamera(),
+          icon: Icon(icon, color: Colors.white, size: 18),
+          label: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: !canTakePhoto ? Colors.grey : accentColor,
+            disabledBackgroundColor: Colors.grey[400],
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        if (widget.showBackButton) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _isAutoRetrying
+                ? null
+                : () =>
+                      _goBackToHome(attendanceSuccess: _isAttendanceSubmitted),
+            icon: Icon(Icons.arrow_back, size: 16, color: Colors.grey[700]),
+            label: Text('Kembali', style: TextStyle(color: Colors.grey[700])),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              side: BorderSide(color: Colors.grey.shade300),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Tips web ──────────────────────────────────────────
+  Widget _buildTipsWeb() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.blue[200]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "💡 Tips agar berhasil:",
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Colors.blue[800],
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (var tip in [
+            "Posisikan wajah tepat di tengah oval",
+            "Pastikan wajah terang, hindari cahaya belakang",
+            "Lepaskan kacamata hitam atau masker",
+            "Jaga jarak 30–50 cm dari kamera",
+            "Tatap langsung ke kamera",
+          ])
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                "• $tip",
+                style: TextStyle(fontSize: 12, color: Colors.blue[700]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Retry indicator web ───────────────────────────────
+  Widget _buildRetryIndicatorWeb(Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Colors.black87,
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "Percobaan otomatis: $_autoRetryCount / $_maxAutoRetry",
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+              if (_retryCountdown > 0)
+                Text(
+                  "Dalam ${_retryCountdown}s...",
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: _autoRetryCount / _maxAutoRetry,
+            backgroundColor: Colors.white24,
+            color: color,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS (mobile)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildLocationInfo() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isInside =
+        _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
     final isError =
         _locationInfo.contains("Error") ||
         _locationInfo.contains("Timeout") ||
         _locationInfo.contains("❌");
 
     return Container(
-      padding: EdgeInsets.all(MediaQuery.of(context).size.width * 0.04),
-      margin: EdgeInsets.all(MediaQuery.of(context).size.width * 0.04),
+      padding: EdgeInsets.all(screenWidth * 0.04),
+      margin: EdgeInsets.all(screenWidth * 0.04),
       decoration: BoxDecoration(
         color: isInside
             ? Colors.green[50]
@@ -947,16 +1401,16 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                     : isError
                     ? Colors.red
                     : Colors.orange,
-                size: MediaQuery.of(context).size.width * 0.06,
+                size: screenWidth * 0.06,
               ),
-              SizedBox(width: MediaQuery.of(context).size.width * 0.02),
+              SizedBox(width: screenWidth * 0.02),
               Expanded(
                 child: Text(
                   _locationInfo,
                   style: TextStyle(
                     fontWeight: FontWeight.w500,
                     color: _isLoadingLocation ? Colors.grey : Colors.black87,
-                    fontSize: MediaQuery.of(context).size.width * 0.035,
+                    fontSize: screenWidth * 0.035,
                   ),
                 ),
               ),
@@ -964,9 +1418,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           ),
           if (_isLoadingLocation)
             Padding(
-              padding: EdgeInsets.only(
-                top: MediaQuery.of(context).size.width * 0.02,
-              ),
+              padding: EdgeInsets.only(top: screenWidth * 0.02),
               child: const LinearProgressIndicator(),
             ),
         ],
@@ -975,11 +1427,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   }
 
   Widget _buildCameraPreview() {
-    final screenSize = MediaQuery.of(context).size;
+    final screenWidth = MediaQuery.of(context).size.width;
     return Container(
-      width: screenSize.width,
-      height: screenSize.width * 1.33,
-      margin: EdgeInsets.symmetric(horizontal: screenSize.width * 0.04),
+      width: screenWidth,
+      height: screenWidth * 1.33,
+      margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.04),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         color: Colors.black,
@@ -1010,7 +1462,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               ? Image.memory(_capturedImageBytes!, fit: BoxFit.cover)
               : Image.file(_capturedImage!, fit: BoxFit.cover),
         ),
-        // Processing overlay dengan pulse animation
         if (_isProcessingFace)
           AnimatedBuilder(
             animation: _pulseAnimation,
@@ -1071,24 +1522,23 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           ),
         ],
       );
-    } else {
-      return Container(
-        color: Colors.black87,
-        child: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-              SizedBox(height: 16),
-              Text(
-                "Mempersiapkan kamera...",
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ],
-          ),
-        ),
-      );
     }
+    return Container(
+      color: Colors.black87,
+      child: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+            SizedBox(height: 16),
+            Text(
+              "Mempersiapkan kamera...",
+              style: TextStyle(color: Colors.white, fontSize: 16),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildStatusOverlay() {
@@ -1125,7 +1575,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ─── RETRY PROGRESS INDICATOR ──────────────────────────────────────────────
   Widget _buildRetryIndicator() {
     if (_autoRetryCount == 0 && !_isAutoRetrying) {
       return const SizedBox.shrink();
@@ -1166,14 +1615,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Widget _buildActionButton() {
     final screenWidth = MediaQuery.of(context).size.width;
-    final bool isInRadius =
-        _locationInfo.contains("Dalam") ||
-        _locationInfo.contains("dalam") ||
-        _locationInfo.contains("✅");
-
-    // Disable tombol ambil foto jika di luar radius
+    final bool isInside =
+        _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
     final bool canTakePhoto =
-        !_isProcessingFace && !_isAutoRetrying && isInRadius;
+        !_isProcessingFace && !_isAutoRetrying && isInside;
 
     return Container(
       width: double.infinity,
@@ -1299,62 +1744,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       ),
     );
   }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _isCheckOut ? 'Check Out Face ID' : 'Check In Face ID',
-          style: const TextStyle(
-            color: Color(0xFF1E293B),
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
-          ),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: widget.showBackButton
-            ? IconButton(
-                icon: Icon(Icons.arrow_back, color: Colors.grey[800]),
-                onPressed: _isAutoRetrying
-                    ? null
-                    : () => _goBackToHome(
-                        attendanceSuccess: _isAttendanceSubmitted,
-                      ),
-              )
-            : null,
-        actions: [
-          IconButton(
-            icon: Icon(
-              Icons.refresh,
-              color: _isCheckOut ? Colors.red[400] : Colors.blue,
-            ),
-            onPressed: (_isLoadingLocation || _isAutoRetrying)
-                ? null
-                : _refreshLocation,
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              _buildLocationInfo(),
-              _buildCameraPreview(),
-              _buildRetryIndicator(),
-              _buildActionButton(),
-              _buildTips(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-// ─── REALTIME FACE GUIDE ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// REALTIME FACE GUIDE (tidak berubah)
+// ─────────────────────────────────────────────────────────────────
 class RealtimeFaceGuide extends StatelessWidget {
   final bool isProcessing;
   final bool showRegistrationInfo;
@@ -1370,15 +1764,15 @@ class RealtimeFaceGuide extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final guideWidth = size.width * 0.6;
+    final isWeb = size.width >= 768;
+    // Di web, guide lebih kecil karena kamera mengisi kolom kiri
+    final guideWidth = isWeb ? size.width * 0.25 : size.width * 0.6;
     final guideHeight = guideWidth * 1.2;
     final accentColor = isCheckOut ? Colors.red[300]! : Colors.blue[300]!;
 
     return Stack(
       children: [
         Container(color: Colors.black.withOpacity(0.35)),
-
-        // Oval face guide
         Center(
           child: Container(
             width: guideWidth,
@@ -1392,8 +1786,6 @@ class RealtimeFaceGuide extends StatelessWidget {
             ),
           ),
         ),
-
-        // Corner guides
         Center(
           child: SizedBox(
             width: guideWidth,
@@ -1408,8 +1800,6 @@ class RealtimeFaceGuide extends StatelessWidget {
             ),
           ),
         ),
-
-        // Instructions
         Positioned(
           bottom: 80,
           left: 20,
@@ -1433,7 +1823,6 @@ class RealtimeFaceGuide extends StatelessWidget {
             ),
           ),
         ),
-
         if (showRegistrationInfo && !isProcessing)
           Positioned(
             top: 40,
@@ -1459,7 +1848,6 @@ class RealtimeFaceGuide extends StatelessWidget {
               ),
             ),
           ),
-
         if (isProcessing)
           Positioned(
             top: 40,

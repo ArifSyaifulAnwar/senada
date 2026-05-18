@@ -6,7 +6,6 @@ import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-// Ganti dengan URL API kamu
 const String apiUrl = '$baseURL/api/asn/file/summary/all/data';
 
 class AttendanceSummaryAdmin extends StatefulWidget {
@@ -49,9 +48,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
   Future<bool> _updateSummaryCard(AttendanceCardModel model) async {
     try {
       final token = await _getToken();
-      if (token == null) {
-        throw Exception('Gagal mendapatkan access token');
-      }
+      if (token == null) throw Exception('Gagal mendapatkan access token');
 
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/file/summary/update/data'),
@@ -70,9 +67,8 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         return responseData['success'] == true;
-      } else {
-        return false;
       }
+      return false;
     } catch (e) {
       return false;
     }
@@ -89,7 +85,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     int minutes,
   ) async {
     try {
-      // Format waktu istirahat
       String formattedBreakTime;
       String subText;
 
@@ -120,7 +115,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       );
 
       final success = await _updateSummaryCard(updatedModel);
-
       if (success) {
         _refreshData();
       } else {
@@ -151,7 +145,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       );
 
       final success = await _updateSummaryCard(updatedModel);
-
       if (success) {
         _refreshData();
       } else {
@@ -171,9 +164,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
 
   Future<List<AttendanceCardModel>> fetchSummaryCards() async {
     final token = await _getToken();
-    if (token == null) {
-      throw Exception('Gagal mendapatkan token');
-    }
+    if (token == null) throw Exception('Gagal mendapatkan token');
 
     final response = await http.post(
       Uri.parse(apiUrl),
@@ -191,7 +182,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     }
   }
 
-  // Method untuk menampilkan dialog edit berdasarkan tipe card
   void _showEditDialog(BuildContext context, AttendanceCardModel model) {
     switch (model.title.toLowerCase()) {
       case 'jam masuk':
@@ -226,7 +216,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       );
 
       final success = await _updateSummaryCard(updatedModel);
-
       if (success) {
         _refreshData();
       } else {
@@ -248,16 +237,13 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     BuildContext context,
     AttendanceCardModel model,
   ) async {
-    // Parse waktu saat ini dari mainText
     TimeOfDay initialTime = TimeOfDay.now();
-
     try {
       String timeText = model.mainText.replaceAll('WIB', '').trim();
       final timeParts = timeText.split(':');
       if (timeParts.length >= 2) {
         final hour = int.tryParse(timeParts[0]);
         final minute = int.tryParse(timeParts[1]);
-
         if (hour != null &&
             minute != null &&
             hour >= 0 &&
@@ -271,7 +257,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       initialTime = TimeOfDay.now();
     }
 
-    // Langsung panggil showTimePicker - SAMA PERSIS seperti di OvertimeFormScreen
     final selectedTime = await showTimePicker(
       context: context,
       initialTime: initialTime,
@@ -307,10 +292,8 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       },
     );
 
-    // Handle hasil dari TimePicker
     if (selectedTime != null) {
       await _saveTimeChange(model, selectedTime);
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -343,13 +326,11 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     }
   }
 
-  // Fungsi _saveTimeChange tetap sama seperti sebelumnya
   Future<void> _saveTimeChange(
     AttendanceCardModel model,
     TimeOfDay time,
   ) async {
     try {
-      // Format waktu ke string (HH:MM)
       final hour = time.hour.toString().padLeft(2, '0');
       final minute = time.minute.toString().padLeft(2, '0');
       final formattedTime = '$hour:$minute';
@@ -365,7 +346,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
       );
 
       final success = await _updateSummaryCard(updatedModel);
-
       if (success) {
         _refreshData();
       } else {
@@ -399,11 +379,8 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     }
   }
 
-  // Dialog untuk edit waktu istirahat
   void _showBreakTimeDialog(BuildContext context, AttendanceCardModel model) {
-    int selectedMinutes = 60; // Default 60 menit
-
-    // Parse waktu istirahat saat ini
+    int selectedMinutes = 60;
     try {
       final currentText = model.mainText.replaceAll(RegExp(r'[^\d]'), '');
       if (currentText.isNotEmpty) {
@@ -429,10 +406,13 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                     color: model.getIconColor(),
                     size: 24,
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     'Edit ${model.title}',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -447,9 +427,9 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                       color: Colors.grey[700],
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Container(
-                    padding: EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
@@ -461,12 +441,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                         IconButton(
                           onPressed: () {
                             if (selectedMinutes > 15) {
-                              setDialogState(() {
-                                selectedMinutes -= 15;
-                              });
+                              setDialogState(() => selectedMinutes -= 15);
                             }
                           },
-                          icon: Icon(Icons.remove_circle_outline),
+                          icon: const Icon(Icons.remove_circle_outline),
                           color: model.getIconColor(),
                         ),
                         Text(
@@ -480,18 +458,16 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                         IconButton(
                           onPressed: () {
                             if (selectedMinutes < 180) {
-                              setDialogState(() {
-                                selectedMinutes += 15;
-                              });
+                              setDialogState(() => selectedMinutes += 15);
                             }
                           },
-                          icon: Icon(Icons.add_circle_outline),
+                          icon: const Icon(Icons.add_circle_outline),
                           color: model.getIconColor(),
                         ),
                       ],
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'Rentang: 15 - 180 menit',
                     style: TextStyle(fontSize: 12, color: Colors.grey[500]),
@@ -526,7 +502,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: Text('Simpan'),
+                  child: const Text('Simpan'),
                 ),
               ],
             );
@@ -536,11 +512,8 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     );
   }
 
-  // Dialog untuk edit total hari
   void _showTotalDaysDialog(BuildContext context, AttendanceCardModel model) {
-    int selectedDays = 22; // Default 22 hari
-
-    // Parse total hari saat ini
+    int selectedDays = 22;
     try {
       final currentText = model.mainText.replaceAll(RegExp(r'[^\d]'), '');
       if (currentText.isNotEmpty) {
@@ -566,10 +539,13 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                     color: model.getIconColor(),
                     size: 24,
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     'Edit ${model.title}',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -584,9 +560,9 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                       color: Colors.grey[700],
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Container(
-                    padding: EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
@@ -598,12 +574,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                         IconButton(
                           onPressed: () {
                             if (selectedDays > 1) {
-                              setDialogState(() {
-                                selectedDays--;
-                              });
+                              setDialogState(() => selectedDays--);
                             }
                           },
-                          icon: Icon(Icons.remove_circle_outline),
+                          icon: const Icon(Icons.remove_circle_outline),
                           color: model.getIconColor(),
                         ),
                         Text(
@@ -617,18 +591,16 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                         IconButton(
                           onPressed: () {
                             if (selectedDays < 31) {
-                              setDialogState(() {
-                                selectedDays++;
-                              });
+                              setDialogState(() => selectedDays++);
                             }
                           },
-                          icon: Icon(Icons.add_circle_outline),
+                          icon: const Icon(Icons.add_circle_outline),
                           color: model.getIconColor(),
                         ),
                       ],
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'Rentang: 1 - 31 hari',
                     style: TextStyle(fontSize: 12, color: Colors.grey[500]),
@@ -663,7 +635,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: Text('Simpan'),
+                  child: const Text('Simpan'),
                 ),
               ],
             );
@@ -673,10 +645,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     );
   }
 
-  // Dialog untuk edit card lainnya
   void _showGenericEditDialog(BuildContext context, AttendanceCardModel model) {
-    final TextEditingController controller = TextEditingController();
-    controller.text = model.mainText;
+    final TextEditingController controller = TextEditingController(
+      text: model.mainText,
+    );
 
     showDialog(
       context: context,
@@ -688,10 +660,13 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
           title: Row(
             children: [
               Icon(model.getIconData(), color: model.getIconColor(), size: 24),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               Text(
                 'Edit ${model.title}',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -736,7 +711,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              child: Text('Simpan'),
+              child: const Text('Simpan'),
             ),
           ],
         );
@@ -744,12 +719,22 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // BUILD UTAMA — responsive grid
+  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final bool isWeb = screenWidth >= 768;
+
+    // PERBAIKAN UTAMA:
+    // Mobile  → padding dari screenWidth penuh (perilaku asli)
+    // Web     → padding 0, biarkan parent yang atur padding,
+    //           karena widget ini sudah di dalam kolom kanan yang lebih sempit
+    final double horizontalPadding = isWeb ? 0 : screenWidth * 0.04;
+
     const double baseWidth = 375;
-    final double scale = screenWidth / baseWidth;
-    final double horizontalPadding = screenWidth * 0.04;
+    final double scale = isWeb ? 1.0 : screenWidth / baseWidth;
     final double cardSpacing = 12 * scale;
 
     return FutureBuilder<List<AttendanceCardModel>>(
@@ -758,13 +743,45 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         } else if (snapshot.hasError) {
-          return Center(child: Text("Error: ${snapshot.error}"));
+          return Center(child: Text('Error: ${snapshot.error}'));
         } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text("Tidak ada data summary"));
+          return const Center(child: Text('Tidak ada data summary'));
         }
 
         final cards = snapshot.data!;
 
+        // Web: Row 4 kolom, tinggi mengikuti konten (tidak ada whitespace)
+        if (isWeb) {
+          final List<Widget> rows = [];
+          for (int i = 0; i < cards.length; i += 4) {
+            final rowCards = cards.sublist(
+              i,
+              i + 4 > cards.length ? cards.length : i + 4,
+            );
+            rows.add(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (int j = 0; j < rowCards.length; j++) ...[
+                    if (j > 0) const SizedBox(width: 12),
+                    Expanded(child: _buildCard(context, rowCards[j], scale)),
+                  ],
+                  for (int j = rowCards.length; j < 4; j++) ...[
+                    const SizedBox(width: 12),
+                    const Expanded(child: SizedBox()),
+                  ],
+                ],
+              ),
+            );
+            if (i + 4 < cards.length) rows.add(const SizedBox(height: 12));
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: rows,
+          );
+        }
+
+        // Mobile: layout 2 kolom asli (Row pairs)
         return Padding(
           padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
           child: Column(
@@ -783,7 +800,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
                       SizedBox(width: cardSpacing),
                       Expanded(child: _buildCard(context, second, scale)),
                     ] else
-                      Expanded(child: Container()),
+                      const Expanded(child: SizedBox()),
                   ],
                 ),
               );
@@ -799,78 +816,89 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     AttendanceCardModel model,
     double scale,
   ) {
+    final bool isWeb = MediaQuery.of(context).size.width >= 768;
+
     return Container(
-      padding: EdgeInsets.all(16 * scale),
+      padding: EdgeInsets.symmetric(
+        horizontal: isWeb ? 14 : 16 * scale,
+        vertical: isWeb ? 12 : 16 * scale,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12 * scale),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
-            blurRadius: 8 * scale,
-            offset: Offset(0, 2 * scale),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // Header: icon + judul + edit
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                padding: EdgeInsets.all(6 * scale),
+                padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: model.getIconColor().withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8 * scale),
+                  borderRadius: BorderRadius.circular(7),
                 ),
                 child: Icon(
                   model.getIconData(),
                   color: model.getIconColor(),
-                  size: 16 * scale,
+                  size: 14,
                 ),
               ),
-              SizedBox(width: 8 * scale),
+              const SizedBox(width: 7),
               Expanded(
                 child: Text(
                   model.title,
                   style: TextStyle(
-                    fontSize: 12 * scale,
+                    fontSize: 11,
                     fontWeight: FontWeight.w500,
                     color: Colors.grey[600],
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ),
-              // TAMBAHAN: Icon pencil untuk edit
               GestureDetector(
                 onTap: () => _showEditDialog(context, model),
                 child: Container(
-                  padding: EdgeInsets.all(4 * scale),
+                  padding: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(6 * scale),
+                    borderRadius: BorderRadius.circular(5),
                   ),
-                  child: Icon(
-                    Icons.edit,
-                    size: 14 * scale,
-                    color: Colors.grey[600],
-                  ),
+                  child: Icon(Icons.edit, size: 12, color: Colors.grey[500]),
                 ),
               ),
             ],
           ),
-          SizedBox(height: 12 * scale),
+          const SizedBox(height: 8),
+          // Nilai utama
           Text(
             model.mainText,
             style: TextStyle(
-              fontSize: 18 * scale,
+              fontSize: isWeb ? 16 : 18 * scale,
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
-          SizedBox(height: 4 * scale),
+          const SizedBox(height: 3),
+          // Sub teks
           Text(
             model.subText,
-            style: TextStyle(fontSize: 11 * scale, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
         ],
       ),
