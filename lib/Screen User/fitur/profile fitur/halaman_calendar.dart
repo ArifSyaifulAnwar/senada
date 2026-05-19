@@ -54,25 +54,16 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
 
   Future<void> _loadEvents() async {
     setState(() => _isLoadingEvents = true);
-    try {
-      final events = await CalendarEventService.getDayoffEvents(
-        _focusedDate.year,
-      );
+    // Service sudah handle semua error secara internal dan
+    // selalu return map (bisa kosong atau fallback), tidak pernah throw.
+    final events = await CalendarEventService.getDayoffEvents(
+      _focusedDate.year,
+    );
+    if (mounted) {
       setState(() {
         _events = events;
         _isLoadingEvents = false;
       });
-    } catch (e) {
-      setState(() => _isLoadingEvents = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal memuat event: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
     }
   }
 
@@ -108,12 +99,8 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
   }
 
   Future<void> _loadEventsForYear(int year) async {
-    try {
-      final events = await CalendarEventService.getDayoffEvents(year);
-      setState(() => _events.addAll(events));
-    } catch (e) {
-      rethrow;
-    }
+    final events = await CalendarEventService.getDayoffEvents(year);
+    if (mounted) setState(() => _events.addAll(events));
   }
 
   void _goToToday() {
@@ -532,14 +519,25 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
 
   Widget _buildEventsSection() {
     final today = DateTime.now();
-    final todayEvents = _getEventsForDay(today);
-    final thisMonthEvents = <DateTime, List<CalendarEvent>>{};
+    // "Hari Ini" hanya ditampilkan kalau sedang melihat bulan yang sama
+    final isCurrentMonth =
+        _focusedDate.year == today.year && _focusedDate.month == today.month;
+    final todayEvents = isCurrentMonth
+        ? _getEventsForDay(today)
+        : <CalendarEvent>[];
 
-    _events.forEach((date, events) {
-      if (date.month == _focusedDate.month && date.year == _focusedDate.year) {
-        thisMonthEvents[date] = events;
+    // Filter event untuk bulan yang sedang dilihat
+    final thisMonthEvents = <DateTime, List<CalendarEvent>>{};
+    for (final entry in _events.entries) {
+      final date = entry.key;
+      if (date.year == _focusedDate.year && date.month == _focusedDate.month) {
+        thisMonthEvents[date] = entry.value;
       }
-    });
+    }
+
+    // Sort by tanggal
+    final sortedEntries = thisMonthEvents.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -567,7 +565,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
             ),
             const Spacer(),
             Text(
-              '${thisMonthEvents.length} event',
+              '${sortedEntries.length} event',
               style: const TextStyle(
                 fontSize: 14,
                 color: Color(0xFF6B7280),
@@ -585,8 +583,8 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         ],
 
         // Event bulan ini
-        if (thisMonthEvents.isNotEmpty)
-          ...thisMonthEvents.entries.map(
+        if (sortedEntries.isNotEmpty)
+          ...sortedEntries.map(
             (entry) => _buildEventCard(entry.key, entry.value),
           )
         else

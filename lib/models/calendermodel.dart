@@ -5,10 +5,8 @@ class CalendarEvent {
   final Color color;
   final String type;
   final bool isHoliday;
-  final String?
-  displayDate; // Tambahan untuk menyimpan tanggal display dari API
-  final bool
-  isCutiBersama; // Untuk membedakan cuti bersama dengan hari libur biasa
+  final String? displayDate;
+  final bool isCutiBersama;
 
   CalendarEvent({
     required this.title,
@@ -19,22 +17,17 @@ class CalendarEvent {
     this.isCutiBersama = false,
   });
 
-  /// Factory constructor dari API dayoffapi.vercel.app
+  // ─────────────────────────────────────────────────────────────────
+  // Factory: dari dayoffapi.vercel.app
+  // {"tanggal":"2026-05-27","keterangan":"Hari Raya Idul Adha","is_cuti":false}
+  // ─────────────────────────────────────────────────────────────────
   factory CalendarEvent.fromDayoffJson(Map<String, dynamic> json) {
-    String title = json['keterangan'] ?? 'Event';
-    String? displayDate = json['tanggal_display'];
-    bool isCutiBersama = (json['is_cuti'] == true);
-
-    // Tentukan apakah ini hari libur (merah di kalender)
-    // - Jika is_cuti = true, maka ini cuti bersama (merah)
-    // - Jika is_cuti = false tapi hari penting, tetap merah tapi berbeda treatment
-    bool isHoliday = isCutiBersama || _isNationalHoliday(title);
-
-    // Tentukan warna berdasarkan jenis event
-    Color color = _determineColor(title, isCutiBersama);
-
-    // Tentukan tipe event
-    String type = _determineType(title, isCutiBersama);
+    final title = json['keterangan'] as String? ?? 'Event';
+    final displayDate = json['tanggal_display'] as String?;
+    final isCutiBersama = json['is_cuti'] == true;
+    final isHoliday = isCutiBersama || _isNationalHoliday(title);
+    final color = _determineColor(title, isCutiBersama);
+    final type = _determineType(title, isCutiBersama);
 
     return CalendarEvent(
       title: title,
@@ -46,84 +39,135 @@ class CalendarEvent {
     );
   }
 
-  // Helper method untuk menentukan apakah ini hari libur nasional penting
-  static bool _isNationalHoliday(String title) {
-    List<String> nationalHolidays = [
-      'Tahun Baru',
-      'Kemerdekaan',
-      'Natal',
-      'Idul Fitri',
-      'Idul Adha',
-      'Nyepi',
-      'Waisak',
-    ];
+  // ─────────────────────────────────────────────────────────────────
+  // Factory: dari date.nager.at
+  // {"date":"2026-01-01","localName":"Tahun Baru Masehi","name":"New Year's Day",
+  //  "types":["Public"],"global":true}
+  // ─────────────────────────────────────────────────────────────────
+  factory CalendarEvent.fromNagerJson(Map<String, dynamic> json) {
+    final title = json['localName'] as String? ??
+        json['name'] as String? ??
+        'Hari Libur';
 
-    return nationalHolidays.any(
-      (holiday) => title.toLowerCase().contains(holiday.toLowerCase()),
+    // Nager.Date tidak punya field is_cuti, semua adalah hari libur nasional
+    // Tapi ada tipe "Optional" yang bisa dianggap sebagai hari biasa
+    final types = (json['types'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        ['Public'];
+
+    // Anggap semua Public holiday sebagai isHoliday = true
+    final isHoliday = types.contains('Public') || types.contains('Bank');
+
+    // Nager tidak punya is_cuti, set false — tapi bisa dioverride
+    // berdasarkan nama (cuti bersama biasanya ada kata "Cuti")
+    final isCutiBersama = title.toLowerCase().contains('cuti');
+
+    final color = _determineColor(title, isCutiBersama);
+    final type = _determineType(title, isCutiBersama);
+
+    return CalendarEvent(
+      title: title,
+      color: color,
+      type: type,
+      isHoliday: isHoliday,
+      displayDate: json['date'] as String?,
+      isCutiBersama: isCutiBersama,
     );
   }
 
-  // Helper method untuk menentukan warna
+  // ─────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────
+  static bool _isNationalHoliday(String title) {
+    const keywords = [
+      'tahun baru', 'kemerdekaan', 'natal', 'idul fitri', 'idul adha',
+      'nyepi', 'waisak', 'paskah', 'kenaikan', 'imlek', 'maulid', 'isra',
+      'muharram', 'pancasila', 'buruh',
+    ];
+    final lower = title.toLowerCase();
+    return keywords.any((k) => lower.contains(k));
+  }
+
   static Color _determineColor(String title, bool isCutiBersama) {
-    if (isCutiBersama) {
-      return Colors.red[400]!; // Merah untuk cuti bersama
-    }
+    if (isCutiBersama) return Colors.red[400]!;
 
-    // Warna berdasarkan jenis hari penting
-    String titleLower = title.toLowerCase();
+    final lower = title.toLowerCase();
 
-    if (titleLower.contains('tahun baru') ||
-        titleLower.contains('kemerdekaan')) {
-      return Colors.red[600]!; // Merah tua untuk hari nasional
-    } else if (titleLower.contains('idul fitri') ||
-        titleLower.contains('idul adha')) {
-      return Colors.green[600]!; // Hijau untuk hari raya Islam
-    } else if (titleLower.contains('natal') || titleLower.contains('paskah')) {
-      return Colors.blue[600]!; // Biru untuk hari raya Kristen
-    } else if (titleLower.contains('nyepi') || titleLower.contains('imlek')) {
-      return Colors.orange[600]!; // Orange untuk hari raya lainnya
-    } else if (titleLower.contains('waisak')) {
-      return Colors.amber[600]!; // Kuning untuk hari raya Buddha
-    } else if (titleLower.contains('isra') || titleLower.contains('maulid')) {
-      return Colors.teal[600]!; // Teal untuk hari penting Islam
+    if (lower.contains('kemerdekaan') || lower.contains('tahun baru masehi')) {
+      return Colors.red[600]!;
+    } else if (lower.contains('idul fitri') || lower.contains('idul adha')) {
+      return Colors.green[600]!;
+    } else if (lower.contains('natal') ||
+        lower.contains('paskah') ||
+        lower.contains('wafat isa') ||
+        lower.contains('kenaikan isa') ||
+        lower.contains('good friday') ||
+        lower.contains('ascension')) {
+      return Colors.blue[600]!;
+    } else if (lower.contains('nyepi') ||
+        lower.contains('imlek') ||
+        lower.contains('chinese')) {
+      return Colors.orange[600]!;
+    } else if (lower.contains('waisak') || lower.contains('vesak')) {
+      return Colors.amber[600]!;
+    } else if (lower.contains('isra') ||
+        lower.contains('maulid') ||
+        lower.contains('muharram') ||
+        lower.contains('muhammad')) {
+      return Colors.teal[600]!;
+    } else if (lower.contains('pancasila') ||
+        lower.contains('buruh') ||
+        lower.contains('labour') ||
+        lower.contains('labor')) {
+      return Colors.indigo[600]!;
     } else {
-      return Colors.purple[600]!; // Default untuk hari penting lainnya
+      return Colors.purple[600]!;
     }
   }
 
-  // Helper method untuk menentukan tipe
   static String _determineType(String title, bool isCutiBersama) {
-    if (isCutiBersama) {
-      return 'cuti_bersama';
-    }
+    if (isCutiBersama) return 'cuti_bersama';
 
-    String titleLower = title.toLowerCase();
+    final lower = title.toLowerCase();
 
-    if (titleLower.contains('tahun baru') ||
-        titleLower.contains('kemerdekaan')) {
+    if (lower.contains('kemerdekaan') ||
+        lower.contains('pancasila') ||
+        lower.contains('buruh') ||
+        lower.contains('labour') ||
+        lower.contains('labor') ||
+        lower.contains('tahun baru masehi') ||
+        lower.contains("new year")) {
       return 'nasional';
-    } else if (titleLower.contains('idul') ||
-        titleLower.contains('isra') ||
-        titleLower.contains('maulid') ||
-        titleLower.contains('muharram')) {
+    } else if (lower.contains('idul') ||
+        lower.contains('isra') ||
+        lower.contains('maulid') ||
+        lower.contains('muharram') ||
+        lower.contains('muhammad')) {
       return 'islam';
-    } else if (titleLower.contains('natal') ||
-        titleLower.contains('paskah') ||
-        titleLower.contains('kenaikan')) {
+    } else if (lower.contains('natal') ||
+        lower.contains('paskah') ||
+        lower.contains('wafat isa') ||
+        lower.contains('kenaikan isa') ||
+        lower.contains('good friday') ||
+        lower.contains('christmas') ||
+        lower.contains('easter') ||
+        lower.contains('ascension')) {
       return 'kristen';
-    } else if (titleLower.contains('nyepi') || titleLower.contains('imlek')) {
-      return 'tradisional';
-    } else if (titleLower.contains('waisak')) {
+    } else if (lower.contains('waisak') || lower.contains('vesak')) {
       return 'buddha';
-    } else if (titleLower.contains('buruh') ||
-        titleLower.contains('pancasila')) {
-      return 'negara';
+    } else if (lower.contains('nyepi') ||
+        lower.contains('imlek') ||
+        lower.contains('chinese')) {
+      return 'tradisional';
     } else {
       return 'lainnya';
     }
   }
 
-  // Method untuk mendapatkan deskripsi tipe dalam bahasa Indonesia
+  // ─────────────────────────────────────────────────────────────────
+  // Display getters
+  // ─────────────────────────────────────────────────────────────────
   String get typeDescription {
     switch (type) {
       case 'cuti_bersama':
@@ -141,11 +185,10 @@ class CalendarEvent {
       case 'negara':
         return 'Hari Negara';
       default:
-        return 'Hari Penting';
+        return 'Hari Libur';
     }
   }
 
-  // Method untuk mendapatkan icon berdasarkan tipe
   IconData get typeIcon {
     switch (type) {
       case 'cuti_bersama':
@@ -168,7 +211,6 @@ class CalendarEvent {
   }
 
   @override
-  String toString() {
-    return 'CalendarEvent{title: $title, type: $type, isHoliday: $isHoliday, isCutiBersama: $isCutiBersama}';
-  }
+  String toString() =>
+      'CalendarEvent{title: $title, type: $type, isHoliday: $isHoliday}';
 }
