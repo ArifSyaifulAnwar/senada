@@ -1033,7 +1033,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       ),
       _buildServiceIconData(
         Icons.location_on,
-        'Live Attendance',
+        'Absensi',
         const Color(0xFFFF9500),
         onTap: () {
           Navigator.push(
