@@ -2,12 +2,10 @@
 
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
-
 import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-// Ganti dengan URL API kamu
 const String apiUrl = '$baseURL/api/asn/file/summary/all/data';
 
 class AttendanceSummary extends StatefulWidget {
@@ -42,16 +40,14 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
         }
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
   Future<List<AttendanceCardModel>> fetchSummaryCards() async {
     final token = await _getToken();
-    if (token == null) {
-      throw Exception('Gagal mendapatkan token');
-    }
+    if (token == null) throw Exception('Gagal mendapatkan token');
 
     final response = await http.post(
       Uri.parse(apiUrl),
@@ -71,49 +67,50 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    const double baseWidth = 375;
-    final double scale = screenWidth / baseWidth;
-    final double horizontalPadding = screenWidth * 0.04;
-    final double cardSpacing = 12 * scale;
-
     return FutureBuilder<List<AttendanceCardModel>>(
       future: _futureCards,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
-        } else if (snapshot.hasError) {
-          return Center(child: Text("Error: ${snapshot.error}"));
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text("Tidak ada data summary"));
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('Tidak ada data summary'));
         }
 
         final cards = snapshot.data!;
 
-        return Padding(
-          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-          child: Column(
-            children: List.generate((cards.length / 2).ceil(), (index) {
-              final first = cards[index * 2];
-              final second = (index * 2 + 1 < cards.length)
-                  ? cards[index * 2 + 1]
-                  : null;
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            // Tentukan jumlah kolom berdasarkan lebar
+            final int crossAxisCount = constraints.maxWidth >= 768
+                ? (constraints.maxWidth >= 1024 ? 4 : 3)
+                : 2;
 
-              return Padding(
-                padding: EdgeInsets.only(bottom: cardSpacing),
-                child: Row(
-                  children: [
-                    Expanded(child: _buildCard(context, first, scale)),
-                    if (second != null) ...[
-                      SizedBox(width: cardSpacing),
-                      Expanded(child: _buildCard(context, second, scale)),
-                    ] else
-                      Expanded(child: Container()),
-                  ],
-                ),
-              );
-            }),
-          ),
+            // Scale hanya dipakai di mobile untuk menyesuaikan ukuran font/padding
+            final double scale = constraints.maxWidth >= 768
+                ? 1.0
+                : (constraints.maxWidth / 375.0).clamp(0.8, 1.2);
+
+            final double spacing = 12 * scale;
+
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
+                crossAxisSpacing: spacing,
+                mainAxisSpacing: spacing,
+                // Ratio lebih tinggi di web (konten tidak terlalu besar)
+                childAspectRatio: constraints.maxWidth >= 768 ? 1.6 : 1.4,
+              ),
+              itemCount: cards.length,
+              itemBuilder: (context, index) =>
+                  _buildCard(context, cards[index], scale),
+            );
+          },
         );
       },
     );
@@ -125,7 +122,7 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
     double scale,
   ) {
     return Container(
-      padding: EdgeInsets.all(16 * scale),
+      padding: EdgeInsets.all(14 * scale),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12 * scale),
@@ -139,6 +136,7 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
@@ -151,7 +149,7 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
                 child: Icon(
                   model.getIconData(),
                   color: model.getIconColor(),
-                  size: 16 * scale,
+                  size: 15 * scale,
                 ),
               ),
               SizedBox(width: 8 * scale),
@@ -159,27 +157,35 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
                 child: Text(
                   model.title,
                   style: TextStyle(
-                    fontSize: 12 * scale,
+                    fontSize: 11 * scale,
                     fontWeight: FontWeight.w500,
                     color: Colors.grey[600],
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
                 ),
               ),
             ],
           ),
-          SizedBox(height: 12 * scale),
-          Text(
-            model.mainText,
-            style: TextStyle(
-              fontSize: 18 * scale,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          SizedBox(height: 4 * scale),
-          Text(
-            model.subText,
-            style: TextStyle(fontSize: 11 * scale, color: Colors.grey[500]),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                model.mainText,
+                style: TextStyle(
+                  fontSize: 17 * scale,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: 3 * scale),
+              Text(
+                model.subText,
+                style: TextStyle(fontSize: 10 * scale, color: Colors.grey[500]),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
         ],
       ),

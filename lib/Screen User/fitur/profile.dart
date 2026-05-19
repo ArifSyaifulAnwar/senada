@@ -18,6 +18,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:device_info_plus/device_info_plus.dart';
 
+// ── helper ──────────────────────────────────────────────────────────
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -26,7 +30,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  bool isDarkTheme = false;
   bool _isLoadingDisplay = true;
   bool _isUploadingPhoto = false;
   bool _isDeletingAccount = false;
@@ -34,9 +37,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   ProfileDisplay? _profileDisplay;
   String? _accessToken;
   final ImagePicker _picker = ImagePicker();
-  String _selectedLanguage = 'system'; // 'system', 'id', 'en'
+  String _selectedLanguage = 'system';
 
-  // Localization Maps
   final Map<String, Map<String, String>> _localizedStrings = {
     'system': {
       'profile': 'Profil',
@@ -93,7 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'reprimand': 'Teguran',
       'settings': 'Pengaturan',
       'changeSecurity': 'Ubah Keamanan',
-      'attendanceReminder': 'Pengingat Absen Masuk/Keluar',
+      'attendanceReminder': 'Pengingat Absen',
       'language': 'Bahasa',
       'deviceDefault': 'Bawaan Perangkat',
       'helpSupport': 'Bantuan & Dukungan',
@@ -105,7 +107,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'deleteAccountConfirm':
           'Apakah Anda yakin ingin menghapus akun ini secara permanen?',
       'deleteAccountWarning':
-          'Peringatan: Akun Anda akan dihapus secara permanen dan semua data terkait akan hilang. Tindakan ini tidak dapat dibatalkan.',
+          'Peringatan: Akun Anda akan dihapus secara permanen.',
       'deleteAccountPassword': 'Masukkan password Anda untuk konfirmasi',
       'passwordHint': 'Password',
       'cancel': 'Batal',
@@ -146,7 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'deleteAccountConfirm':
           'Are you sure you want to permanently delete this account?',
       'deleteAccountWarning':
-          'Warning: Your account will be permanently deleted and all associated data will be lost. This action cannot be undone.',
+          'Warning: Your account will be permanently deleted.',
       'deleteAccountPassword': 'Enter your password to confirm',
       'passwordHint': 'Password',
       'cancel': 'Cancel',
@@ -172,14 +174,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadLanguagePreference() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _selectedLanguage = prefs.getString('selected_language') ?? 'system';
-    });
+    setState(
+      () =>
+          _selectedLanguage = prefs.getString('selected_language') ?? 'system',
+    );
   }
 
-  String _getLocalizedString(String key) {
-    return _localizedStrings[_selectedLanguage]?[key] ?? key;
-  }
+  String _l(String key) => _localizedStrings[_selectedLanguage]?[key] ?? key;
 
   static Future<String?> _getToken() async {
     try {
@@ -197,39 +198,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
   Future<void> _initializeUserInfo() async {
     _accessToken = await _getToken();
-    if (_accessToken != null) {
-      await _loadProfileData();
-    }
+    if (_accessToken != null) await _loadProfileData();
   }
 
   Future<void> _loadProfileData() async {
-    setState(() {
-      _isLoadingDisplay = true;
-    });
-
+    setState(() => _isLoadingDisplay = true);
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('Email');
-
     if (email == null) {
-      setState(() {
-        _isLoadingDisplay = false;
-      });
+      setState(() => _isLoadingDisplay = false);
       return;
     }
-
-    setState(() {
-      _email = email;
-    });
-
+    setState(() => _email = email);
     try {
-      final userResponse = await http.post(
+      final response = await http.post(
         Uri.parse('$baseURL/api/asn/getDataUser'),
         headers: {
           'Authorization': 'bearer $_accessToken',
@@ -238,70 +227,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
         body: json.encode({'Email': email}),
       );
-
-      if (userResponse.statusCode == 200) {
-        final data = json.decode(userResponse.body);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
         setState(() {
           _profileDisplay = ProfileDisplay.fromJson(data);
           _isLoadingDisplay = false;
         });
       } else {
-        setState(() {
-          _isLoadingDisplay = false;
-        });
+        setState(() => _isLoadingDisplay = false);
       }
-    } catch (e) {
-      setState(() {
-        _isLoadingDisplay = false;
-      });
+    } catch (_) {
+      setState(() => _isLoadingDisplay = false);
     }
   }
 
   Future<void> _pickImageFromGallery() async {
     try {
-      final permission = await _checkGalleryPermission();
-      if (!permission) {
+      if (!await _checkGalleryPermission()) {
         _showErrorSnackBar('Permission galeri tidak diberikan');
         return;
       }
-
       final XFile? image = await _picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: 800,
         maxHeight: 800,
         imageQuality: 80,
       );
-
-      if (image != null) {
-        File imageFile = File(image.path);
-        await _uploadProfilePhotoBase64(imageFile);
-      }
+      if (image != null) await _uploadProfilePhotoBase64(File(image.path));
     } catch (e) {
-      _showErrorSnackBar('Gagal memilih gambar dari galeri: ${e.toString()}');
+      _showErrorSnackBar('Gagal memilih gambar: ${e.toString()}');
     }
   }
 
   Future<void> _pickImageFromCamera() async {
     try {
-      final permission = await _checkCameraPermission();
-      if (!permission) {
+      if (!await _checkCameraPermission()) {
         _showErrorSnackBar('Permission kamera tidak diberikan');
         return;
       }
-
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
         maxWidth: 800,
         maxHeight: 800,
         imageQuality: 80,
       );
-
-      if (photo != null) {
-        File imageFile = File(photo.path);
-        await _uploadProfilePhotoBase64(imageFile);
-      }
+      if (photo != null) await _uploadProfilePhotoBase64(File(photo.path));
     } catch (e) {
-      _showErrorSnackBar('Gagal mengambil foto dari kamera: ${e.toString()}');
+      _showErrorSnackBar('Gagal mengambil foto: ${e.toString()}');
     }
   }
 
@@ -310,173 +282,121 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (status.isDenied || status.isPermanentlyDenied) {
       status = await Permission.camera.request();
     }
-
     if (status.isPermanentlyDenied) {
       _showPermissionDialog('Kamera', 'kamera');
       return false;
     }
-
     return status.isGranted;
   }
 
   Future<bool> _checkGalleryPermission() async {
     Permission permission;
-
     if (Platform.isAndroid) {
       final androidInfo = await DeviceInfoPlugin().androidInfo;
-      if (androidInfo.version.sdkInt >= 33) {
-        permission = Permission.photos;
-      } else {
-        permission = Permission.storage;
-      }
+      permission = androidInfo.version.sdkInt >= 33
+          ? Permission.photos
+          : Permission.storage;
     } else {
       permission = Permission.photos;
     }
-
     var status = await permission.status;
     if (status.isDenied || status.isPermanentlyDenied) {
       status = await permission.request();
     }
-
     if (status.isPermanentlyDenied) {
       _showPermissionDialog('Galeri', 'mengakses galeri');
       return false;
     }
-
     return status.isGranted;
   }
 
-  void _showPermissionDialog(String permissionName, String action) {
+  void _showPermissionDialog(String name, String action) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Permission $permissionName Diperlukan'),
-          content: Text(
-            'Aplikasi memerlukan akses $action untuk mengubah foto profil. '
-            'Silakan aktifkan permission di pengaturan aplikasi.',
+      builder: (_) => AlertDialog(
+        title: Text('Permission $name Diperlukan'),
+        content: Text(
+          'Aplikasi memerlukan akses $action untuk mengubah foto profil.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(_l('cancel')),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text(_getLocalizedString('cancel')),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                openAppSettings();
-              },
-              child: const Text('Buka Pengaturan'),
-            ),
-          ],
-        );
-      },
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Buka Pengaturan'),
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _uploadProfilePhotoBase64(File imageFile) async {
-    setState(() {
-      _isUploadingPhoto = true;
-    });
-
+    setState(() => _isUploadingPhoto = true);
     try {
       final bytes = await imageFile.readAsBytes();
-      final String base64Image = base64Encode(bytes);
+      final base64Image = base64Encode(bytes);
       final prefs = await SharedPreferences.getInstance();
       final email = prefs.getString('Email') ?? '';
-
       if (email.isEmpty) {
         _showErrorSnackBar('Email tidak ditemukan');
         return;
       }
 
-      final tokenResponse = await http.post(
+      final tokenResp = await http.post(
         Uri.parse('$baseURL/api/auth/token'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: {'grant_type': 'password', 'password': 'ASN_DBS'},
       );
-
-      if (tokenResponse.statusCode != 200) {
-        _showErrorSnackBar('Gagal mendapatkan token akses');
+      if (tokenResp.statusCode != 200) {
+        _showErrorSnackBar('Gagal mendapatkan token');
         return;
       }
-
-      final tokenData = json.decode(tokenResponse.body);
-      final String accessToken = tokenData['access_token'];
-
-      final body = json.encode({
-        'Email': email,
-        'FotoProfilBase64': base64Image,
-      });
+      final token = json.decode(tokenResp.body)['access_token'];
 
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/user/profile/photo/upload-base64'),
         headers: {
-          'Authorization': 'Bearer $accessToken',
+          'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: body,
+        body: json.encode({'Email': email, 'FotoProfilBase64': base64Image}),
       );
 
       if (!mounted) return;
-
       if (response.statusCode == 200) {
-        final responseBody = json.decode(response.body);
-
-        if (responseBody['success'] == true) {
+        final rb = json.decode(response.body);
+        if (rb['success'] == true) {
           _showSuccessSnackBar(
-            responseBody['message'] ?? 'Foto profil berhasil diperbarui',
+            rb['message'] ?? 'Foto profil berhasil diperbarui',
           );
           await _loadProfileData();
         } else {
-          _showErrorSnackBar(
-            responseBody['message'] ?? 'Gagal memperbarui foto profil',
-          );
+          _showErrorSnackBar(rb['message'] ?? 'Gagal memperbarui foto profil');
         }
-      } else if (response.statusCode == 404) {
-        final responseBody = json.decode(response.body);
-        _showErrorSnackBar(responseBody['message'] ?? 'User tidak ditemukan');
       } else {
-        final responseBody = json.decode(response.body);
-        _showErrorSnackBar(
-          responseBody['message'] ?? 'Gagal memperbarui foto profil',
-        );
+        final rb = json.decode(response.body);
+        _showErrorSnackBar(rb['message'] ?? 'Gagal memperbarui foto profil');
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar(
-          'Terjadi kesalahan saat mengunggah foto: ${e.toString()}',
-        );
-      }
+      if (mounted) _showErrorSnackBar('Error upload: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isUploadingPhoto = false;
-        });
-      }
+      if (mounted) setState(() => _isUploadingPhoto = false);
     }
   }
 
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
+  void _showSuccessSnackBar(String msg) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.green));
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
+  void _showErrorSnackBar(String msg) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
 
   void _showLogoutBottomSheet() {
     showModalBottomSheet(
@@ -485,88 +405,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       backgroundColor: Colors.white,
-      isScrollControlled: false,
-      builder: (BuildContext context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Text(
-                  _getLocalizedString('logout'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                    color: Colors.red[600],
-                  ),
-                ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _l('logout'),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: Colors.red[600],
               ),
-              const SizedBox(height: 12),
-              Center(
-                child: Text(
-                  _getLocalizedString('logoutConfirm'),
-                  style: const TextStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 30),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        backgroundColor: Colors.blue[100],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        foregroundColor: Colors.blue[800],
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _l('logoutConfirm'),
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 30),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.blue[100],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(
-                        _getLocalizedString('cancel'),
-                        style: const TextStyle(fontSize: 16),
-                      ),
+                      foregroundColor: Colors.blue[800],
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(
+                      _l('cancel'),
+                      style: const TextStyle(fontSize: 16),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        _performLogout();
-                      },
-                      child: Text(
-                        _getLocalizedString('yes'),
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.white,
-                        ),
-                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _performLogout();
+                    },
+                    child: Text(
+                      _l('yes'),
+                      style: const TextStyle(fontSize: 16, color: Colors.white),
                     ),
                   ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  // ===================== DELETE ACCOUNT FUNCTIONS =====================
   void _showDeleteAccountBottomSheet() {
-    final TextEditingController passwordController = TextEditingController();
+    final passwordCtrl = TextEditingController();
     bool hidePassword = true;
-
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -574,166 +482,147 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       backgroundColor: Colors.white,
       isScrollControlled: true,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return SingleChildScrollView(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  24,
-                  24,
-                  24,
-                  MediaQuery.of(context).viewInsets.bottom + 40,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDS) => SingleChildScrollView(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              24,
+              24,
+              24,
+              MediaQuery.of(context).viewInsets.bottom + 40,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.red[600],
+                  size: 40,
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                const SizedBox(height: 16),
+                Text(
+                  _l('deleteAccount'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    color: Colors.red[600],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red[200]!),
+                  ),
+                  child: Text(
+                    _l('deleteAccountWarning'),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.red[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  _l('deleteAccountConfirm'),
+                  style: const TextStyle(fontSize: 15),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: passwordCtrl,
+                  obscureText: hidePassword,
+                  decoration: InputDecoration(
+                    hintText: _l('passwordHint'),
+                    labelText: _l('deleteAccountPassword'),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        hidePassword ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () =>
+                          setDS(() => hidePassword = !hidePassword),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 30),
+                Row(
                   children: [
-                    // Warning Icon
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      color: Colors.red[600],
-                      size: 40,
-                    ),
-                    const SizedBox(height: 16),
-                    Center(
-                      child: Text(
-                        _getLocalizedString('deleteAccount'),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20,
-                          color: Colors.red[600],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    // Warning Message
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red[200]!, width: 1),
-                      ),
-                      child: Text(
-                        _getLocalizedString('deleteAccountWarning'),
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.red[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Confirmation Question
-                    Center(
-                      child: Text(
-                        _getLocalizedString('deleteAccountConfirm'),
-                        style: const TextStyle(fontSize: 16),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Password Input
-                    TextField(
-                      controller: passwordController,
-                      obscureText: hidePassword,
-                      decoration: InputDecoration(
-                        hintText: _getLocalizedString('passwordHint'),
-                        labelText: _getLocalizedString('deleteAccountPassword'),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            hidePassword
-                                ? Icons.visibility_off
-                                : Icons.visibility,
+                    Expanded(
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.grey[200],
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          onPressed: () {
-                            setState(() {
-                              hidePassword = !hidePassword;
-                            });
-                          },
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        onPressed: () {
+                          passwordCtrl.dispose();
+                          Navigator.pop(context);
+                        },
+                        child: Text(
+                          _l('cancel'),
+                          style: const TextStyle(fontSize: 16),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 30),
-                    // Action Buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextButton(
-                            style: TextButton.styleFrom(
-                              backgroundColor: Colors.grey[200],
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              foregroundColor: Colors.grey[800],
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                            ),
-                            onPressed: () {
-                              passwordController.dispose();
-                              Navigator.of(context).pop();
-                            },
-                            child: Text(
-                              _getLocalizedString('cancel'),
-                              style: const TextStyle(fontSize: 16),
-                            ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
                           ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                            ),
-                            onPressed: _isDeletingAccount
-                                ? null
-                                : () {
-                                    if (passwordController.text.isEmpty) {
-                                      _showErrorSnackBar(
-                                        'Silakan masukkan password Anda',
-                                      );
-                                      return;
-                                    }
-                                    Navigator.of(context).pop();
-                                    passwordController.dispose();
-                                    _performDeleteAccount();
-                                  },
-                            child: _isDeletingAccount
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.white,
-                                      ),
-                                    ),
-                                  )
-                                : Text(
-                                    _getLocalizedString('yesDelete'),
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.white,
-                                    ),
+                        onPressed: _isDeletingAccount
+                            ? null
+                            : () {
+                                if (passwordCtrl.text.isEmpty) {
+                                  _showErrorSnackBar(
+                                    'Silakan masukkan password',
+                                  );
+                                  return;
+                                }
+                                Navigator.pop(context);
+                                passwordCtrl.dispose();
+                                _performDeleteAccount();
+                              },
+                        child: _isDeletingAccount
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
                                   ),
-                          ),
-                        ),
-                      ],
+                                ),
+                              )
+                            : Text(
+                                _l('yesDelete'),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.white,
+                                ),
+                              ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-            );
-          },
-        );
-      },
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -742,20 +631,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _showErrorSnackBar('Data profil tidak ditemukan');
       return;
     }
-
-    setState(() {
-      _isDeletingAccount = true;
-    });
-
+    setState(() => _isDeletingAccount = true);
     try {
       final prefs = await SharedPreferences.getInstance();
       final email = prefs.getString('Email') ?? '';
-
-      final body = json.encode({
-        'UserId': _profileDisplay!.id.toString(),
-        'UpdatedBy': email,
-      });
-
       final response = await http
           .post(
             Uri.parse('$baseURL/api/asn/user/deleteAccount'),
@@ -764,501 +643,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
-            body: body,
+            body: json.encode({
+              'UserId': _profileDisplay!.id.toString(),
+              'UpdatedBy': email,
+            }),
           )
           .timeout(const Duration(seconds: 30));
-
       if (!mounted) return;
-
       if (response.statusCode == 200) {
-        final responseBody = json.decode(response.body);
-        final message =
-            responseBody['Message'] ?? responseBody['message'] ?? '';
-
+        final rb = json.decode(response.body);
+        final message = rb['Message'] ?? rb['message'] ?? '';
         if (message.toLowerCase().contains('successfully')) {
-          // Show success message
-          _showSuccessSnackBar(_getLocalizedString('successDeleteAccount'));
-
-          // Show redirect message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(_getLocalizedString('accountDeletedRedirect')),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-
-          // Wait 2 seconds before redirecting
+          _showSuccessSnackBar(_l('successDeleteAccount'));
           await Future.delayed(const Duration(seconds: 2));
-
-          // Clear all data
           await prefs.clear();
-
           if (!mounted) return;
-
-          // Redirect to splash screen
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const SplashScreen()),
+            MaterialPageRoute(builder: (_) => const SplashScreen()),
           );
         } else {
           _showErrorSnackBar(message);
         }
-      } else if (response.statusCode == 400) {
-        final responseBody = json.decode(response.body);
-        _showErrorSnackBar(
-          responseBody['Message'] ??
-              responseBody['message'] ??
-              _getLocalizedString('errorDeleteAccount'),
-        );
-      } else if (response.statusCode == 404) {
-        _showErrorSnackBar('User tidak ditemukan');
       } else {
-        final responseBody = json.decode(response.body);
+        final rb = json.decode(response.body);
         _showErrorSnackBar(
-          responseBody['Message'] ??
-              responseBody['message'] ??
-              _getLocalizedString('errorDeleteAccount'),
+          rb['Message'] ?? rb['message'] ?? _l('errorDeleteAccount'),
         );
       }
     } catch (e) {
-      if (mounted) {
-        _showErrorSnackBar('Kesalahan: ${e.toString()}');
-      }
+      if (mounted) _showErrorSnackBar('Kesalahan: ${e.toString()}');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isDeletingAccount = false;
-        });
-      }
+      if (mounted) setState(() => _isDeletingAccount = false);
     }
   }
-  // ===================== END DELETE ACCOUNT FUNCTIONS =====================
 
-  void _performLogout() async {
+  Future<void> _performLogout() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // Menghapus semua data tersimpan
-
+    await prefs.clear();
     if (!mounted) return;
-
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const SplashScreen()),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final isMediumScreen = screenWidth >= 360 && screenWidth < 600;
-
-    // Responsive values
-    final double horizontalPadding = isSmallScreen
-        ? 16
-        : (isMediumScreen ? 24 : 32);
-    final double verticalPadding = isSmallScreen ? 12 : 16;
-    final double avatarRadius = isSmallScreen ? 40 : (isMediumScreen ? 50 : 60);
-    final double titleFontSize = isSmallScreen
-        ? 20
-        : (isMediumScreen ? 24 : 28);
-    final double sectionTitleFontSize = isSmallScreen
-        ? 16
-        : (isMediumScreen ? 18 : 20);
-    final double menuItemFontSize = isSmallScreen
-        ? 14
-        : (isMediumScreen ? 16 : 18);
-    final double iconSize = isSmallScreen ? 20 : (isMediumScreen ? 22 : 24);
-
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      body: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding.toDouble(),
-            vertical: verticalPadding.toDouble(),
-          ),
-          children: [
-            // Header
-            Center(
-              child: Text(
-                _getLocalizedString('profile'),
-                style: TextStyle(
-                  fontSize: titleFontSize,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
-            SizedBox(height: isSmallScreen ? 16 : 24),
-
-            // Profile Picture dan Info
-            if (_isLoadingDisplay)
-              const Center(child: CircularProgressIndicator())
-            else
-              Center(
-                child: Column(
-                  children: [
-                    Stack(
-                      children: [
-                        CircleAvatar(
-                          radius: avatarRadius,
-                          backgroundColor: Colors.grey.shade200,
-                          backgroundImage: _profileDisplay?.fotoProfil != null
-                              ? MemoryImage(_profileDisplay!.fotoProfil!)
-                              : null,
-                          child: _profileDisplay?.fotoProfil == null
-                              ? Icon(
-                                  Icons.person,
-                                  size: avatarRadius * 0.6,
-                                  color: Colors.grey[600],
-                                )
-                              : null,
-                        ),
-                        if (_isUploadingPhoto)
-                          Container(
-                            width: avatarRadius * 2,
-                            height: avatarRadius * 2,
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.5),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            ),
-                          ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(30),
-                            onTap: _isUploadingPhoto
-                                ? null
-                                : () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      builder: (context) {
-                                        return SafeArea(
-                                          child: Wrap(
-                                            children: [
-                                              ListTile(
-                                                leading: const Icon(
-                                                  Icons.photo_library,
-                                                ),
-                                                title: Text(
-                                                  _getLocalizedString(
-                                                    'selectFromGallery',
-                                                  ),
-                                                ),
-                                                onTap: () {
-                                                  Navigator.of(context).pop();
-                                                  _pickImageFromGallery();
-                                                },
-                                              ),
-                                              ListTile(
-                                                leading: const Icon(
-                                                  Icons.camera_alt,
-                                                ),
-                                                title: Text(
-                                                  _getLocalizedString(
-                                                    'takePhoto',
-                                                  ),
-                                                ),
-                                                onTap: () {
-                                                  Navigator.of(context).pop();
-                                                  _pickImageFromCamera();
-                                                },
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
-                            child: CircleAvatar(
-                              radius: isSmallScreen ? 12 : 14,
-                              backgroundColor: _isUploadingPhoto
-                                  ? Colors.grey
-                                  : Colors.blue,
-                              child: Icon(
-                                Icons.edit,
-                                color: Colors.white,
-                                size: isSmallScreen ? 14 : 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _profileDisplay?.displayName ??
-                          _getLocalizedString('username'),
-                      style: TextStyle(
-                        fontSize: menuItemFontSize + 2,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      _email.isNotEmpty ? _email : "email@domain.com",
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                    Text(
-                      _profileDisplay?.jobs ?? _getLocalizedString('position'),
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-
-            SizedBox(height: isSmallScreen ? 20 : 30),
-
-            // My Info Section
-            _buildSectionTitle(
-              _getLocalizedString('myInfo'),
-              sectionTitleFontSize,
-            ),
-            const SizedBox(height: 8),
-            _buildMenuSection([
-              _buildMenuItem(
-                Icons.person_outline,
-                _getLocalizedString('personalInfo'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const InfoProfileScreen(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.emergency,
-                _getLocalizedString('emergencyContact'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => EmergencyContactScreen(
-                        userId: _profileDisplay?.userId ?? '',
-                      ),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.family_restroom,
-                _getLocalizedString('familyInfo'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  _showComingSoonDialog(context);
-                },
-              ),
-              _buildMenuItem(
-                Icons.school_outlined,
-                _getLocalizedString('education'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  _showComingSoonDialog(context);
-                },
-              ),
-              _buildMenuItem(
-                Icons.payment_outlined,
-                _getLocalizedString('salaryInfo'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  _showComingSoonDialog(context);
-                },
-              ),
-              _buildMenuItem(
-                Icons.warning_amber_outlined,
-                _getLocalizedString('reprimand'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  _showComingSoonDialog(context);
-                },
-              ),
-            ]),
-
-            const SizedBox(height: 24),
-
-            // Settings Section
-            _buildSectionTitle(
-              _getLocalizedString('settings'),
-              sectionTitleFontSize,
-            ),
-            const SizedBox(height: 8),
-            _buildMenuSection([
-              _buildMenuItem(
-                Icons.lock_outline,
-                _getLocalizedString('Ubah Keamanan'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanPengaturanKeamanan(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.access_time_outlined,
-                _getLocalizedString('attendanceReminder'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  _showComingSoonDialog(context);
-                },
-              ),
-            ]),
-
-            const SizedBox(height: 24),
-            _buildSectionTitle(
-              _getLocalizedString('helpSupport'),
-              sectionTitleFontSize,
-            ),
-            const SizedBox(height: 8),
-            // Additional Menu Items
-            _buildMenuSection([
-              _buildMenuItem(
-                Icons.privacy_tip_outlined,
-                _getLocalizedString('privacyPolicy'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanKebijakanPrivasi(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.help_outline,
-                _getLocalizedString('helpSupport'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanBantuanDukungan(),
-                    ),
-                  );
-                },
-              ),
-              _buildMenuItem(
-                Icons.contact_mail_outlined,
-                _getLocalizedString('contactUs'),
-                iconSize: iconSize,
-                fontSize: menuItemFontSize,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HalamanHubungiKami(),
-                    ),
-                  );
-                },
-              ),
-            ]),
-
-            const SizedBox(height: 20),
-
-            // Logout Button
-            Container(
-              margin: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 16),
-              child: TextButton.icon(
-                onPressed: _showLogoutBottomSheet,
-                icon: const Icon(Icons.logout, color: Colors.blue),
-                label: Text(
-                  _getLocalizedString('logout'),
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontSize: menuItemFontSize,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.symmetric(
-                    vertical: isSmallScreen ? 10 : 12,
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            // Delete Account Button
-            Container(
-              margin: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 16),
-              child: TextButton.icon(
-                onPressed: _isDeletingAccount
-                    ? null
-                    : _showDeleteAccountBottomSheet,
-                icon: Icon(
-                  Icons.delete_forever,
-                  color: _isDeletingAccount ? Colors.grey : Colors.red,
-                ),
-                label: Text(
-                  _getLocalizedString('deleteAccount'),
-                  style: TextStyle(
-                    color: _isDeletingAccount ? Colors.grey : Colors.red,
-                    fontSize: menuItemFontSize,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.symmetric(
-                    vertical: isSmallScreen ? 10 : 12,
-                  ),
-                ),
-              ),
-            ),
-
-            SizedBox(height: isSmallScreen ? 16 : 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(String title, double fontSize) {
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: MediaQuery.of(context).size.width < 360 ? 8 : 16,
-      ),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: FontWeight.w600,
-          color: Colors.black87,
-        ),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const SplashScreen()));
   }
 
   void _showComingSoonDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: const Text('Coming Soon'),
         content: const Text('Untuk saat ini masih dalam pengembangan.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Tutup'),
           ),
         ],
@@ -1266,19 +703,445 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildMenuSection(List<Widget> items) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalMargin = screenWidth < 360 ? 8 : 16;
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final isWeb = _isWideScreen(context);
 
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli — ListView)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmall = screenWidth < 360;
+    final hPad = isSmall ? 16.0 : 24.0;
+    const avatarRadius = 50.0;
+    const titleFs = 24.0;
+    const sectionFs = 18.0;
+    const menuFs = 16.0;
+    const iconSz = 22.0;
+
+    return ListView(
+      padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 16),
+      children: [
+        Center(
+          child: Text(
+            _l('profile'),
+            style: const TextStyle(
+              fontSize: titleFs,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        _buildProfileHeader(avatarRadius, menuFs),
+        const SizedBox(height: 28),
+        _buildSectionTitle(_l('myInfo'), sectionFs),
+        const SizedBox(height: 8),
+        _buildInfoSection(iconSz, menuFs),
+        const SizedBox(height: 24),
+        _buildSectionTitle(_l('settings'), sectionFs),
+        const SizedBox(height: 8),
+        _buildSettingsSection(iconSz, menuFs),
+        const SizedBox(height: 24),
+        _buildSectionTitle(_l('helpSupport'), sectionFs),
+        const SizedBox(height: 8),
+        _buildHelpSection(iconSz, menuFs),
+        const SizedBox(height: 20),
+        _buildLogoutButton(menuFs),
+        const SizedBox(height: 12),
+        _buildDeleteAccountButton(menuFs),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: panel kiri profil | panel kanan menu)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    const avatarRadius = 60.0;
+    const menuFs = 15.0;
+    const iconSz = 20.0;
+    const sectionFs = 16.0;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Panel kiri: foto + info + logout/delete ───────────
+        SizedBox(
+          width: 280,
+          child: Container(
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Text(
+                    _l('profile'),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  _buildProfileHeader(avatarRadius, menuFs),
+                  const SizedBox(height: 28),
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  _buildLogoutButton(menuFs),
+                  const SizedBox(height: 8),
+                  _buildDeleteAccountButton(menuFs),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // ── Panel kanan: menu grid 2 kolom ────────────────────
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 2 kolom: Informasi Saya + Pengaturan
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildSectionTitle(_l('myInfo'), sectionFs),
+                          const SizedBox(height: 8),
+                          _buildInfoSection(iconSz, menuFs),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildSectionTitle(_l('settings'), sectionFs),
+                          const SizedBox(height: 8),
+                          _buildSettingsSection(iconSz, menuFs),
+                          const SizedBox(height: 20),
+                          _buildSectionTitle(_l('helpSupport'), sectionFs),
+                          const SizedBox(height: 8),
+                          _buildHelpSection(iconSz, menuFs),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS
+  // ─────────────────────────────────────────────────────────────────
+
+  // ── Foto profil + nama + email + jabatan ──────────────────────
+  Widget _buildProfileHeader(double avatarRadius, double menuFs) {
+    if (_isLoadingDisplay) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Column(
+      children: [
+        Stack(
+          children: [
+            CircleAvatar(
+              radius: avatarRadius,
+              backgroundColor: Colors.grey.shade200,
+              backgroundImage: _profileDisplay?.fotoProfil != null
+                  ? MemoryImage(_profileDisplay!.fotoProfil!)
+                  : null,
+              child: _profileDisplay?.fotoProfil == null
+                  ? Icon(
+                      Icons.person,
+                      size: avatarRadius * 0.6,
+                      color: Colors.grey[600],
+                    )
+                  : null,
+            ),
+            if (_isUploadingPhoto)
+              Container(
+                width: avatarRadius * 2,
+                height: avatarRadius * 2,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: _isUploadingPhoto
+                    ? null
+                    : () {
+                        showModalBottomSheet(
+                          context: context,
+                          builder: (_) => SafeArea(
+                            child: Wrap(
+                              children: [
+                                ListTile(
+                                  leading: const Icon(Icons.photo_library),
+                                  title: Text(_l('selectFromGallery')),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _pickImageFromGallery();
+                                  },
+                                ),
+                                ListTile(
+                                  leading: const Icon(Icons.camera_alt),
+                                  title: Text(_l('takePhoto')),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _pickImageFromCamera();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                child: CircleAvatar(
+                  radius: 14,
+                  backgroundColor: _isUploadingPhoto
+                      ? Colors.grey
+                      : Colors.blue,
+                  child: const Icon(Icons.edit, color: Colors.white, size: 15),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _profileDisplay?.displayName ?? _l('username'),
+          style: TextStyle(fontSize: menuFs + 2, fontWeight: FontWeight.w600),
+          textAlign: TextAlign.center,
+        ),
+        Text(
+          _email.isNotEmpty ? _email : 'email@domain.com',
+          style: const TextStyle(color: Colors.grey, fontSize: 13),
+          textAlign: TextAlign.center,
+        ),
+        Text(
+          _profileDisplay?.jobs ?? _l('position'),
+          style: const TextStyle(color: Colors.grey, fontSize: 13),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  // ── Section informasi saya ────────────────────────────────────
+  Widget _buildInfoSection(double iconSz, double menuFs) {
+    return _buildMenuSection([
+      _buildMenuItem(
+        Icons.person_outline,
+        _l('personalInfo'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const InfoProfileScreen()),
+        ),
+      ),
+      _buildMenuItem(
+        Icons.emergency,
+        _l('emergencyContact'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                EmergencyContactScreen(userId: _profileDisplay?.userId ?? ''),
+          ),
+        ),
+      ),
+      _buildMenuItem(
+        Icons.family_restroom,
+        _l('familyInfo'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => _showComingSoonDialog(context),
+      ),
+      _buildMenuItem(
+        Icons.school_outlined,
+        _l('education'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => _showComingSoonDialog(context),
+      ),
+      _buildMenuItem(
+        Icons.payment_outlined,
+        _l('salaryInfo'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => _showComingSoonDialog(context),
+      ),
+      _buildMenuItem(
+        Icons.warning_amber_outlined,
+        _l('reprimand'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => _showComingSoonDialog(context),
+      ),
+    ]);
+  }
+
+  // ── Section pengaturan ────────────────────────────────────────
+  Widget _buildSettingsSection(double iconSz, double menuFs) {
+    return _buildMenuSection([
+      _buildMenuItem(
+        Icons.lock_outline,
+        _l('changeSecurity'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanPengaturanKeamanan()),
+        ),
+      ),
+      _buildMenuItem(
+        Icons.access_time_outlined,
+        _l('attendanceReminder'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => _showComingSoonDialog(context),
+      ),
+    ]);
+  }
+
+  // ── Section bantuan ───────────────────────────────────────────
+  Widget _buildHelpSection(double iconSz, double menuFs) {
+    return _buildMenuSection([
+      _buildMenuItem(
+        Icons.privacy_tip_outlined,
+        _l('privacyPolicy'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanKebijakanPrivasi()),
+        ),
+      ),
+      _buildMenuItem(
+        Icons.help_outline,
+        _l('helpSupport'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanBantuanDukungan()),
+        ),
+      ),
+      _buildMenuItem(
+        Icons.contact_mail_outlined,
+        _l('contactUs'),
+        iconSize: iconSz,
+        fontSize: menuFs,
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanHubungiKami()),
+        ),
+      ),
+    ]);
+  }
+
+  // ── Tombol logout ─────────────────────────────────────────────
+  Widget _buildLogoutButton(double menuFs) {
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        onPressed: _showLogoutBottomSheet,
+        icon: const Icon(Icons.logout, color: Colors.blue),
+        label: Text(
+          _l('logout'),
+          style: TextStyle(color: Colors.blue, fontSize: menuFs),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  // ── Tombol hapus akun ─────────────────────────────────────────
+  Widget _buildDeleteAccountButton(double menuFs) {
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        onPressed: _isDeletingAccount ? null : _showDeleteAccountBottomSheet,
+        icon: Icon(
+          Icons.delete_forever,
+          color: _isDeletingAccount ? Colors.grey : Colors.red,
+        ),
+        label: Text(
+          _l('deleteAccount'),
+          style: TextStyle(
+            color: _isDeletingAccount ? Colors.grey : Colors.red,
+            fontSize: menuFs,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  // ── Section container ─────────────────────────────────────────
+  Widget _buildSectionTitle(String title, double fontSize) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: fontSize,
+        fontWeight: FontWeight.w600,
+        color: Colors.black87,
+      ),
+    );
+  }
+
+  Widget _buildMenuSection(List<Widget> items) {
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: horizontalMargin.toDouble()),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 0,
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -1296,25 +1159,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     double iconSize = 22,
     double fontSize = 16,
   }) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final horizontalPadding = isSmallScreen ? 12 : 16;
-    final verticalPadding = isSmallScreen ? 12 : 16;
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding.toDouble(),
-            vertical: verticalPadding.toDouble(),
-          ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
               Icon(icon, color: Colors.grey.shade700, size: iconSize),
-              SizedBox(width: isSmallScreen ? 12 : 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Text(
                   title,
@@ -1337,12 +1192,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              SizedBox(width: isSmallScreen ? 4 : 8),
-              Icon(
-                Icons.chevron_right,
-                color: Colors.grey.shade400,
-                size: isSmallScreen ? 18 : 20,
-              ),
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
             ],
           ),
         ),

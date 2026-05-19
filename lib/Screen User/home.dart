@@ -34,17 +34,30 @@ class _HomePageState extends State<HomePage> {
     _loadData = _loadUserEmail();
   }
 
+  bool _isWide(BuildContext context) =>
+      MediaQuery.of(context).size.width >= 768;
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final double scale = size.width / 375.0;
+    final isWeb = _isWide(context);
 
-    List<Widget> pages = [
-      const HomeScreen(), // Home
-      const HalamanRiwayatAbsensi(), // Kalender
-      const AbsensiScreen(showBackButton: false), // Kamera (FAB)
-      const HalamanListEmployee(), // Beach
-      const ProfileScreen(), // Profile
+    final List<Widget> pages = [
+      const HomeScreen(),
+      const HalamanRiwayatAbsensi(),
+      const AbsensiScreen(showBackButton: false),
+      const HalamanListEmployee(),
+      const ProfileScreen(),
+    ];
+
+    // Nav item definitions
+    final navItems = [
+      _NavItem(Icons.home_filled, Icons.home_outlined, 'Home'),
+      _NavItem(Icons.receipt_long, Icons.receipt_long_outlined, 'Riwayat'),
+      _NavItem(Icons.camera_alt, Icons.camera_alt_outlined, 'Absensi'),
+      _NavItem(Icons.people, Icons.people_outlined, 'Karyawan'),
+      _NavItem(Icons.person, Icons.person_outline, 'Profil'),
     ];
 
     return FutureBuilder<void>(
@@ -55,81 +68,149 @@ class _HomePageState extends State<HomePage> {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-
         if (_userEmail == null) {
           return const Scaffold(
             body: Center(child: Text('Email tidak ditemukan')),
           );
         }
 
-        return Scaffold(
-          body: pages[myCurrentIndex],
-          floatingActionButtonLocation:
-              FloatingActionButtonLocation.centerDocked,
-          floatingActionButton: Container(
-            width: 60 * scale, // lebih kecil
-            height: 60 * scale,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF2E57C9),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.blueAccent.withOpacity(0.4),
-                  blurRadius: 12 * scale,
-                  offset: Offset(0, 6 * scale),
-                ),
-              ],
-            ),
-            child: FloatingActionButton(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              onPressed: () {
-                setState(() {
-                  myCurrentIndex = 2;
-                });
-              },
-              child: Icon(
-                Icons.camera_alt,
-                size: 24 * scale,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          bottomNavigationBar: BottomAppBar(
-            shape: const CircularNotchedRectangle(),
-            notchMargin: 8 * scale,
-            elevation: 8,
-            color: Colors.white,
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: 16 * scale,
-                vertical: 6 * scale,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildTabIcon(Icons.home_filled, 0, scale),
-                  _buildTabIcon(Icons.receipt_long, 1, scale),
-                  SizedBox(width: 40 * scale), // ruang tengah
-                  _buildTabIcon(Icons.people, 3, scale),
-                  _buildTabIcon(Icons.person_outline, 4, scale),
-                ],
-              ),
-            ),
-          ),
-        );
+        if (isWeb) {
+          return _buildWebLayout(pages, navItems);
+        }
+        return _buildMobileLayout(pages, navItems, scale);
       },
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT — NavigationRail kiri + konten kanan
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout(List<Widget> pages, List<_NavItem> navItems) {
+    return Scaffold(
+      body: Row(
+        children: [
+          // ── NavigationRail ──────────────────────────────────
+          NavigationRail(
+            backgroundColor: Colors.white,
+            selectedIndex: myCurrentIndex,
+            onDestinationSelected: (i) => setState(() => myCurrentIndex = i),
+            labelType: NavigationRailLabelType.all,
+            leading: Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2E57C9).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.fingerprint,
+                  color: Color(0xFF2E57C9),
+                  size: 22,
+                ),
+              ),
+            ),
+            selectedIconTheme: const IconThemeData(
+              color: Color(0xFF2E57C9),
+              size: 24,
+            ),
+            unselectedIconTheme: IconThemeData(
+              color: Colors.grey[500],
+              size: 22,
+            ),
+            selectedLabelTextStyle: const TextStyle(
+              color: Color(0xFF2E57C9),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+            unselectedLabelTextStyle: TextStyle(
+              color: Colors.grey[500],
+              fontSize: 11,
+            ),
+            indicatorColor: const Color(0xFF2E57C9).withOpacity(0.1),
+            destinations: navItems
+                .map(
+                  (item) => NavigationRailDestination(
+                    icon: Icon(item.iconOutlined),
+                    selectedIcon: Icon(item.iconFilled),
+                    label: Text(item.label),
+                  ),
+                )
+                .toList(),
+          ),
+          // Divider vertikal
+          Container(width: 1, color: Colors.grey.shade200),
+          // ── Konten ─────────────────────────────────────────
+          Expanded(
+            child: IndexedStack(index: myCurrentIndex, children: pages),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (layout asli — BottomAppBar + FAB)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout(
+    List<Widget> pages,
+    List<_NavItem> navItems,
+    double scale,
+  ) {
+    return Scaffold(
+      body: pages[myCurrentIndex],
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: Container(
+        width: 60 * scale,
+        height: 60 * scale,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0xFF2E57C9),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.blueAccent.withOpacity(0.4),
+              blurRadius: 12 * scale,
+              offset: Offset(0, 6 * scale),
+            ),
+          ],
+        ),
+        child: FloatingActionButton(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          onPressed: () => setState(() => myCurrentIndex = 2),
+          child: Icon(Icons.camera_alt, size: 24 * scale, color: Colors.white),
+        ),
+      ),
+      bottomNavigationBar: BottomAppBar(
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8 * scale,
+        elevation: 8,
+        color: Colors.white,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 16 * scale,
+            vertical: 6 * scale,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildTabIcon(Icons.home_filled, 0, scale),
+              _buildTabIcon(Icons.receipt_long, 1, scale),
+              SizedBox(width: 40 * scale),
+              _buildTabIcon(Icons.people, 3, scale),
+              _buildTabIcon(Icons.person_outline, 4, scale),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildTabIcon(IconData icon, int index, double scale) {
     final isSelected = myCurrentIndex == index;
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          myCurrentIndex = index;
-        });
-      },
+      onTap: () => setState(() => myCurrentIndex = index),
       child: Container(
         padding: EdgeInsets.all(6 * scale),
         decoration: BoxDecoration(
@@ -144,4 +225,11 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+class _NavItem {
+  final IconData iconFilled;
+  final IconData iconOutlined;
+  final String label;
+  const _NavItem(this.iconFilled, this.iconOutlined, this.label);
 }

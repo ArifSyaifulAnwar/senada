@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:image_picker/image_picker.dart';
+
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
 
 enum AttendanceStatus { notCheckedIn, checkedIn, onBreak, checkedOut }
 
@@ -34,25 +36,18 @@ class TodayAttendance {
 
   Duration get workingDuration {
     if (checkInTime == null) return Duration.zero;
-
     DateTime endTime = checkOutTime ?? DateTime.now();
     Duration total = endTime.difference(checkInTime!);
-
-    // Subtract break time if any
     if (breakStartTime != null) {
       DateTime breakEnd = breakEndTime ?? DateTime.now();
-      Duration breakDuration = breakEnd.difference(breakStartTime!);
-      total = total - breakDuration;
+      total -= breakEnd.difference(breakStartTime!);
     }
-
     return total;
   }
 
   String get workingHours {
-    Duration duration = workingDuration;
-    int hours = duration.inHours;
-    int minutes = (duration.inMinutes % 60);
-    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}';
+    final d = workingDuration;
+    return '${d.inHours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}';
   }
 }
 
@@ -80,22 +75,18 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
   Map<String, dynamic>? _nearestOfficeLocation;
   String _locationInfo = "Memuat lokasi...";
 
-  // Tambahkan getter untuk mengecek apakah user berada di area kantor
   bool get _isInOfficeArea {
     if (_nearestOfficeLocation == null) return false;
-
-    double distance = _nearestOfficeLocation!['distance'] ?? double.infinity;
-    double allowedRadius =
+    final double distance =
+        _nearestOfficeLocation!['distance'] ?? double.infinity;
+    final double allowedRadius =
         (_nearestOfficeLocation!['radius_meters'] as num?)?.toDouble() ?? 100.0;
-
     return distance <= allowedRadius;
   }
 
-  // Getter untuk mendapatkan informasi lokasi yang akan ditampilkan
   String get _displayLocationInfo {
     if (_isLoadingLocation) return "Memuat lokasi...";
     if (_nearestOfficeLocation == null) return "Tidak ada kantor terdekat";
-
     return _locationInfo;
   }
 
@@ -103,28 +94,22 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
   void initState() {
     super.initState();
 
-    // Timer for real-time clock
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _currentTime = DateTime.now();
-      });
-    });
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => setState(() => _currentTime = DateTime.now()),
+    );
 
-    // Animation controllers
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
-
     _slideController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
     );
-
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-
     _slideAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _slideController, curve: Curves.elasticOut),
     );
@@ -133,13 +118,23 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
     _slideController.forward();
 
     _loadTodayAttendance();
-    _getCurrentLocation();
-    _loadOfficeLocations();
+    _loadOfficeLocations().then((_) => _getCurrentLocation());
   }
 
+  @override
+  void dispose() {
+    _timer.cancel();
+    _locationTimer?.cancel();
+    _pulseController.dispose();
+    _slideController.dispose();
+    super.dispose();
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // LOKASI — sama persis dengan AbsensiScreen
+  // ─────────────────────────────────────────────────────────────────
   Future<void> _loadOfficeLocations() async {
     try {
-      // Tambahkan timeout untuk request
       final tokenResponse = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
@@ -149,10 +144,7 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
           .timeout(const Duration(seconds: 10));
 
       if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final token = tokenData['access_token'];
-
-        // Panggil endpoint lokasi kantor dengan timeout
+        final token = json.decode(tokenResponse.body)['access_token'];
         final response = await http
             .get(
               Uri.parse('$baseURL/api/asn/office/locations'),
@@ -164,16 +156,14 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
             .timeout(const Duration(seconds: 10));
 
         if (response.statusCode == 200) {
-          final jsonData = json.decode(response.body);
-          final List<dynamic> data = jsonData['data'] ?? [];
-
+          final data =
+              (json.decode(response.body)['data'] ?? []) as List<dynamic>;
           if (mounted) {
             setState(() {
               _officeLocations = data
                   .map<Map<String, dynamic>>(
                     (item) => {
                       'id': item['id'],
-                      // Handle berbagai format field name
                       'office_name':
                           item['officeName'] ??
                           item['office_name'] ??
@@ -190,43 +180,29 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
                   .toList();
             });
           }
-        } else {
-          throw Exception(
-            'Gagal load lokasi kantor. Status: ${response.statusCode}',
-          );
         }
-      } else {
-        throw Exception(
-          'Gagal mendapatkan token. Status: ${tokenResponse.statusCode}',
-        );
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _locationInfo = "Gagal memuat data kantor: ${e.toString()}";
+          _locationInfo = "Gagal memuat data kantor";
           _isLoadingLocation = false;
         });
       }
-      rethrow;
     }
   }
 
   Future<void> _getCurrentLocation() async {
     if (!mounted) return;
-
     setState(() => _isLoadingLocation = true);
-
-    // Cancel timer sebelumnya jika ada
     _locationTimer?.cancel();
 
     try {
-      // Check if location service is enabled
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         throw Exception('Layanan lokasi tidak aktif. Silakan aktifkan GPS.');
       }
 
-      // Check permissions
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -234,58 +210,46 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
           throw Exception('Izin lokasi ditolak.');
         }
       }
-
       if (permission == LocationPermission.deniedForever) {
-        throw Exception(
-          'Izin lokasi ditolak secara permanen. Silakan aktifkan di pengaturan.',
-        );
+        throw Exception('Izin lokasi ditolak secara permanen.');
       }
 
-      // Set timeout timer
       _locationTimer = Timer(const Duration(seconds: 15), () {
         if (mounted && _isLoadingLocation) {
           setState(() {
-            _locationInfo = "Timeout mendapatkan lokasi. Silakan coba lagi.";
+            _locationInfo = "Timeout mendapatkan lokasi. Coba lagi.";
             _isLoadingLocation = false;
           });
         }
       });
 
-      // Get current position dengan timeout dan akurasi tinggi
-      Position position = await Geolocator.getCurrentPosition(
+      final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 10),
       );
-
-      // Cancel timer karena sudah berhasil
       _locationTimer?.cancel();
 
       if (!mounted) return;
-
-      //_currentPosition = position;
       _nearestOfficeLocation = _findNearestOffice(position);
 
       if (_nearestOfficeLocation != null) {
-        double distance = _nearestOfficeLocation!['distance'];
-        double allowedRadius = (_nearestOfficeLocation!['radius_meters'] as num)
-            .toDouble();
-
+        final double distance = _nearestOfficeLocation!['distance'];
+        final double allowedRadius =
+            (_nearestOfficeLocation!['radius_meters'] as num).toDouble();
         setState(() {
           _locationInfo = distance <= allowedRadius
-              ? "Anda berada dalam radius ${_nearestOfficeLocation!['office_name']}"
-              : "Anda di luar radius ${_nearestOfficeLocation!['office_name']} (${distance.toStringAsFixed(0)}m dari batas ${allowedRadius.toStringAsFixed(0)}m)";
+              ? '✅ Dalam radius ${_nearestOfficeLocation!['office_name']}'
+              : '❌ Di luar radius ${_nearestOfficeLocation!['office_name']} (${distance.toStringAsFixed(0)}m dari batas ${allowedRadius.toStringAsFixed(0)}m)';
           _isLoadingLocation = false;
         });
       } else {
         setState(() {
-          _locationInfo = "Tidak ada kantor terdekat yang ditemukan";
+          _locationInfo = "Tidak ada kantor terdekat";
           _isLoadingLocation = false;
         });
       }
     } catch (e) {
       _locationTimer?.cancel();
-      debugPrint('Error getting location: $e');
-
       if (mounted) {
         setState(() {
           _locationInfo = "Error: ${e.toString()}";
@@ -297,174 +261,111 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
 
   Map<String, dynamic>? _findNearestOffice(Position userPosition) {
     if (_officeLocations.isEmpty) return null;
-
-    Map<String, dynamic>? nearestOffice;
-    double minDistance = double.infinity;
-
+    Map<String, dynamic>? nearest;
+    double minDist = double.infinity;
     for (var office in _officeLocations) {
       try {
-        final double officeLat = (office['latitude'] as num).toDouble();
-        final double officeLon = (office['longitude'] as num).toDouble();
-
-        final double distance = Geolocator.distanceBetween(
+        final distance = Geolocator.distanceBetween(
           userPosition.latitude,
           userPosition.longitude,
-          officeLat,
-          officeLon,
+          (office['latitude'] as num).toDouble(),
+          (office['longitude'] as num).toDouble(),
         );
-
-        if (distance < minDistance) {
-          minDistance = distance;
-          nearestOffice = Map<String, dynamic>.from(office);
-          nearestOffice['distance'] = distance;
+        if (distance < minDist) {
+          minDist = distance;
+          nearest = Map<String, dynamic>.from(office);
+          nearest['distance'] = distance;
         }
-      } catch (e) {
-        debugPrint('Error calculating distance for office: $office, error: $e');
+      } catch (_) {
         continue;
       }
     }
-
-    return nearestOffice;
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    _locationTimer?.cancel();
-    _pulseController.dispose();
-    _slideController.dispose();
-    super.dispose();
+    return nearest;
   }
 
   Future<void> _loadTodayAttendance() async {
-    // Simulate loading today's attendance data
     await Future.delayed(const Duration(milliseconds: 500));
-  }
-
-  Future<void> _takeSelfie() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? photo = await picker.pickImage(
-      source: ImageSource.camera,
-      preferredCameraDevice: CameraDevice.front,
-    );
-
-    if (photo != null) {
-      setState(() {
-        _todayAttendance.selfieImage = photo.path;
-      });
-    }
   }
 
   Future<void> _performCheckIn() async {
     setState(() => _isLoading = true);
-
     try {
-      // Simulate API call
       await Future.delayed(const Duration(seconds: 2));
-
       setState(() {
         _todayAttendance.checkInTime = DateTime.now();
         _todayAttendance.checkInLocation =
-            _nearestOfficeLocation?['office_name'] ?? 'Unknown Location';
+            _nearestOfficeLocation?['office_name'] ?? 'Unknown';
         _todayAttendance.status = AttendanceStatus.checkedIn;
       });
-
       _showSuccessDialog(
         'Check In Berhasil!',
-        'Anda berhasil melakukan check in pada ${DateFormat('HH:mm').format(DateTime.now())}',
+        'Anda berhasil check in pada ${DateFormat('HH:mm').format(DateTime.now())}',
       );
-    } catch (e) {
+    } catch (_) {
       _showErrorDialog(
         'Gagal Check In',
-        'Terjadi kesalahan saat melakukan check in. Silakan coba lagi.',
+        'Terjadi kesalahan. Silakan coba lagi.',
       );
     }
-
     setState(() => _isLoading = false);
   }
 
   Future<void> _performCheckOut() async {
     setState(() => _isLoading = true);
-
     try {
       await Future.delayed(const Duration(seconds: 2));
-
       setState(() {
         _todayAttendance.checkOutTime = DateTime.now();
         _todayAttendance.checkOutLocation =
-            _nearestOfficeLocation?['office_name'] ?? 'Unknown Location';
+            _nearestOfficeLocation?['office_name'] ?? 'Unknown';
         _todayAttendance.status = AttendanceStatus.checkedOut;
       });
-
       _showSuccessDialog(
         'Check Out Berhasil!',
-        'Anda berhasil melakukan check out pada ${DateFormat('HH:mm').format(DateTime.now())}.\n\nTotal waktu kerja: ${_todayAttendance.workingHours}',
+        'Check out pada ${DateFormat('HH:mm').format(DateTime.now())}.\nTotal kerja: ${_todayAttendance.workingHours}',
       );
-    } catch (e) {
+    } catch (_) {
       _showErrorDialog(
         'Gagal Check Out',
-        'Terjadi kesalahan saat melakukan check out. Silakan coba lagi.',
+        'Terjadi kesalahan. Silakan coba lagi.',
       );
     }
-
     setState(() => _isLoading = false);
   }
 
   Future<void> _performBreakStart() async {
     setState(() => _isLoading = true);
-
-    try {
-      await Future.delayed(const Duration(seconds: 1));
-
-      setState(() {
-        _todayAttendance.breakStartTime = DateTime.now();
-        _todayAttendance.status = AttendanceStatus.onBreak;
-      });
-
-      _showSuccessDialog(
-        'Istirahat Dimulai',
-        'Waktu istirahat Anda telah dimulai.',
-      );
-    } catch (e) {
-      _showErrorDialog(
-        'Gagal Mulai Istirahat',
-        'Terjadi kesalahan. Silakan coba lagi.',
-      );
-    }
-
-    setState(() => _isLoading = false);
+    await Future.delayed(const Duration(seconds: 1));
+    setState(() {
+      _todayAttendance.breakStartTime = DateTime.now();
+      _todayAttendance.status = AttendanceStatus.onBreak;
+      _isLoading = false;
+    });
+    _showSuccessDialog(
+      'Istirahat Dimulai',
+      'Waktu istirahat Anda telah dimulai.',
+    );
   }
 
   Future<void> _performBreakEnd() async {
     setState(() => _isLoading = true);
-
-    try {
-      await Future.delayed(const Duration(seconds: 1));
-
-      setState(() {
-        _todayAttendance.breakEndTime = DateTime.now();
-        _todayAttendance.status = AttendanceStatus.checkedIn;
-      });
-
-      _showSuccessDialog('Istirahat Selesai', 'Selamat kembali bekerja!');
-    } catch (e) {
-      _showErrorDialog(
-        'Gagal Selesai Istirahat',
-        'Terjadi kesalahan. Silakan coba lagi.',
-      );
-    }
-
-    setState(() => _isLoading = false);
+    await Future.delayed(const Duration(seconds: 1));
+    setState(() {
+      _todayAttendance.breakEndTime = DateTime.now();
+      _todayAttendance.status = AttendanceStatus.checkedIn;
+      _isLoading = false;
+    });
+    _showSuccessDialog('Istirahat Selesai', 'Selamat kembali bekerja!');
   }
 
   void _showSuccessDialog(String title, String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.check_circle, color: Colors.green, size: 24),
+            const Icon(Icons.check_circle, color: Colors.green, size: 22),
             const SizedBox(width: 8),
             Text(title),
           ],
@@ -483,11 +384,11 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.error, color: Colors.red, size: 24),
+            const Icon(Icons.error, color: Colors.red, size: 22),
             const SizedBox(width: 8),
             Text(title),
           ],
@@ -503,223 +404,8 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
     );
   }
 
-  Widget _buildCurrentTime() {
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, -1),
-        end: Offset.zero,
-      ).animate(_slideAnimation),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [const Color(0xFF007AFF), const Color(0xFF5856D6)],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF007AFF).withOpacity(0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Text(
-              DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(_currentTime),
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.white70,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              DateFormat('HH:mm:ss').format(_currentTime),
-              style: const TextStyle(
-                fontSize: 48,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 2,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _isInOfficeArea ? Icons.location_on : Icons.location_off,
-                  color: _isInOfficeArea ? Colors.green : Colors.orange,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    _displayLocationInfo,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTodaysSummary() {
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(-1, 0),
-        end: Offset.zero,
-      ).animate(_slideAnimation),
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 16),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.today, color: const Color(0xFF007AFF), size: 20),
-                const SizedBox(width: 8),
-                const Text(
-                  'Ringkasan Hari Ini',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _buildSummaryItem(
-                    'Check In',
-                    _todayAttendance.checkInTime != null
-                        ? DateFormat(
-                            'HH:mm',
-                          ).format(_todayAttendance.checkInTime!)
-                        : '-',
-                    Icons.login,
-                    Colors.green,
-                  ),
-                ),
-                Expanded(
-                  child: _buildSummaryItem(
-                    'Check Out',
-                    _todayAttendance.checkOutTime != null
-                        ? DateFormat(
-                            'HH:mm',
-                          ).format(_todayAttendance.checkOutTime!)
-                        : '-',
-                    Icons.logout,
-                    Colors.red,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: _buildSummaryItem(
-                    'Jam Kerja',
-                    _todayAttendance.checkInTime != null
-                        ? _todayAttendance.workingHours
-                        : '-',
-                    Icons.schedule,
-                    Colors.blue,
-                  ),
-                ),
-                Expanded(
-                  child: _buildSummaryItem(
-                    'Status',
-                    _getStatusText(_todayAttendance.status),
-                    Icons.info,
-                    _getStatusColor(_todayAttendance.status),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryItem(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              color: color,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _getStatusText(AttendanceStatus status) {
-    switch (status) {
+  String _getStatusText(AttendanceStatus s) {
+    switch (s) {
       case AttendanceStatus.notCheckedIn:
         return 'Belum Absen';
       case AttendanceStatus.checkedIn:
@@ -731,8 +417,8 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
     }
   }
 
-  Color _getStatusColor(AttendanceStatus status) {
-    switch (status) {
+  Color _getStatusColor(AttendanceStatus s) {
+    switch (s) {
       case AttendanceStatus.notCheckedIn:
         return Colors.grey;
       case AttendanceStatus.checkedIn:
@@ -744,221 +430,13 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
     }
   }
 
-  Widget _buildActionButtons() {
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(1, 0),
-        end: Offset.zero,
-      ).animate(_slideAnimation),
-      child: Column(
-        children: [
-          if (_todayAttendance.status == AttendanceStatus.notCheckedIn) ...[
-            _buildMainActionButton(
-              'Check In',
-              'Mulai hari kerja Anda',
-              Icons.login,
-              Colors.green,
-              _isInOfficeArea ? _performCheckIn : null,
-            ),
-            if (!_isInOfficeArea)
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange[200]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.warning, color: Colors.orange[700], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Anda berada di luar area kantor. Silakan pindah ke area kantor untuk melakukan check in.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.orange[700],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-
-          if (_todayAttendance.status == AttendanceStatus.checkedIn) ...[
-            _buildMainActionButton(
-              'Check Out',
-              'Akhiri hari kerja Anda',
-              Icons.logout,
-              Colors.red,
-              _performCheckOut,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildSecondaryActionButton(
-                    'Mulai Istirahat',
-                    Icons.pause,
-                    Colors.orange,
-                    _performBreakStart,
-                  ),
-                ),
-              ],
-            ),
-          ],
-
-          if (_todayAttendance.status == AttendanceStatus.onBreak) ...[
-            _buildMainActionButton(
-              'Selesai Istirahat',
-              'Kembali bekerja',
-              Icons.play_arrow,
-              Colors.green,
-              _performBreakEnd,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildSecondaryActionButton(
-                    'Check Out',
-                    Icons.logout,
-                    Colors.red,
-                    _performCheckOut,
-                  ),
-                ),
-              ],
-            ),
-          ],
-
-          if (_todayAttendance.status == AttendanceStatus.checkedOut) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 20),
-              decoration: BoxDecoration(
-                color: Colors.green[50],
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.green[200]!),
-              ),
-              child: Column(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green, size: 48),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Hari Kerja Selesai',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Total waktu kerja: ${_todayAttendance.workingHours}',
-                    style: TextStyle(fontSize: 14, color: Colors.green[700]),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMainActionButton(
-    String title,
-    String subtitle,
-    IconData icon,
-    Color color,
-    VoidCallback? onPressed,
-  ) {
-    return AnimatedBuilder(
-      animation: _pulseAnimation,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: onPressed != null ? _pulseAnimation.value : 1.0,
-          child: Container(
-            width: double.infinity,
-            height: 80,
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ElevatedButton(
-              onPressed: _isLoading ? null : onPressed,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: color,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                elevation: onPressed != null ? 8 : 0,
-                shadowColor: color.withOpacity(0.3),
-                disabledBackgroundColor: Colors.grey[300],
-              ),
-              child: _isLoading
-                  ? const CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    )
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(icon, size: 24),
-                        const SizedBox(width: 12),
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              subtitle,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white70,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildSecondaryActionButton(
-    String title,
-    IconData icon,
-    Color color,
-    VoidCallback? onPressed,
-  ) {
-    return ElevatedButton.icon(
-      onPressed: _isLoading ? null : onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(
-        title,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color.withOpacity(0.1),
-        foregroundColor: color,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        elevation: 0,
-      ),
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final isWeb = _isWideScreen(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
       appBar: AppBar(
@@ -1003,92 +481,720 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: AnimatedBuilder(
-            animation: _slideAnimation,
-            builder: (context, child) {
-              return Column(
+      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (scroll vertikal — layout asli)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: AnimatedBuilder(
+        animation: _slideAnimation,
+        builder: (_, __) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCurrentTime(),
+            _buildTodaysSummary(),
+            _buildActionButtons(),
+            const SizedBox(height: 20),
+            _buildQuickActionsCard(),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: info kiri | aksi kanan)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Kolom kiri: jam + summary + quick actions ──────────
+        SizedBox(
+          width: 380,
+          child: Container(
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: AnimatedBuilder(
+                animation: _slideAnimation,
+                builder: (_, __) => Column(
+                  children: [
+                    _buildCurrentTime(),
+                    const SizedBox(height: 20),
+                    _buildTodaysSummary(),
+                    const SizedBox(height: 20),
+                    _buildQuickActionsCard(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // ── Kolom kanan: status badge + tombol aksi + panduan ──
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: AnimatedBuilder(
+              animation: _slideAnimation,
+              builder: (_, __) => Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildCurrentTime(),
-                  _buildTodaysSummary(),
+                  _buildWebStatusBadge(),
+                  const SizedBox(height: 24),
                   _buildActionButtons(),
+                  const SizedBox(height: 32),
+                  _buildWebGuide(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
-                  const SizedBox(height: 20),
+  // ── Status badge kolom kanan web ──────────────────────────────
+  Widget _buildWebStatusBadge() {
+    final status = _todayAttendance.status;
+    final color = _getStatusColor(status);
+    final text = _getStatusText(status);
 
-                  // Quick Actions
+    return Row(
+      children: [
+        const Text(
+          'Status Hari Ini',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1F2937),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                text,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Panduan kolom kanan web ───────────────────────────────────
+  Widget _buildWebGuide() {
+    final steps = [
+      {
+        'step': '1',
+        'title': 'Pastikan Lokasi Aktif',
+        'desc': 'GPS harus aktif dan izin lokasi diberikan.',
+        'color': Colors.blue,
+      },
+      {
+        'step': '2',
+        'title': 'Berada di Area Kantor',
+        'desc': 'Anda harus berada dalam radius kantor untuk Check In.',
+        'color': Colors.green,
+      },
+      {
+        'step': '3',
+        'title': 'Tekan Tombol Aksi',
+        'desc': 'Klik Check In / Check Out untuk mencatat kehadiran.',
+        'color': Colors.purple,
+      },
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Cara Absensi',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ...steps.map((s) {
+            final color = s['color'] as Color;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    width: 28,
+                    height: 28,
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.grey.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      color: color.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: color.withOpacity(0.3)),
                     ),
+                    child: Center(
+                      child: Text(
+                        s['step'] as String,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.flash_on,
-                              color: const Color(0xFF007AFF),
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Aksi Cepat',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
+                        Text(
+                          s['title'] as String,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1F2937),
+                          ),
                         ),
-                        const SizedBox(height: 16),
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildQuickActionButton(
-                                'Lihat Riwayat',
-                                Icons.history,
-                                Colors.blue,
-                                () {
-                                  // Navigate to attendance log
-                                  Navigator.pop(context);
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildQuickActionButton(
-                                'Ambil Foto',
-                                Icons.camera_alt,
-                                Colors.green,
-                                _takeSelfie,
-                              ),
-                            ),
-                          ],
+                        const SizedBox(height: 2),
+                        Text(
+                          s['desc'] as String,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
                   ),
-
-                  const SizedBox(height: 40),
                 ],
-              );
-            },
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildCurrentTime() {
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0, -1),
+        end: Offset.zero,
+      ).animate(_slideAnimation),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF007AFF).withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Text(
+              DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(_currentTime),
+              style: const TextStyle(
+                fontSize: 15,
+                color: Colors.white70,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              DateFormat('HH:mm:ss').format(_currentTime),
+              style: const TextStyle(
+                fontSize: 46,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _isInOfficeArea ? Icons.location_on : Icons.location_off,
+                  color: _isInOfficeArea ? Colors.green : Colors.orange,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _displayLocationInfo,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTodaysSummary() {
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(-1, 0),
+        end: Offset.zero,
+      ).animate(_slideAnimation),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.today, color: Color(0xFF007AFF), size: 18),
+                const SizedBox(width: 8),
+                const Text(
+                  'Ringkasan Hari Ini',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Check In',
+                    _todayAttendance.checkInTime != null
+                        ? DateFormat(
+                            'HH:mm',
+                          ).format(_todayAttendance.checkInTime!)
+                        : '-',
+                    Icons.login,
+                    Colors.green,
+                  ),
+                ),
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Check Out',
+                    _todayAttendance.checkOutTime != null
+                        ? DateFormat(
+                            'HH:mm',
+                          ).format(_todayAttendance.checkOutTime!)
+                        : '-',
+                    Icons.logout,
+                    Colors.red,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Jam Kerja',
+                    _todayAttendance.checkInTime != null
+                        ? _todayAttendance.workingHours
+                        : '-',
+                    Icons.schedule,
+                    Colors.blue,
+                  ),
+                ),
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Status',
+                    _getStatusText(_todayAttendance.status),
+                    Icons.info,
+                    _getStatusColor(_todayAttendance.status),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(11),
+      margin: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 15,
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(1, 0),
+        end: Offset.zero,
+      ).animate(_slideAnimation),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Belum Check In ────────────────────────────────────
+          if (_todayAttendance.status == AttendanceStatus.notCheckedIn) ...[
+            _buildMainActionButton(
+              'Check In',
+              'Mulai hari kerja Anda',
+              Icons.login,
+              Colors.green,
+              _isInOfficeArea ? _performCheckIn : null,
+            ),
+            if (!_isInOfficeArea) ...[
+              const SizedBox(height: 12),
+              _buildLocationWarning(),
+            ],
+          ],
+
+          // ── Sedang Kerja ──────────────────────────────────────
+          if (_todayAttendance.status == AttendanceStatus.checkedIn) ...[
+            _buildMainActionButton(
+              'Check Out',
+              'Akhiri hari kerja Anda',
+              Icons.logout,
+              Colors.red,
+              _performCheckOut,
+            ),
+            const SizedBox(height: 12),
+            _buildSecondaryActionButton(
+              'Mulai Istirahat',
+              Icons.pause,
+              Colors.orange,
+              _performBreakStart,
+            ),
+          ],
+
+          // ── Istirahat ─────────────────────────────────────────
+          if (_todayAttendance.status == AttendanceStatus.onBreak) ...[
+            _buildMainActionButton(
+              'Selesai Istirahat',
+              'Kembali bekerja',
+              Icons.play_arrow,
+              Colors.green,
+              _performBreakEnd,
+            ),
+            const SizedBox(height: 12),
+            _buildSecondaryActionButton(
+              'Check Out',
+              Icons.logout,
+              Colors.red,
+              _performCheckOut,
+            ),
+          ],
+
+          // ── Selesai ───────────────────────────────────────────
+          if (_todayAttendance.status == AttendanceStatus.checkedOut)
+            _buildWorkDoneCard(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationWarning() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange[200]!),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.warning, color: Colors.orange[700], size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Anda berada di luar area kantor. Pindah ke area kantor untuk Check In.',
+              style: TextStyle(fontSize: 12, color: Colors.orange[700]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkDoneCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      decoration: BoxDecoration(
+        color: Colors.green[50],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.green[200]!),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.check_circle, color: Colors.green, size: 48),
+          const SizedBox(height: 12),
+          const Text(
+            'Hari Kerja Selesai',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.green,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Total waktu kerja: ${_todayAttendance.workingHours}',
+            style: TextStyle(fontSize: 13, color: Colors.green[700]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMainActionButton(
+    String title,
+    String subtitle,
+    IconData icon,
+    Color color,
+    VoidCallback? onPressed,
+  ) {
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (_, __) => Transform.scale(
+        scale: onPressed != null ? _pulseAnimation.value : 1.0,
+        child: SizedBox(
+          width: double.infinity,
+          height: 76,
+          child: ElevatedButton(
+            onPressed: _isLoading ? null : onPressed,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: color,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              elevation: onPressed != null ? 8 : 0,
+              shadowColor: color.withOpacity(0.3),
+              disabledBackgroundColor: Colors.grey[300],
+            ),
+            child: _isLoading
+                ? const CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon, size: 22),
+                      const SizedBox(width: 12),
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSecondaryActionButton(
+    String title,
+    IconData icon,
+    Color color,
+    VoidCallback? onPressed,
+  ) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isLoading ? null : onPressed,
+        icon: Icon(icon, size: 16),
+        label: Text(
+          title,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color.withOpacity(0.1),
+          foregroundColor: color,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          elevation: 0,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.flash_on, color: Color(0xFF007AFF), size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Aksi Cepat',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _buildQuickActionButton(
+                  'Lihat Riwayat',
+                  Icons.history,
+                  Colors.blue,
+                  () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildQuickActionButton(
+                  'Refresh Lokasi',
+                  Icons.my_location,
+                  Colors.green,
+                  _getCurrentLocation,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1111,12 +1217,12 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen>
         ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 8),
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 6),
             Text(
               title,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 color: color,
                 fontWeight: FontWeight.w600,
               ),

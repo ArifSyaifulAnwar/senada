@@ -2,11 +2,12 @@
 
 import 'package:absensikaryawan/Screen%20HRD/Home/homenyahrd.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
-import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/listkaryawan.dart';
+
 import 'package:absensikaryawan/Screen%20admin/Home/profileadmin.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../Screen User/Screen HRD/hrd_listkaryawan.dart';
 import 'Home/riwayatabsensihrd.dart';
 
 bool _isWideScreen(BuildContext context) =>
@@ -48,7 +49,7 @@ class _HomePageHRDState extends State<HomePageHRD> {
       const HomeScreenHRD(), // 0 - Home
       const HalamanHRDAbsensi(), // 1 - Riwayat Absensi
       const AbsensiScreen(), // 2 - Kamera (FAB / mobile only)
-      const HalamanListEmployee(), // 3 - List Karyawan
+      const HrdListKaryawanPage(), // 3 - List Karyawan
       const ProfileScreenAdmin(), // 4 - Profile
     ];
 
