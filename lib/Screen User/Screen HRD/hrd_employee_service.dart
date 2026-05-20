@@ -1,6 +1,4 @@
 // File: Services/hrd_employee_service.dart
-// Service khusus HRD dengan kemampuan CRUD lengkap
-
 // ignore_for_file: avoid_print
 
 import 'dart:convert';
@@ -15,17 +13,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class HrdUpdateEmployeeRequest {
-  // Identity
   final int id;
   final String? name;
   final String? email;
   final String? phone;
   final String? additionalPhone;
-
-  // Personal
   final String? gender;
   final String? placeOfBirth;
-  final String? birthDate; // yyyy-MM-dd
+  final String? birthDate;
   final String? maritalStatus;
   final String? bloodType;
   final String? religion;
@@ -33,33 +28,25 @@ class HrdUpdateEmployeeRequest {
   final String? nip;
   final String? npwp;
   final String? passportNumber;
-  final String? passportExpiry; // yyyy-MM-dd
-
-  // Address
+  final String? passportExpiry;
   final String? address;
   final String? citizenIdAddress;
   final String? residentialAddress;
   final String? postalCode;
-
-  // Employment
   final String? department;
   final String? jobPosition;
   final String? jobLevel;
   final String? employmentStatus;
-  final String? joinDate; // yyyy-MM-dd
-  final String? endContractDate; // yyyy-MM-dd
+  final String? joinDate;
+  final String? endContractDate;
   final String? manager;
   final String? approvalLine;
   final String? grade;
   final String? classLevel;
   final String? branch;
   final String? companyName;
-  final String? statusDisplay; // Aktif / Cuti / Non-Aktif
-
-  // Skills
+  final String? statusDisplay;
   final List<String>? skills;
-
-  // Photo — base64 string (tanpa prefix data:image/...)
   final String? profilePhotoBase64;
 
   HrdUpdateEmployeeRequest({
@@ -101,9 +88,14 @@ class HrdUpdateEmployeeRequest {
   });
 
   Map<String, dynamic> toJson() {
-    final data = <String, dynamic>{'Id': id};
+    final data = <String, dynamic>{
+      'TargetId': id, // C# model pakai TargetId, bukan Id
+    };
+
     void add(String key, dynamic value) {
-      if (value != null) data[key] = value;
+      if (value == null) return;
+      if (value is String && value.isEmpty) return;
+      data[key] = value;
     }
 
     add('Name', name);
@@ -125,7 +117,7 @@ class HrdUpdateEmployeeRequest {
     add('CitizenIdAddress', citizenIdAddress);
     add('ResidentialAddress', residentialAddress);
     add('PostalCode', postalCode);
-    add('Department', department);
+    add('Organization', department); // C# model pakai Organization
     add('JobPosition', jobPosition);
     add('JobLevel', jobLevel);
     add('EmploymentStatus', employmentStatus);
@@ -134,12 +126,20 @@ class HrdUpdateEmployeeRequest {
     add('Manager', manager);
     add('ApprovalLine', approvalLine);
     add('Grade', grade);
-    add('Class', classLevel);
+    add('ClassLevel', classLevel); // C# model pakai ClassLevel
     add('Branch', branch);
-    add('CompanyName', companyName);
     add('StatusDisplay', statusDisplay);
+
     if (skills != null) data['Skills'] = skills;
-    add('ProfilePhoto', profilePhotoBase64);
+
+    // Strip base64 prefix "data:image/jpeg;base64," kalau ada
+    if (profilePhotoBase64 != null && profilePhotoBase64!.isNotEmpty) {
+      String photo = profilePhotoBase64!;
+      if (photo.contains(',')) photo = photo.split(',').last;
+      photo = photo.trim().replaceAll(' ', '+');
+      data['ProfilePhoto'] = photo;
+    }
+
     return data;
   }
 }
@@ -174,21 +174,35 @@ class HrdCreateEmployeeRequest {
   });
 
   Map<String, dynamic> toJson() {
-    final data = <String, dynamic>{'Name': name, 'Email': email};
+    final data = <String, dynamic>{
+      'Name': name,
+      'Mail': email,
+    }; // C# pakai Mail
+
     void add(String key, dynamic value) {
-      if (value != null) data[key] = value;
+      if (value == null) return;
+      if (value is String && value.isEmpty) return;
+      data[key] = value;
     }
 
     add('Phone', phone);
-    add('Department', department);
+    add('Organization', department); // C# pakai Organization
     add('JobPosition', jobPosition);
     add('JobLevel', jobLevel);
     add('EmploymentStatus', employmentStatus);
     add('JoinDate', joinDate);
     add('Gender', gender);
     add('Nik', nik);
-    add('ProfilePhoto', profilePhotoBase64);
+
     if (skills != null) data['Skills'] = skills;
+
+    if (profilePhotoBase64 != null && profilePhotoBase64!.isNotEmpty) {
+      String photo = profilePhotoBase64!;
+      if (photo.contains(',')) photo = photo.split(',').last;
+      photo = photo.trim().replaceAll(' ', '+');
+      data['ProfilePhoto'] = photo;
+    }
+
     return data;
   }
 }
@@ -198,10 +212,10 @@ class HrdCreateEmployeeRequest {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class HrdEmployeeService {
-  static const String _baseUrl = '$baseURL/api/employee';
   static const String _hrdUrl = '$baseURL/api/hrd/employee';
 
-  // ── Auth helpers ────────────────────────────────────────────────────────────
+  // ── Auth helpers ──────────────────────────────────────────────────────────
+
   static Future<String?> _getToken() async {
     try {
       final response = await http
@@ -216,7 +230,7 @@ class HrdEmployeeService {
         return data['access_token'];
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
@@ -226,7 +240,7 @@ class HrdEmployeeService {
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'Authorization': 'bearer $token',
+      'Authorization': 'Bearer $token',
     };
   }
 
@@ -239,7 +253,8 @@ class HrdEmployeeService {
     }
   }
 
-  // ── Konversi file foto → base64 ─────────────────────────────────────────────
+  // ── Konversi file foto → base64 ───────────────────────────────────────────
+
   static Future<String?> fileToBase64(File file) async {
     try {
       final bytes = await file.readAsBytes();
@@ -250,7 +265,8 @@ class HrdEmployeeService {
     }
   }
 
-  // ── GET LIST (sama seperti EmployeeService, di-reuse) ───────────────────────
+  // ── GET LIST ──────────────────────────────────────────────────────────────
+
   static Future<ApiResponse<EmployeeListResponse>> getEmployeeList({
     String? searchQuery,
     String? department,
@@ -269,7 +285,7 @@ class HrdEmployeeService {
       }
 
       final body = <String, dynamic>{
-        'UserId': userId,
+        'HrdUserId': userId, // pakai HrdUserId sesuai C# model
         'SortBy': sortBy ?? 'name_asc',
         'Page': page,
         'PageSize': pageSize,
@@ -280,28 +296,31 @@ class HrdEmployeeService {
       if (department != null && department.isNotEmpty) {
         body['Department'] = department;
       }
-      if (status != null && status.isNotEmpty) body['Status'] = status;
+      if (status != null && status.isNotEmpty) {
+        body['Status'] = status;
+      }
 
       final response = await http
           .post(
-            Uri.parse('$_baseUrl/list'),
+            Uri.parse('$_hrdUrl/list'), // pakai hrd endpoint
             headers: await _getHeaders(),
             body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
-        if (json['Success'] == true && json['Data'] != null) {
+        final j = jsonDecode(response.body);
+        // API return lowercase success/message/data
+        if (j['success'] == true && j['data'] != null) {
           return ApiResponse(
             success: true,
-            message: json['Message'] ?? 'Success',
-            data: EmployeeListResponse.fromJson(json['Data']),
+            message: j['message'] ?? 'Success',
+            data: EmployeeListResponse.fromJson(j['data']),
           );
         }
         return ApiResponse(
           success: false,
-          message: json['Message'] ?? 'Gagal mengambil data',
+          message: j['message'] ?? 'Gagal mengambil data',
         );
       }
       return ApiResponse(
@@ -313,29 +332,35 @@ class HrdEmployeeService {
     }
   }
 
-  // ── GET DETAIL ──────────────────────────────────────────────────────────────
+  // ── GET DETAIL ────────────────────────────────────────────────────────────
+
   static Future<ApiResponse<EmployeeApiData>> getEmployeeDetail(int id) async {
     try {
+      final hrdUserId = await _getCurrentUserId();
+      if (hrdUserId == null) {
+        return ApiResponse(success: false, message: 'UserID tidak ditemukan.');
+      }
+
       final response = await http
           .post(
-            Uri.parse('$_baseUrl/detail'),
+            Uri.parse('$_hrdUrl/detail'),
             headers: await _getHeaders(),
-            body: jsonEncode({'Id': id}),
+            body: jsonEncode({'HrdUserId': hrdUserId, 'TargetId': id}),
           )
           .timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
-        if (json['Success'] == true && json['Data'] != null) {
+        final j = jsonDecode(response.body);
+        if (j['success'] == true && j['data'] != null) {
           return ApiResponse(
             success: true,
-            message: json['Message'] ?? 'Success',
-            data: EmployeeApiData.fromJson(json['Data']),
+            message: j['message'] ?? 'Success',
+            data: EmployeeApiData.fromJson(j['data']),
           );
         }
         return ApiResponse(
           success: false,
-          message: json['Message'] ?? 'Data tidak ditemukan',
+          message: j['message'] ?? 'Data tidak ditemukan',
         );
       }
       return ApiResponse(
@@ -347,34 +372,42 @@ class HrdEmployeeService {
     }
   }
 
-  // ── CREATE (HRD) ────────────────────────────────────────────────────────────
-  /// POST /api/hrd/employee/create
+  // ── CREATE ────────────────────────────────────────────────────────────────
+
   static Future<ApiResponse<EmployeeApiData>> createEmployee(
     HrdCreateEmployeeRequest request,
   ) async {
     try {
+      final hrdUserId = await _getCurrentUserId();
+      if (hrdUserId == null) {
+        return ApiResponse(success: false, message: 'UserID tidak ditemukan.');
+      }
+
+      final body = request.toJson();
+      body['HrdUserId'] = hrdUserId; // inject HrdUserId
+
       final response = await http
           .post(
             Uri.parse('$_hrdUrl/create'),
             headers: await _getHeaders(),
-            body: jsonEncode(request.toJson()),
+            body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final json = jsonDecode(response.body);
-        if (json['Success'] == true) {
+        final j = jsonDecode(response.body);
+        if (j['success'] == true) {
           return ApiResponse(
             success: true,
-            message: json['Message'] ?? 'Karyawan berhasil dibuat',
-            data: json['Data'] != null
-                ? EmployeeApiData.fromJson(json['Data'])
+            message: j['message'] ?? 'Karyawan berhasil dibuat',
+            data: j['data'] != null
+                ? EmployeeApiData.fromJson(j['data'])
                 : null,
           );
         }
         return ApiResponse(
           success: false,
-          message: json['Message'] ?? 'Gagal membuat karyawan',
+          message: j['message'] ?? 'Gagal membuat karyawan',
         );
       }
       return _handleHttpError(response);
@@ -383,34 +416,45 @@ class HrdEmployeeService {
     }
   }
 
-  // ── UPDATE (HRD) ────────────────────────────────────────────────────────────
-  /// POST /api/hrd/employee/update
+  // ── UPDATE ────────────────────────────────────────────────────────────────
+
   static Future<ApiResponse<EmployeeApiData>> updateEmployee(
     HrdUpdateEmployeeRequest request,
   ) async {
     try {
+      final hrdUserId = await _getCurrentUserId();
+      if (hrdUserId == null) {
+        return ApiResponse(
+          success: false,
+          message: 'UserID tidak ditemukan. Silakan login ulang.',
+        );
+      }
+
+      final body = request.toJson();
+      body['HrdUserId'] = hrdUserId; // inject HrdUserId — wajib untuk SP
+
       final response = await http
           .post(
             Uri.parse('$_hrdUrl/update'),
             headers: await _getHeaders(),
-            body: jsonEncode(request.toJson()),
+            body: jsonEncode(body),
           )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
-        if (json['Success'] == true) {
+        final j = jsonDecode(response.body);
+        if (j['success'] == true) {
           return ApiResponse(
             success: true,
-            message: json['Message'] ?? 'Data berhasil diperbarui',
-            data: json['Data'] != null
-                ? EmployeeApiData.fromJson(json['Data'])
+            message: j['message'] ?? 'Data berhasil diperbarui',
+            data: j['data'] != null
+                ? EmployeeApiData.fromJson(j['data'])
                 : null,
           );
         }
         return ApiResponse(
           success: false,
-          message: json['Message'] ?? 'Gagal memperbarui data',
+          message: j['message'] ?? 'Gagal memperbarui data',
         );
       }
       return _handleHttpError(response);
@@ -419,23 +463,28 @@ class HrdEmployeeService {
     }
   }
 
-  // ── DELETE (HRD) ────────────────────────────────────────────────────────────
-  /// POST /api/hrd/employee/delete
+  // ── DELETE ────────────────────────────────────────────────────────────────
+
   static Future<ApiResponse<void>> deleteEmployee(int id) async {
     try {
+      final hrdUserId = await _getCurrentUserId();
+      if (hrdUserId == null) {
+        return ApiResponse(success: false, message: 'UserID tidak ditemukan.');
+      }
+
       final response = await http
           .post(
             Uri.parse('$_hrdUrl/delete'),
             headers: await _getHeaders(),
-            body: jsonEncode({'Id': id}),
+            body: jsonEncode({'HrdUserId': hrdUserId, 'TargetId': id}),
           )
           .timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
+        final j = jsonDecode(response.body);
         return ApiResponse(
-          success: json['Success'] ?? false,
-          message: json['Message'] ?? 'Selesai',
+          success: j['success'] ?? false,
+          message: j['message'] ?? 'Selesai',
         );
       }
       return _handleHttpError(response);
@@ -444,26 +493,40 @@ class HrdEmployeeService {
     }
   }
 
-  // ── UPDATE PHOTO ONLY ───────────────────────────────────────────────────────
-  /// POST /api/hrd/employee/update-photo  (multipart atau base64)
+  // ── UPDATE PHOTO ──────────────────────────────────────────────────────────
+
   static Future<ApiResponse<void>> updateEmployeePhoto(
     int id,
     String base64Photo,
   ) async {
     try {
+      final hrdUserId = await _getCurrentUserId();
+      if (hrdUserId == null) {
+        return ApiResponse(success: false, message: 'UserID tidak ditemukan.');
+      }
+
+      // Strip prefix kalau ada
+      String photo = base64Photo;
+      if (photo.contains(',')) photo = photo.split(',').last;
+      photo = photo.trim().replaceAll(' ', '+');
+
       final response = await http
           .post(
             Uri.parse('$_hrdUrl/update-photo'),
             headers: await _getHeaders(),
-            body: jsonEncode({'Id': id, 'ProfilePhoto': base64Photo}),
+            body: jsonEncode({
+              'HrdUserId': hrdUserId,
+              'TargetId': id,
+              'ProfilePhoto': photo,
+            }),
           )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
+        final j = jsonDecode(response.body);
         return ApiResponse(
-          success: json['Success'] ?? false,
-          message: json['Message'] ?? 'Foto berhasil diperbarui',
+          success: j['success'] ?? false,
+          message: j['message'] ?? 'Foto berhasil diperbarui',
         );
       }
       return _handleHttpError(response);
@@ -472,13 +535,14 @@ class HrdEmployeeService {
     }
   }
 
-  // ── Helper HTTP error ────────────────────────────────────────────────────────
+  // ── Helper ────────────────────────────────────────────────────────────────
+
   static ApiResponse<T> _handleHttpError<T>(http.Response response) {
     try {
-      final json = jsonDecode(response.body);
+      final j = jsonDecode(response.body);
       return ApiResponse(
         success: false,
-        message: json['Message'] ?? 'HTTP ${response.statusCode}',
+        message: j['message'] ?? j['Message'] ?? 'HTTP ${response.statusCode}',
       );
     } catch (_) {
       return ApiResponse(

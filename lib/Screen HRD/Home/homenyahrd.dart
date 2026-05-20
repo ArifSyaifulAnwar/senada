@@ -1064,8 +1064,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         const Color(0xFFFFCC02),
       ),
       _buildServiceIconData(
-        Icons.flag,
-        'Goal',
+        Icons.event,
+        "Acara",
         const Color(0xFF795548),
         onTap: () => _showComingSoonDialog(context),
       ),

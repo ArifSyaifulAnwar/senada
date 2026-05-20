@@ -1,7 +1,8 @@
 // screens/time_off_screen.dart
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
-import 'dart:io';
+import 'dart:io' show File, Directory, Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:typed_data';
 
 import 'package:absensikaryawan/Screen%20User/home/ajuantimeoff.dart';
@@ -14,9 +15,12 @@ import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class TimeOffScreen extends StatefulWidget {
-  final String userId; // Pass dari screen sebelumnya
+// ── helper ──────────────────────────────────────────────────────────
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
 
+class TimeOffScreen extends StatefulWidget {
+  final String userId;
   const TimeOffScreen({super.key, required this.userId});
 
   @override
@@ -24,18 +28,16 @@ class TimeOffScreen extends StatefulWidget {
 }
 
 class _TimeOffScreenState extends State<TimeOffScreen> {
-  List<TimeOffModel> _allTimeOffList = []; // Semua data dari API
-  List<TimeOffModel> _filteredTimeOffList = []; // Data yang sudah difilter
+  List<TimeOffModel> _allTimeOffList = [];
+  List<TimeOffModel> _filteredTimeOffList = [];
   bool _isLoading = true;
   String _errorMessage = '';
   final ScrollController _scrollController = ScrollController();
 
-  // Filter variables
   int _selectedYear = DateTime.now().year;
   int _selectedMonth = DateTime.now().month;
   bool _isFilterExpanded = false;
 
-  // Month names
   final List<String> _monthNames = [
     'Semua Bulan',
     'Januari',
@@ -69,15 +71,12 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       _isLoading = true;
       _errorMessage = '';
     });
-
     try {
-      // Ambil semua data dari API tanpa filter
       final response = await TimeOffService.getMyTimeOff(widget.userId);
-
       if (response.success && response.data != null) {
         setState(() {
           _allTimeOffList = response.data!.data;
-          _applyClientSideFilter(); // Terapkan filter di client
+          _applyClientSideFilter();
         });
       } else {
         setState(() {
@@ -91,43 +90,27 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         _isLoading = false;
       });
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
   void _applyClientSideFilter() {
-    List<TimeOffModel> filtered = _allTimeOffList;
-
-    // Filter berdasarkan tahun
-    filtered = filtered.where((timeOff) {
-      return timeOff.tanggalMulai.year == _selectedYear;
-    }).toList();
-
-    // Filter berdasarkan bulan (jika bukan "Semua Bulan")
+    List<TimeOffModel> filtered = _allTimeOffList
+        .where((t) => t.tanggalMulai.year == _selectedYear)
+        .toList();
     if (_selectedMonth != 0) {
-      filtered = filtered.where((timeOff) {
-        return timeOff.tanggalMulai.month == _selectedMonth;
-      }).toList();
+      filtered = filtered
+          .where((t) => t.tanggalMulai.month == _selectedMonth)
+          .toList();
     }
-
-    // Urutkan berdasarkan tanggal terbaru
     filtered.sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
-
-    setState(() {
-      _filteredTimeOffList = filtered;
-    });
+    setState(() => _filteredTimeOffList = filtered);
   }
 
-  Future<void> _refreshData() async {
-    await _loadTimeOffData();
-  }
+  Future<void> _refreshData() async => _loadTimeOffData();
 
   void _applyFilter() {
-    setState(() {
-      _isFilterExpanded = false;
-    });
+    setState(() => _isFilterExpanded = false);
     _applyClientSideFilter();
   }
 
@@ -147,21 +130,16 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     return '$monthName $_selectedYear';
   }
 
-  // Mendapatkan tahun yang tersedia dari data
   List<int> _getAvailableYears() {
     final years = _allTimeOffList
-        .map((timeOff) => timeOff.tanggalMulai.year)
+        .map((t) => t.tanggalMulai.year)
         .toSet()
         .toList();
-
-    years.sort((a, b) => b.compareTo(a)); // Urutkan dari terbaru
-
-    // Jika tidak ada data, gunakan 5 tahun terakhir
+    years.sort((a, b) => b.compareTo(a));
     if (years.isEmpty) {
-      final currentYear = DateTime.now().year;
-      return List.generate(5, (index) => currentYear - 2 + index);
+      final y = DateTime.now().year;
+      return List.generate(5, (i) => y - 2 + i);
     }
-
     return years;
   }
 
@@ -169,148 +147,31 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) =>
+        builder: (_) =>
             AddTimeOffScreen(userId: widget.userId, editData: editData),
       ),
     ).then((result) {
-      if (result == true) {
-        _refreshData();
-      }
+      if (result == true) _refreshData();
     });
   }
 
-  // Future<void> _deleteTimeOff(TimeOffModel timeOff) async {
-  //   // Show confirmation dialog
-  //   final confirmed = await showDialog<bool>(
-  //     context: context,
-  //     builder: (context) => AlertDialog(
-  //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-  //       title: const Row(
-  //         children: [
-  //           Icon(
-  //             Icons.warning_amber_rounded,
-  //             color: Color(0xFFEF4444),
-  //             size: 28,
-  //           ),
-  //           SizedBox(width: 12),
-  //           Text(
-  //             'Konfirmasi Hapus',
-  //             style: TextStyle(fontWeight: FontWeight.w700),
-  //           ),
-  //         ],
-  //       ),
-  //       content: Column(
-  //         mainAxisSize: MainAxisSize.min,
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: [
-  //           const Text(
-  //             'Apakah Anda yakin ingin menghapus pengajuan time off ini?',
-  //             style: TextStyle(fontSize: 16),
-  //           ),
-  //           const SizedBox(height: 16),
-  //           Container(
-  //             padding: const EdgeInsets.all(16),
-  //             decoration: BoxDecoration(
-  //               color: const Color(0xFFF8FAFC),
-  //               borderRadius: BorderRadius.circular(12),
-  //               border: Border.all(color: const Color(0xFFE2E8F0)),
-  //             ),
-  //             child: Column(
-  //               crossAxisAlignment: CrossAxisAlignment.start,
-  //               children: [
-  //                 Text('📅 ${timeOff.jenisTimeOff}'),
-  //                 const SizedBox(height: 4),
-  //                 Text(
-  //                   '🗓️ ${DateFormat('dd MMM yyyy').format(timeOff.tanggalMulai)} - ${DateFormat('dd MMM yyyy').format(timeOff.tanggalSelesai)}',
-  //                 ),
-  //                 const SizedBox(height: 4),
-  //                 Text('⏱️ ${timeOff.totalHari} hari'),
-  //                 if (timeOff.catatan != null &&
-  //                     timeOff.catatan!.isNotEmpty) ...[
-  //                   const SizedBox(height: 4),
-  //                   Text('📝 ${timeOff.catatan}'),
-  //                 ],
-  //               ],
-  //             ),
-  //           ),
-  //           const SizedBox(height: 12),
-  //           const Text(
-  //             'Data yang dihapus tidak dapat dikembalikan.',
-  //             style: TextStyle(
-  //               fontSize: 14,
-  //               color: Color(0xFFEF4444),
-  //               fontWeight: FontWeight.w500,
-  //             ),
-  //           ),
-  //         ],
-  //       ),
-  //       actions: [
-  //         TextButton(
-  //           onPressed: () => Navigator.of(context).pop(false),
-  //           child: const Text('Batal'),
-  //         ),
-  //         ElevatedButton(
-  //           onPressed: () => Navigator.of(context).pop(true),
-  //           style: ElevatedButton.styleFrom(
-  //             backgroundColor: const Color(0xFFEF4444),
-  //             foregroundColor: Colors.white,
-  //             shape: RoundedRectangleBorder(
-  //               borderRadius: BorderRadius.circular(8),
-  //             ),
-  //           ),
-  //           child: const Text('Hapus'),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-
-  //   if (confirmed == true) {
-  //     // Show loading dialog
-  //     showDialog(
-  //       context: context,
-  //       barrierDismissible: false,
-  //       builder: (context) => const Center(child: CircularProgressIndicator()),
-  //     );
-
-  //     try {
-  //       final deleteRequest = DeleteTimeOffRequest(
-  //         id: timeOff.id!,
-  //         userId: widget.userId,
-  //       );
-
-  //       final response = await TimeOffService.deleteTimeOff(deleteRequest);
-  //       Navigator.pop(context); // Close loading dialog
-
-  //       if (response.success) {
-  //         _showSnackBar('Data time off berhasil dihapus', isError: false);
-  //         _refreshData();
-  //       } else {
-  //         _showSnackBar(response.message, isError: true);
-  //       }
-  //     } catch (e) {
-  //       Navigator.pop(context); // Close loading dialog
-  //       _showSnackBar('Terjadi kesalahan: ${e.toString()}', isError: true);
-  //     }
-  //   }
-  // }
-
+  // ── file download/preview ────────────────────────────────────────
   Future<void> _downloadFile(TimeOffModel timeOff) async {
     if (timeOff.id == null) {
-      _showSnackBar('ID Cuti tidak valid', isError: true);
+      _showSnackBar('ID Izin tidak valid', isError: true);
       return;
     }
-
     try {
       _showSnackBar('Mengunduh file...', isError: false);
-
       final response = await TimeOffService.downloadFile(
         timeOff.id!,
         widget.userId,
       );
-
       if (response.success && response.data != null) {
-        final fileBytes = Uint8List.fromList(response.data!);
-        await _saveAndOpenFile(fileBytes, timeOff.fileName!);
+        await _saveAndOpenFile(
+          Uint8List.fromList(response.data!),
+          timeOff.fileName!,
+        );
       } else {
         _showSnackBar(response.message, isError: true);
       }
@@ -320,38 +181,29 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Future<void> _saveAndOpenFile(Uint8List fileBytes, String fileName) async {
+    // Web: tidak bisa akses filesystem, tampilkan info saja
+    if (kIsWeb) {
+      _showSnackBar(
+        'File tidak dapat disimpan di web. Gunakan tombol Preview untuk melihat file.',
+        isError: false,
+      );
+      return;
+    }
     try {
-      // Check dan request permission yang tepat
-      final hasPermission = await _requestStoragePermission();
-      if (!hasPermission) {
-        _showSnackBar(
-          'Izin akses storage diperlukan untuk menyimpan file',
-          isError: true,
-        );
+      if (!await _requestStoragePermission()) {
+        _showSnackBar('Izin akses storage diperlukan', isError: true);
         return;
       }
-
-      // Get directory untuk menyimpan file
       final directory = await _getDownloadDirectory();
       if (directory == null) {
         _showSnackBar('Tidak dapat mengakses folder download', isError: true);
         return;
       }
-
-      // Buat file path yang unik jika file sudah ada
       final filePath = await _getUniqueFilePath(directory.path, fileName);
-      final file = File(filePath);
-
-      // Write file
-      await file.writeAsBytes(fileBytes);
-
+      await File(filePath).writeAsBytes(fileBytes);
       _showSnackBar('File berhasil diunduh ke Downloads', isError: false);
-
-      // Open file automatically
       final result = await OpenFile.open(filePath);
-
       if (result.type != ResultType.done) {
-        // Jika gagal buka otomatis, tampilkan dialog
         _showOpenFileDialog(filePath, fileName);
       }
     } catch (e) {
@@ -360,93 +212,55 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Future<String> _getUniqueFilePath(String dirPath, String fileName) async {
+    if (kIsWeb) return ''; // tidak dipakai di web
     String filePath = '$dirPath/$fileName';
-
-    // Jika file sudah ada, tambahkan angka di belakang nama
     int counter = 1;
     while (await File(filePath).exists()) {
-      final nameWithoutExt = fileName.split('.').first;
-      final extension = fileName.split('.').last;
-      filePath = '$dirPath/${nameWithoutExt}_$counter.$extension';
+      final name = fileName.split('.').first;
+      final ext = fileName.split('.').last;
+      filePath = '$dirPath/${name}_$counter.$ext';
       counter++;
     }
-
     return filePath;
   }
 
   Future<bool> _requestStoragePermission() async {
-    if (Platform.isIOS) {
-      return true; // iOS tidak perlu permission khusus untuk Documents directory
-    }
-
-    // Get Android version - PERBAIKAN: gunakan version.sdkInt
-    final androidInfo = await DeviceInfoPlugin().androidInfo;
-    final sdkInt = androidInfo.version.sdkInt; // UBAH DARI androidInfo.sdkInt
-
-    if (sdkInt >= 30) {
-      // Android 11+ (API 30+) - Tidak perlu permission untuk Downloads folder
-      return true;
-    } else if (sdkInt >= 23) {
-      // Android 6+ (API 23+) - Perlu permission storage
-      final status = await Permission.storage.request();
-      return status.isGranted;
-    } else {
-      // Android dibawah 6.0 - Tidak perlu runtime permission
-      return true;
-    }
+    if (kIsWeb) return true; // web tidak pakai storage permission
+    if (Platform.isIOS) return true;
+    final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
+    if (sdkInt >= 30) return true;
+    if (sdkInt >= 23) return (await Permission.storage.request()).isGranted;
+    return true;
   }
 
   Future<Directory?> _getDownloadDirectory() async {
+    if (kIsWeb) return null; // web tidak pakai Directory
     try {
       if (Platform.isAndroid) {
-        // Untuk Android 11+, gunakan getExternalStorageDirectory
-        final androidInfo = await DeviceInfoPlugin().androidInfo;
-        final sdkInt =
-            androidInfo.version.sdkInt; // UBAH DARI androidInfo.sdkInt
-
+        final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
         if (sdkInt >= 30) {
           final appDir = await getExternalStorageDirectory();
           if (appDir != null) {
-            // Buat folder Downloads di app directory
-            final downloadDir = Directory('${appDir.path}/Downloads');
-            if (!await downloadDir.exists()) {
-              await downloadDir.create(recursive: true);
-            }
-            return downloadDir;
+            final d = Directory('${appDir.path}/Downloads');
+            if (!await d.exists()) await d.create(recursive: true);
+            return d;
           }
         } else {
-          // Untuk Android dibawah 11, gunakan Downloads folder sistem
-          final downloadsDir = Directory('/storage/emulated/0/Download');
-          if (await downloadsDir.exists()) {
-            return downloadsDir;
-          }
+          final d = Directory('/storage/emulated/0/Download');
+          if (await d.exists()) return d;
         }
-
-        // Fallback ke external storage directory
         return await getExternalStorageDirectory();
       } else if (Platform.isIOS) {
-        // Untuk iOS, gunakan Documents directory
         return await getApplicationDocumentsDirectory();
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Terjadi kesalahan saat mendownload file.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-
+    } catch (_) {}
     return null;
   }
 
-  // Dialog untuk membuka file manual jika auto-open gagal
   void _showOpenFileDialog(String filePath, String fileName) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
           children: [
@@ -469,12 +283,12 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Nanti'),
           ),
           ElevatedButton.icon(
             onPressed: () async {
-              Navigator.of(context).pop();
+              Navigator.pop(context);
               await OpenFile.open(filePath);
             },
             icon: const Icon(Icons.open_in_new_rounded, size: 18),
@@ -492,24 +306,22 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // Alternative: Langsung buka file tanpa menyimpan (untuk preview)
   Future<void> _previewFile(TimeOffModel timeOff) async {
     if (timeOff.id == null) {
-      _showSnackBar('ID Cuti tidak valid', isError: true);
+      _showSnackBar('ID Izin tidak valid', isError: true);
       return;
     }
-
     try {
       _showSnackBar('Membuka preview...', isError: false);
-
       final response = await TimeOffService.downloadFile(
         timeOff.id!,
         widget.userId,
       );
-
       if (response.success && response.data != null) {
-        final fileBytes = Uint8List.fromList(response.data!);
-        await _openTempFile(fileBytes, timeOff.fileName!);
+        await _openTempFile(
+          Uint8List.fromList(response.data!),
+          timeOff.fileName!,
+        );
       } else {
         _showSnackBar(response.message, isError: true);
       }
@@ -519,18 +331,16 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Future<void> _openTempFile(Uint8List fileBytes, String fileName) async {
+    if (kIsWeb) {
+      _showSnackBar('Preview file tidak tersedia di web.', isError: false);
+      return;
+    }
     try {
-      // Tidak perlu permission untuk temp directory
       final tempDir = await getTemporaryDirectory();
       final tempFile = File('${tempDir.path}/$fileName');
-
       await tempFile.writeAsBytes(fileBytes);
-
       final result = await OpenFile.open(tempFile.path);
-
-      if (result.type == ResultType.done) {
-        _showSnackBar('File dibuka untuk preview', isError: false);
-      } else {
+      if (result.type != ResultType.done) {
         _showSnackBar(
           'Tidak dapat membuka file: ${result.message}',
           isError: true,
@@ -539,59 +349,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     } catch (e) {
       _showSnackBar('Gagal membuka file: $e', isError: true);
     }
-  }
-
-  // Untuk menambahkan opsi preview dan download terpisah
-  Widget _buildDownloadButton(TimeOffModel timeOff) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Preview button (tidak perlu permission)
-        InkWell(
-          onTap: () =>
-              _previewFile(timeOff), // PASTIKAN MEMANGGIL FUNGSI YANG BENAR
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFF10B981).withOpacity(0.2),
-                width: 1,
-              ),
-            ),
-            child: const Icon(
-              Icons.visibility_rounded,
-              size: 16,
-              color: Color(0xFF10B981),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // Download button
-        InkWell(
-          onTap: () => _downloadFile(timeOff),
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF3B82F6).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFF3B82F6).withOpacity(0.2),
-                width: 1,
-              ),
-            ),
-            child: const Icon(
-              Icons.download_rounded,
-              size: 16,
-              color: Color(0xFF3B82F6),
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   void _showSnackBar(String message, {required bool isError}) {
@@ -623,43 +380,40 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  Color _colorForStatus(String status) {
-    switch (status.toLowerCase()) {
+  // ── status helpers ───────────────────────────────────────────────
+  Color _colorForStatus(String s) {
+    switch (s.toLowerCase()) {
       case "approved":
       case "disetujui":
         return const Color(0xFF10B981);
       case "rejected":
       case "ditolak":
         return const Color(0xFFEF4444);
-      case "pending":
-      case "menunggu":
       default:
         return const Color(0xFFF59E0B);
     }
   }
 
-  IconData _iconForStatus(String status) {
-    switch (status.toLowerCase()) {
+  IconData _iconForStatus(String s) {
+    switch (s.toLowerCase()) {
       case "approved":
       case "disetujui":
         return Icons.check_circle_rounded;
       case "rejected":
       case "ditolak":
         return Icons.cancel_rounded;
-      case "pending":
-      case "menunggu":
       default:
         return Icons.schedule_rounded;
     }
   }
 
-  String _getJenisIcon(String jenis) {
-    switch (jenis) {
-      case "Cuti Tahunan":
+  String _getJenisIcon(String j) {
+    switch (j) {
+      case "Izin Tahunan":
         return "🏖️";
       case "Sakit":
         return "🏥";
-      case "Cuti Khusus":
+      case "Izin Khusus":
         return "🎉";
       case "Izin Pribadi":
         return "👤";
@@ -668,252 +422,22 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     }
   }
 
-  String _getFileExtension(String fileName) {
-    return fileName.split('.').last.toLowerCase();
-  }
+  String _getFileExtension(String f) => f.split('.').last.toLowerCase();
+  bool _isImageFile(String f) =>
+      ['jpg', 'jpeg', 'png'].contains(_getFileExtension(f));
 
-  bool _isImageFile(String fileName) {
-    final extension = _getFileExtension(fileName);
-    return ['jpg', 'jpeg', 'png'].contains(extension);
-  }
-
-  Widget _buildFilePreview(TimeOffModel timeOff) {
-    if (timeOff.fileName == null || timeOff.fileName!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final fileName = timeOff.fileName!;
-    _getFileExtension(fileName);
-    final isImage = _isImageFile(fileName);
-
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.attach_file_rounded,
-                size: 16,
-                color: Color(0xFF6B7280),
-              ),
-              SizedBox(width: 6),
-              Text(
-                "File Lampiran",
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF6B7280),
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
-            ),
-            child: isImage
-                ? _buildImagePreview(timeOff)
-                : _buildDocumentPreview(timeOff),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildImagePreview(TimeOffModel timeOff) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(
-        children: [
-          // Image preview section
-          Container(
-            height: 120,
-            width: double.infinity,
-            color: Colors.grey[100],
-            child: Stack(
-              children: [
-                // Placeholder for image - In a real app, you'd load from network
-                Container(
-                  width: double.infinity,
-                  height: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(12),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.image_rounded,
-                        size: 40,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Preview Gambar',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // File type badge
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _getFileExtension(timeOff.fileName!).toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // File info section
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        timeOff.fileName!,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF374151),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Gambar • ${_getFileExtension(timeOff.fileName!).toUpperCase()}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildDownloadButton(timeOff),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDocumentPreview(TimeOffModel timeOff) {
-    final fileExtension = _getFileExtension(timeOff.fileName!);
-
-    IconData fileIcon;
-    Color iconColor;
-    String fileType;
-
-    switch (fileExtension) {
-      case 'pdf':
-        fileIcon = Icons.picture_as_pdf_rounded;
-        iconColor = const Color(0xFFEF4444);
-        fileType = 'PDF Document';
-        break;
-      case 'doc':
-      case 'docx':
-        fileIcon = Icons.description_rounded;
-        iconColor = const Color(0xFF2563EB);
-        fileType = 'Word Document';
-        break;
-      default:
-        fileIcon = Icons.insert_drive_file_rounded;
-        iconColor = const Color(0xFF6B7280);
-        fileType = 'Document';
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(fileIcon, size: 24, color: iconColor),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  timeOff.fileName!,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$fileType • ${fileExtension.toUpperCase()}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF6B7280),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          _buildDownloadButton(timeOff),
-        ],
-      ),
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────────
+  // BUILD UTAMA
+  // ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    _getAvailableYears();
+    final isWeb = _isWideScreen(context);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text(
-          'Cuti',
+          'Izin',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w700,
@@ -940,6 +464,27 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ),
         ),
         actions: [
+          // Web: tombol Ajukan di AppBar
+          if (isWeb)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+              child: ElevatedButton.icon(
+                onPressed: () => _navigateToFormSubmit(context),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text(
+                  'Ajukan Izin',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
           Container(
             margin: const EdgeInsets.all(8),
             decoration: BoxDecoration(
@@ -953,107 +498,392 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _refreshData,
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Filter Section
-              _buildFilterSection(),
-
-              const SizedBox(height: 24),
-
-              // Section Header
-              Row(
-                children: [
-                  Container(
-                    width: 4,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF3B82F6),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    "Riwayat Cuti",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                      color: Color(0xFF1F2937),
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    "${_filteredTimeOffList.length} data",
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF6B7280),
-                      fontWeight: FontWeight.w500,
-                    ),
+      body: isWeb ? _buildWebLayout() : _buildMobileLayout(),
+      // Mobile: FAB tetap
+      floatingActionButton: isWeb
+          ? null
+          : Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF3B82F6).withOpacity(0.3),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
                   ),
                 ],
               ),
-
-              const SizedBox(height: 16),
-
-              // Content based on loading state
-              if (_isLoading)
-                _buildLoadingState()
-              else if (_errorMessage.isNotEmpty && _allTimeOffList.isEmpty)
-                _buildErrorState()
-              else if (_filteredTimeOffList.isEmpty)
-                _buildEmptyState()
-              else
-                ..._filteredTimeOffList.map(
-                  (timeOff) => _buildTimeOffCard(timeOff),
+              child: FloatingActionButton.extended(
+                onPressed: () => _navigateToFormSubmit(context),
+                label: const Text(
+                  'Ajukan Izin',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
                 ),
-            ],
-          ),
-        ),
-      ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF3B82F6).withOpacity(0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
+                icon: const Icon(Icons.add_rounded, size: 22),
+                backgroundColor: const Color(0xFF3B82F6),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
             ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // MOBILE LAYOUT (asli)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildMobileLayout() {
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildFilterSection(),
+            const SizedBox(height: 24),
+            _buildListHeader(),
+            const SizedBox(height: 16),
+            _buildListContent(),
           ],
-        ),
-        child: FloatingActionButton.extended(
-          onPressed: () => _navigateToFormSubmit(context),
-          label: const Text(
-            'Ajukan Cuti',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-          ),
-          icon: const Icon(Icons.add_rounded, size: 22),
-          backgroundColor: const Color(0xFF3B82F6),
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
         ),
       ),
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // WEB LAYOUT (2 kolom: filter kiri | list kanan)
+  // ─────────────────────────────────────────────────────────────────
+  Widget _buildWebLayout() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Panel kiri: filter (sticky) ───────────────────────
+        SizedBox(
+          width: 300,
+          child: Container(
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Filter Periode',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildWebFilterContent(),
+                  const SizedBox(height: 20),
+                  _buildWebStats(),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        // ── Panel kanan: list cards ───────────────────────────
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshData,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildListHeader(),
+                  const SizedBox(height: 16),
+                  _buildListContent(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Web filter panel (tidak accordion, selalu terbuka) ────────
+  Widget _buildWebFilterContent() {
+    final availableYears = _getAvailableYears();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Tahun
+        const Text(
+          'Tahun',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: availableYears.contains(_selectedYear)
+                  ? _selectedYear
+                  : availableYears.first,
+              isExpanded: true,
+              onChanged: (v) => setState(() => _selectedYear = v!),
+              items: availableYears
+                  .map(
+                    (y) => DropdownMenuItem(
+                      value: y,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(y.toString()),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              icon: const Icon(Icons.arrow_drop_down),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Bulan
+        const Text(
+          'Bulan',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: _selectedMonth,
+              isExpanded: true,
+              onChanged: (v) => setState(() => _selectedMonth = v!),
+              items: List.generate(
+                _monthNames.length,
+                (i) => DropdownMenuItem(
+                  value: i,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(_monthNames[i]),
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.arrow_drop_down),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Buttons
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _resetFilter,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF6B7280),
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Reset',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                onPressed: _applyFilter,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Terapkan',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Stats summary di panel kiri web ──────────────────────────
+  Widget _buildWebStats() {
+    final approved = _filteredTimeOffList
+        .where(
+          (t) =>
+              t.status.toLowerCase() == 'approved' ||
+              t.status.toLowerCase() == 'disetujui',
+        )
+        .length;
+    final pending = _filteredTimeOffList
+        .where(
+          (t) =>
+              t.status.toLowerCase() == 'pending' ||
+              t.status.toLowerCase() == 'menunggu',
+        )
+        .length;
+    final rejected = _filteredTimeOffList
+        .where(
+          (t) =>
+              t.status.toLowerCase() == 'rejected' ||
+              t.status.toLowerCase() == 'ditolak',
+        )
+        .length;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Statistik',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildStatRow(
+            'Total',
+            _filteredTimeOffList.length,
+            const Color(0xFF3B82F6),
+          ),
+          const SizedBox(height: 6),
+          _buildStatRow('Disetujui', approved, const Color(0xFF10B981)),
+          const SizedBox(height: 6),
+          _buildStatRow('Menunggu', pending, const Color(0xFFF59E0B)),
+          const SizedBox(height: 6),
+          _buildStatRow('Ditolak', rejected, const Color(0xFFEF4444)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatRow(String label, int count, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+          ),
+        ),
+        Text(
+          count.toString(),
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── List header (shared) ───────────────────────────────────────
+  Widget _buildListHeader() {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFF3B82F6),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Text(
+          'Riwayat Izin',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+            color: Color(0xFF1F2937),
+            letterSpacing: -0.3,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          '${_filteredTimeOffList.length} data',
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── List content (shared) ──────────────────────────────────────
+  Widget _buildListContent() {
+    if (_isLoading) return _buildLoadingState();
+    if (_errorMessage.isNotEmpty && _allTimeOffList.isEmpty) {
+      return _buildErrorState();
+    }
+    if (_filteredTimeOffList.isEmpty) return _buildEmptyState();
+    return Column(
+      children: _filteredTimeOffList.map(_buildTimeOffCard).toList(),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHARED WIDGETS (tidak berubah dari asli)
+  // ─────────────────────────────────────────────────────────────────
   Widget _buildFilterSection() {
     final availableYears = _getAvailableYears();
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -1064,13 +894,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       ),
       child: Column(
         children: [
-          // Filter Header
           InkWell(
-            onTap: () {
-              setState(() {
-                _isFilterExpanded = !_isFilterExpanded;
-              });
-            },
+            onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
             borderRadius: BorderRadius.vertical(
               top: const Radius.circular(16),
               bottom: _isFilterExpanded
@@ -1130,15 +955,12 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ),
             ),
           ),
-
-          // Filter Content
           if (_isFilterExpanded) ...[
             const Divider(height: 1, color: Color(0xFFE5E7EB)),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // Year Selector
                   Row(
                     children: [
                       const Icon(
@@ -1166,25 +988,22 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                             child: DropdownButton<int>(
                               value: availableYears.contains(_selectedYear)
                                   ? _selectedYear
-                                  : (availableYears.isNotEmpty
-                                        ? availableYears.first
-                                        : DateTime.now().year),
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedYear = value!;
-                                });
-                              },
-                              items: availableYears.map((year) {
-                                return DropdownMenuItem(
-                                  value: year,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
+                                  : availableYears.first,
+                              onChanged: (v) =>
+                                  setState(() => _selectedYear = v!),
+                              items: availableYears
+                                  .map(
+                                    (y) => DropdownMenuItem(
+                                      value: y,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                        ),
+                                        child: Text(y.toString()),
+                                      ),
                                     ),
-                                    child: Text(year.toString()),
-                                  ),
-                                );
-                              }).toList(),
+                                  )
+                                  .toList(),
                               icon: const Icon(Icons.arrow_drop_down),
                               isExpanded: true,
                             ),
@@ -1193,10 +1012,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 16),
-
-                  // Month Selector
                   Row(
                     children: [
                       const Icon(
@@ -1223,22 +1039,20 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<int>(
                               value: _selectedMonth,
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedMonth = value!;
-                                });
-                              },
-                              items: List.generate(_monthNames.length, (index) {
-                                return DropdownMenuItem(
-                                  value: index,
+                              onChanged: (v) =>
+                                  setState(() => _selectedMonth = v!),
+                              items: List.generate(
+                                _monthNames.length,
+                                (i) => DropdownMenuItem(
+                                  value: i,
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 12,
                                     ),
-                                    child: Text(_monthNames[index]),
+                                    child: Text(_monthNames[i]),
                                   ),
-                                );
-                              }),
+                                ),
+                              ),
                               icon: const Icon(Icons.arrow_drop_down),
                               isExpanded: true,
                             ),
@@ -1247,10 +1061,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 20),
-
-                  // Action Buttons
                   Row(
                     children: [
                       Expanded(
@@ -1303,160 +1114,152 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  Widget _buildLoadingState() {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(60),
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
+  Widget _buildLoadingState() => const Center(
+    child: Padding(
+      padding: EdgeInsets.all(60),
+      child: CircularProgressIndicator(
+        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
+      ),
+    ),
+  );
+
+  Widget _buildErrorState() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(40),
+    margin: const EdgeInsets.only(top: 20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFE5E7EB)),
+    ),
+    child: Column(
+      children: [
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEF4444).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: const Icon(
+            Icons.error_outline_rounded,
+            size: 40,
+            color: Color(0xFFEF4444),
+          ),
         ),
-      ),
-    );
-  }
+        const SizedBox(height: 24),
+        const Text(
+          'Terjadi Kesalahan',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _errorMessage,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _refreshData,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text(
+            'Coba Lagi',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF3B82F6),
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
-  Widget _buildErrorState() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(40),
-      margin: const EdgeInsets.only(top: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEF4444).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(40),
-            ),
-            child: const Icon(
-              Icons.error_outline_rounded,
-              size: 40,
-              color: Color(0xFFEF4444),
+  Widget _buildEmptyState() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(40),
+    margin: const EdgeInsets.only(top: 20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFE5E7EB)),
+    ),
+    child: Column(
+      children: [
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: const Icon(
+            Icons.calendar_month_outlined,
+            size: 40,
+            color: Color(0xFF9CA3AF),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Tidak ada data Izin',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Tidak ada data untuk periode ${_getFilterDisplayText()}.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: () => _navigateToFormSubmit(context),
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: const Text(
+            'Ajukan Izin',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF3B82F6),
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
-          const SizedBox(height: 24),
-          const Text(
-            "Terjadi Kesalahan",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF374151),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _errorMessage,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Color(0xFF6B7280),
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _refreshData,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text(
-              "Coba Lagi",
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3B82F6),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(40),
-      margin: const EdgeInsets.only(top: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(40),
-            ),
-            child: const Icon(
-              Icons.calendar_month_outlined,
-              size: 40,
-              color: Color(0xFF9CA3AF),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            "Tidak ada data Cuti",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF374151),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Tidak ada data Cuti untuk periode ${_getFilterDisplayText()}.\nCoba ubah filter periode atau buat pengajuan baru.",
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Color(0xFF6B7280),
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => _navigateToFormSubmit(context),
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text(
-              "Ajukan Cuti",
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3B82F6),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 
   Widget _buildTimeOffCard(TimeOffModel timeOff) {
-    final canEdit = timeOff.status.toLowerCase() == 'pending';
-
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -1473,7 +1276,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Icon Container
                 Container(
                   width: 48,
                   height: 48,
@@ -1488,14 +1290,11 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                     ),
                   ),
                 ),
-
                 const SizedBox(width: 16),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Jenis dan Status
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1524,7 +1323,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                                 color: _colorForStatus(
                                   timeOff.status,
                                 ).withOpacity(0.3),
-                                width: 1,
                               ),
                             ),
                             child: Row(
@@ -1549,19 +1347,13 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 12),
-
-                      // Tanggal dan Total Hari
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF9FAFB),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFFE5E7EB),
-                            width: 1,
-                          ),
+                          border: Border.all(color: const Color(0xFFE5E7EB)),
                         ),
                         child: Column(
                           children: [
@@ -1575,7 +1367,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    "${DateFormat('dd MMM yyyy').format(timeOff.tanggalMulai)} s/d ${DateFormat('dd MMM yyyy').format(timeOff.tanggalSelesai)}",
+                                    '${DateFormat('dd MMM yyyy').format(timeOff.tanggalMulai)} s/d ${DateFormat('dd MMM yyyy').format(timeOff.tanggalSelesai)}',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       color: Color(0xFF374151),
@@ -1595,7 +1387,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  "Total: ${timeOff.totalHari} hari",
+                                  'Total: ${timeOff.totalHari} hari',
                                   style: const TextStyle(
                                     fontSize: 14,
                                     color: Color(0xFF374151),
@@ -1610,75 +1402,11 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                     ],
                   ),
                 ),
-
-                // Action Menu for Pending Status
-                if (canEdit) ...[
-                  const SizedBox(width: 8),
-                  // PopupMenuButton<String>(
-                  //   onSelected: (value) {
-                  //     if (value == 'edit') {
-                  //       _navigateToFormSubmit(context, editData: timeOff);
-                  //     } else if (value == 'delete') {
-                  //       _deleteTimeOff(timeOff);
-                  //     }
-                  //   },
-                  //   shape: RoundedRectangleBorder(
-                  //     borderRadius: BorderRadius.circular(12),
-                  //   ),
-                  //   // itemBuilder: (context) => [
-                  //   //   const PopupMenuItem(
-                  //   //     value: 'edit',
-                  //   //     child: Row(
-                  //   //       children: [
-                  //   //         Icon(
-                  //   //           Icons.edit_rounded,
-                  //   //           size: 18,
-                  //   //           color: Color(0xFF3B82F6),
-                  //   //         ),
-                  //   //         SizedBox(width: 12),
-                  //   //         Text('Edit'),
-                  //   //       ],
-                  //   //     ),
-                  //   //   ),
-                  //   //   const PopupMenuItem(
-                  //   //     value: 'delete',
-                  //   //     child: Row(
-                  //   //       children: [
-                  //   //         Icon(
-                  //   //           Icons.delete_rounded,
-                  //   //           size: 18,
-                  //   //           color: Color(0xFFEF4444),
-                  //   //         ),
-                  //   //         SizedBox(width: 12),
-                  //   //         Text(
-                  //   //           'Hapus',
-                  //   //           style: TextStyle(color: Color(0xFFEF4444)),
-                  //   //         ),
-                  //   //       ],
-                  //   //     ),
-                  //   //   ),
-                  //   // ],
-                  //   // child: Container(
-                  //   //   padding: const EdgeInsets.all(8),
-                  //   //   decoration: BoxDecoration(
-                  //   //     color: const Color(0xFFF3F4F6),
-                  //   //     borderRadius: BorderRadius.circular(8),
-                  //   //   ),
-                  //   //   child: const Icon(
-                  //   //     Icons.more_vert_rounded,
-                  //   //     size: 18,
-                  //   //     color: Color(0xFF6B7280),
-                  //   //   ),
-                  //   // ),
-                  // ),
-                ],
               ],
             ),
 
-            // File Preview Section - NEW!
             _buildFilePreview(timeOff),
 
-            // Catatan
             if (timeOff.catatan != null && timeOff.catatan!.isNotEmpty) ...[
               const SizedBox(height: 16),
               Container(
@@ -1687,7 +1415,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1701,7 +1429,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                         ),
                         SizedBox(width: 6),
                         Text(
-                          "Catatan",
+                          'Catatan',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -1725,48 +1453,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ),
             ],
 
-            // Action Buttons untuk status Pending (alternative display)
-            if (canEdit) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  // Expanded(
-                  //   child: OutlinedButton.icon(
-                  //     onPressed: () =>
-                  //         _navigateToFormSubmit(context, editData: timeOff),
-                  //     icon: const Icon(Icons.edit_rounded, size: 16),
-                  //     label: const Text('Edit'),
-                  //     style: OutlinedButton.styleFrom(
-                  //       foregroundColor: const Color(0xFF3B82F6),
-                  //       side: const BorderSide(color: Color(0xFF3B82F6)),
-                  //       shape: RoundedRectangleBorder(
-                  //         borderRadius: BorderRadius.circular(8),
-                  //       ),
-                  //       padding: const EdgeInsets.symmetric(vertical: 8),
-                  //     ),
-                  //   ),
-                  // ),
-                  // const SizedBox(width: 12),
-                  // Expanded(
-                  //   child: OutlinedButton.icon(
-                  //     onPressed: () => _deleteTimeOff(timeOff),
-                  //     icon: const Icon(Icons.delete_rounded, size: 16),
-                  //     label: const Text('Hapus'),
-                  //     style: OutlinedButton.styleFrom(
-                  //       foregroundColor: const Color(0xFFEF4444),
-                  //       side: const BorderSide(color: Color(0xFFEF4444)),
-                  //       shape: RoundedRectangleBorder(
-                  //         borderRadius: BorderRadius.circular(8),
-                  //       ),
-                  //       padding: const EdgeInsets.symmetric(vertical: 8),
-                  //     ),
-                  //   ),
-                  // ),
-                ],
-              ),
-            ],
-
-            // Rejection reason jika ditolak
             if (timeOff.status.toLowerCase() == 'rejected' &&
                 timeOff.rejectionReason != null &&
                 timeOff.rejectionReason!.isNotEmpty) ...[
@@ -1779,7 +1465,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: const Color(0xFFEF4444).withOpacity(0.2),
-                    width: 1,
                   ),
                 ),
                 child: Column(
@@ -1794,7 +1479,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                         ),
                         SizedBox(width: 6),
                         Text(
-                          "Alasan Penolakan",
+                          'Alasan Penolakan',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -1820,6 +1505,271 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildFilePreview(TimeOffModel timeOff) {
+    if (timeOff.fileName == null || timeOff.fileName!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final fileName = timeOff.fileName!;
+    final isImage = _isImageFile(fileName);
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.attach_file_rounded,
+                size: 16,
+                color: Color(0xFF6B7280),
+              ),
+              SizedBox(width: 6),
+              Text(
+                'File Lampiran',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B7280),
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: isImage
+                ? _buildImagePreview(timeOff)
+                : _buildDocumentPreview(timeOff),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImagePreview(TimeOffModel timeOff) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Column(
+        children: [
+          Container(
+            height: 120,
+            width: double.infinity,
+            color: Colors.grey[100],
+            child: Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(12),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.image_rounded,
+                        size: 40,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Preview Gambar',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _getFileExtension(timeOff.fileName!).toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        timeOff.fileName!,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF374151),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Gambar • ${_getFileExtension(timeOff.fileName!).toUpperCase()}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _buildDownloadButton(timeOff),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocumentPreview(TimeOffModel timeOff) {
+    final ext = _getFileExtension(timeOff.fileName!);
+    IconData fileIcon;
+    Color iconColor;
+    String fileType;
+    switch (ext) {
+      case 'pdf':
+        fileIcon = Icons.picture_as_pdf_rounded;
+        iconColor = const Color(0xFFEF4444);
+        fileType = 'PDF Document';
+        break;
+      case 'doc':
+      case 'docx':
+        fileIcon = Icons.description_rounded;
+        iconColor = const Color(0xFF2563EB);
+        fileType = 'Word Document';
+        break;
+      default:
+        fileIcon = Icons.insert_drive_file_rounded;
+        iconColor = const Color(0xFF6B7280);
+        fileType = 'Document';
+    }
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(fileIcon, size: 24, color: iconColor),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  timeOff.fileName!,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF374151),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$fileType • ${ext.toUpperCase()}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          _buildDownloadButton(timeOff),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDownloadButton(TimeOffModel timeOff) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: () => _previewFile(timeOff),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: const Color(0xFF10B981).withOpacity(0.2),
+              ),
+            ),
+            child: const Icon(
+              Icons.visibility_rounded,
+              size: 16,
+              color: Color(0xFF10B981),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        InkWell(
+          onTap: () => _downloadFile(timeOff),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF3B82F6).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: const Color(0xFF3B82F6).withOpacity(0.2),
+              ),
+            ),
+            child: const Icon(
+              Icons.download_rounded,
+              size: 16,
+              color: Color(0xFF3B82F6),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

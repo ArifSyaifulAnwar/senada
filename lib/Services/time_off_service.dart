@@ -1,5 +1,5 @@
+// Services/time_off_service.dart — FULL REPLACE
 import 'dart:convert';
-import 'dart:io';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
 import 'package:http/http.dart' as http;
@@ -7,441 +7,320 @@ import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as path;
 
 class TimeOffService {
-  static const String timeoffEndpoint = '/api/timeoff';
+  static const String _base = '/api/timeoff';
 
+  // ── Auth token ─────────────────────────────────────────────────────────────
   static Future<String?> _getToken() async {
     try {
-      final response = await http
+      final res = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: {'grant_type': 'password', 'password': 'ASN_DBS'},
           )
           .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
+      if (res.statusCode == 200) {
+        final d = json.decode(res.body);
+        if (d['access_token'] != null) return d['access_token'];
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
 
-  static Future<Map<String, String>> _getHeaders() async {
-    final token = await _getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'bearer $token',
-    };
+  static Future<Map<String, String>> _jsonHeaders() async {
+    final tok = await _getToken();
+    return {'Content-Type': 'application/json', 'Authorization': 'bearer $tok'};
   }
 
-  static Future<Map<String, String>> _getMultipartHeaders() async {
-    final token = await _getToken();
-    return {'Authorization': 'bearer $token'};
+  static Future<Map<String, String>> _multipartHeaders() async {
+    final tok = await _getToken();
+    return {'Authorization': 'bearer $tok'};
   }
 
-  /// ✅ FIXED: Normalisasi jenis time off sebelum dikirim
-  static String _normalizeJenisTimeOff(String jenis) {
-    // Remove any leading/trailing whitespace and normalize internal spaces
-    return jenis.trim().replaceAll(RegExp(r'\s+'), ' ');
+  static String _normalizeJenis(String j) =>
+      j.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+  static MediaType _mediaType(String filePath) {
+    final ext = path.extension(filePath).toLowerCase();
+    switch (ext) {
+      case '.pdf':
+        return MediaType('application', 'pdf');
+      case '.jpg':
+      case '.jpeg':
+        return MediaType('image', 'jpeg');
+      case '.png':
+        return MediaType('image', 'png');
+      default:
+        return MediaType('application', 'octet-stream');
+    }
   }
 
-  // Submit time off request dengan file upload
+  // ── SUBMIT ─────────────────────────────────────────────────────────────────
   static Future<ApiResponse<int>> submitTimeOff(TimeOffRequest request) async {
     try {
-      final url = Uri.parse('$baseURL$timeoffEndpoint/submit');
+      final url = Uri.parse('$baseURL$_base/submit');
+      final mr = http.MultipartRequest('POST', url);
+      mr.headers.addAll(await _multipartHeaders());
 
-      // ✅ NORMALIZE jenis time off
-      final normalizedJenis = _normalizeJenisTimeOff(request.jenisTimeOff);
-
-
-      // ✅ ALWAYS use multipart request for consistency
-      var multipartRequest = http.MultipartRequest('POST', url);
-
-      // Add headers
-      multipartRequest.headers.addAll(await _getMultipartHeaders());
-
-      // ✅ Add request data as JSON field
-      final requestData = {
+      final reqData = {
         'userId': request.userId,
-        'jenisTimeOff': normalizedJenis, // ✅ Use normalized value
+        'jenisTimeOff': _normalizeJenis(request.jenisTimeOff),
         'tanggalMulai': request.tanggalMulai.toIso8601String(),
         'tanggalSelesai': request.tanggalSelesai.toIso8601String(),
         'catatan': request.catatan,
+        // DL
+        'jenisPekerjaan': request.jenisPekerjaan,
+        'rabType': request.rabType,
+        'nominalUangKantor': request.nominalUangKantor,
+        'reimbursementItems': request.reimbursementItems
+            ?.map((e) => e.toJson())
+            .toList(),
       };
+      mr.fields['request'] = jsonEncode(reqData);
 
-      multipartRequest.fields['request'] = jsonEncode(requestData);
-
-      // ✅ Add file ONLY if provided
       if (request.receiptFile != null) {
-        String fileName = path.basename(request.receiptFile!.path);
-        String fileExtension = path.extension(fileName).toLowerCase();
-
-        MediaType mediaType;
-        switch (fileExtension) {
-          case '.pdf':
-            mediaType = MediaType('application', 'pdf');
-            break;
-          case '.jpg':
-          case '.jpeg':
-            mediaType = MediaType('image', 'jpeg');
-            break;
-          case '.png':
-            mediaType = MediaType('image', 'png');
-            break;
-          default:
-            mediaType = MediaType('application', 'octet-stream');
-        }
-
-        multipartRequest.files.add(
+        mr.files.add(
           await http.MultipartFile.fromPath(
             'receiptFile',
             request.receiptFile!.path,
-            filename: fileName,
-            contentType: mediaType,
+            filename: path.basename(request.receiptFile!.path),
+            contentType: _mediaType(request.receiptFile!.path),
           ),
         );
-
-      } else {
       }
 
-      final streamedResponse = await multipartRequest.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      final streamed = await mr.send();
+      final res = await http.Response.fromStream(streamed);
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
 
-
-      if (response.body.isEmpty) {
-        return ApiResponse<int>(
-          success: false,
-          message: 'Server mengembalikan response kosong',
-          data: null,
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && body['success'] == true) {
+        return ApiResponse(
+          success: true,
+          message: body['message'] ?? '',
+          data: body['data'] as int?,
         );
       }
-
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return ApiResponse<int>.fromJson(jsonResponse, (data) => data as int);
-      } else {
-        return ApiResponse<int>(
-          success: false,
-          message:
-              jsonResponse['message'] ??
-              jsonResponse['Message'] ??
-              'Terjadi kesalahan',
-          data: null,
-        );
-      }
-    } catch (e) {
-      return ApiResponse<int>(
+      return ApiResponse(
         success: false,
-        message: 'Koneksi bermasalah: ${e.toString()}',
-        data: null,
+        message: body['message'] ?? 'Terjadi kesalahan',
       );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
 
-  // Update time off dengan file upload - FIXED VERSION
+  // ── UPDATE ─────────────────────────────────────────────────────────────────
   static Future<ApiResponse<Map<String, dynamic>>> updateTimeOff(
     UpdateTimeOffRequest request,
   ) async {
     try {
-      final url = Uri.parse('$baseURL$timeoffEndpoint/update');
+      final url = Uri.parse('$baseURL$_base/update');
+      final mr = http.MultipartRequest('POST', url);
+      mr.headers.addAll(await _multipartHeaders());
 
-      // ✅ NORMALIZE jenis time off
-      final normalizedJenis = _normalizeJenisTimeOff(request.jenisTimeOff);
+      mr.fields['id'] = request.id.toString();
+      mr.fields['userId'] = request.userId;
+      mr.fields['jenisTimeOff'] = _normalizeJenis(request.jenisTimeOff);
+      mr.fields['tanggalMulai'] = request.tanggalMulai.toIso8601String();
+      mr.fields['tanggalSelesai'] = request.tanggalSelesai.toIso8601String();
+      if (request.catatan != null) mr.fields['catatan'] = request.catatan!;
 
-
-      // ALWAYS use multipart request for consistency
-      var multipartRequest = http.MultipartRequest('POST', url);
-
-      // Add headers
-      multipartRequest.headers.addAll(await _getMultipartHeaders());
-
-      // Add form fields with normalized value
-      multipartRequest.fields['id'] = request.id.toString();
-      multipartRequest.fields['userId'] = request.userId;
-      multipartRequest.fields['jenisTimeOff'] =
-          normalizedJenis; // ✅ Use normalized
-      multipartRequest.fields['tanggalMulai'] = request.tanggalMulai
-          .toIso8601String();
-      multipartRequest.fields['tanggalSelesai'] = request.tanggalSelesai
-          .toIso8601String();
-      if (request.catatan != null) {
-        multipartRequest.fields['catatan'] = request.catatan!;
+      // DL
+      if (request.jenisPekerjaan != null) {
+        mr.fields['jenisPekerjaan'] = request.jenisPekerjaan!;
+      }
+      if (request.rabType != null) mr.fields['rabType'] = request.rabType!;
+      if (request.nominalUangKantor != null) {
+        mr.fields['nominalUangKantor'] = request.nominalUangKantor.toString();
+      }
+      if (request.reimbursementItems != null) {
+        mr.fields['reimbursementItems'] = jsonEncode(
+          request.reimbursementItems!.map((e) => e.toJson()).toList(),
+        );
       }
 
-      // Add file only if provided
       if (request.receiptFile != null) {
-        String fileName = path.basename(request.receiptFile!.path);
-        String fileExtension = path.extension(fileName).toLowerCase();
-
-        MediaType mediaType;
-        switch (fileExtension) {
-          case '.pdf':
-            mediaType = MediaType('application', 'pdf');
-            break;
-          case '.jpg':
-          case '.jpeg':
-            mediaType = MediaType('image', 'jpeg');
-            break;
-          case '.png':
-            mediaType = MediaType('image', 'png');
-            break;
-          default:
-            mediaType = MediaType('application', 'octet-stream');
-        }
-
-        multipartRequest.files.add(
+        mr.files.add(
           await http.MultipartFile.fromPath(
             'receiptFile',
             request.receiptFile!.path,
-            filename: fileName,
-            contentType: mediaType,
+            filename: path.basename(request.receiptFile!.path),
+            contentType: _mediaType(request.receiptFile!.path),
           ),
         );
       }
 
-      final streamedResponse = await multipartRequest.send();
-      final response = await http.Response.fromStream(streamedResponse);
-
-
-      if (response.body.isEmpty) {
-        return ApiResponse<Map<String, dynamic>>(
-          success: false,
-          message: 'Server response is empty. Status: ${response.statusCode}',
-          data: null,
-        );
+      final res = await http.Response.fromStream(await mr.send());
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
       }
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return ApiResponse<Map<String, dynamic>>.fromJson(
-          jsonResponse,
-          (data) => data as Map<String, dynamic>,
-        );
-      } else {
-        return ApiResponse<Map<String, dynamic>>(
-          success: false,
-          message: jsonResponse['message'] ?? 'Terjadi kesalahan',
-          data: null,
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && body['success'] == true) {
+        return ApiResponse(
+          success: true,
+          message: body['message'] ?? '',
+          data: body['data'] as Map<String, dynamic>?,
         );
       }
-    } catch (e) {
-      return ApiResponse<Map<String, dynamic>>(
+      return ApiResponse(
         success: false,
-        message: 'Koneksi bermasalah: ${e.toString()}',
-        data: null,
+        message: body['message'] ?? 'Terjadi kesalahan',
       );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
 
-  // Get time off by user
+  // ── DL SUBMIT LAPORAN ──────────────────────────────────────────────────────
+  static Future<ApiResponse<void>> submitDlLaporan(
+    DlLaporanRequest request,
+  ) async {
+    try {
+      final url = Uri.parse('$baseURL$_base/dl-submit-laporan');
+      final mr = http.MultipartRequest('POST', url);
+      mr.headers.addAll(await _multipartHeaders());
+
+      mr.fields['timeOffId'] = request.timeOffId.toString();
+      mr.fields['userId'] = request.userId;
+
+      mr.files.add(
+        await http.MultipartFile.fromPath(
+          'laporanFile',
+          request.laporanFile.path,
+          filename: path.basename(request.laporanFile.path),
+          contentType: _mediaType(request.laporanFile.path),
+        ),
+      );
+      mr.files.add(
+        await http.MultipartFile.fromPath(
+          'anggaranFile',
+          request.anggaranFile.path,
+          filename: path.basename(request.anggaranFile.path),
+          contentType: _mediaType(request.anggaranFile.path),
+        ),
+      );
+
+      final res = await http.Response.fromStream(await mr.send());
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: body['success'] == true,
+        message: body['message'] ?? '',
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── GET MY TIMEOFF ─────────────────────────────────────────────────────────
   static Future<ApiResponse<TimeOffListResponse>> getMyTimeOff(
     String userId,
   ) async {
     try {
-      final url = Uri.parse('$baseURL$timeoffEndpoint/my-timeoff');
-
-      final requestBody = {'userId': userId};
-
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody),
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/my-timeoff'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
       );
-
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return ApiResponse<TimeOffListResponse>.fromJson(
-          jsonResponse,
-          (data) => TimeOffListResponse.fromJson(data),
-        );
-      } else {
-        return ApiResponse<TimeOffListResponse>(
-          success: false,
-          message: jsonResponse['Message'] ?? 'Terjadi kesalahan',
-          data: null,
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && body['success'] == true) {
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: TimeOffListResponse.fromJson(body['data']),
         );
       }
-    } catch (e) {
-      return ApiResponse<TimeOffListResponse>(
+      return ApiResponse(
         success: false,
-        message: 'Koneksi bermasalah: ${e.toString()}',
-        data: null,
+        message: body['message'] ?? 'Terjadi kesalahan',
       );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
 
-  // Delete time off
+  // ── DELETE ─────────────────────────────────────────────────────────────────
   static Future<ApiResponse<Map<String, dynamic>>> deleteTimeOff(
-    DeleteTimeOffRequest request,
+    int id,
+    String userId,
   ) async {
     try {
-      final url = Uri.parse('$baseURL$timeoffEndpoint/delete');
-
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(request.toJson()),
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/delete'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'id': id, 'userId': userId}),
       );
-
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return ApiResponse<Map<String, dynamic>>.fromJson(
-          jsonResponse,
-          (data) => data as Map<String, dynamic>,
-        );
-      } else {
-        return ApiResponse<Map<String, dynamic>>(
-          success: false,
-          message: jsonResponse['message'] ?? 'Terjadi kesalahan',
-          data: null,
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && body['success'] == true) {
+        return ApiResponse(
+          success: true,
+          message: body['message'] ?? '',
+          data: body['data'] as Map<String, dynamic>?,
         );
       }
-    } catch (e) {
-      return ApiResponse<Map<String, dynamic>>(
+      return ApiResponse(
         success: false,
-        message: 'Koneksi bermasalah: ${e.toString()}',
-        data: null,
+        message: body['message'] ?? 'Terjadi kesalahan',
       );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
 
-  // Download file attachment
+  // ── DOWNLOAD FILE ──────────────────────────────────────────────────────────
   static Future<ApiResponse<List<int>>> downloadFile(
     int timeOffId,
     String userId,
   ) async {
     try {
-      final url = Uri.parse('$baseURL$timeoffEndpoint/download-file');
-
-      final requestBody = {'TimeOffId': timeOffId, 'UserId': userId};
-
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody),
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/download-file'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'TimeOffId': timeOffId, 'UserId': userId}),
       );
+      if (res.statusCode == 200) {
+        return ApiResponse(success: true, message: 'OK', data: res.bodyBytes);
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: false,
+        message: body['message'] ?? 'Gagal download',
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
 
-      if (response.statusCode == 200) {
-        return ApiResponse<List<int>>(
+  // ── ANNUAL QUOTA ───────────────────────────────────────────────────────────
+  static Future<ApiResponse<AnnualQuota>> getAnnualQuota(
+    String userId, {
+    int? tahun,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/annual-quota'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId, 'tahun': tahun}),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && body['success'] == true) {
+        return ApiResponse(
           success: true,
-          message: 'File downloaded successfully',
-          data: response.bodyBytes,
-        );
-      } else {
-        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-        return ApiResponse<List<int>>(
-          success: false,
-          message: jsonResponse['message'] ?? 'Gagal download file',
-          data: null,
+          message: '',
+          data: AnnualQuota.fromJson(body['data']),
         );
       }
-    } catch (e) {
-      return ApiResponse<List<int>>(
+      return ApiResponse(
         success: false,
-        message: 'Koneksi bermasalah: ${e.toString()}',
-        data: null,
+        message: body['message'] ?? 'Terjadi kesalahan',
       );
-    }
-  }
-
-  // Validate file before upload
-  static bool validateFile(File file) {
-    try {
-      if (!file.existsSync()) {
-        return false;
-      }
-
-      final fileSize = file.lengthSync();
-      const maxSize = 10 * 1024 * 1024; // 10MB
-      if (fileSize > maxSize) {
-        return false;
-      }
-
-      final fileName = path.basename(file.path);
-      final fileExtension = path.extension(fileName).toLowerCase();
-      final allowedExtensions = ['.jpg', '.jpeg', '.png', '.pdf'];
-
-      if (!allowedExtensions.contains(fileExtension)) {
-        return false;
-      }
-
-      return true;
     } catch (e) {
-      return false;
-    }
-  }
-
-  // Get file info
-  static Map<String, dynamic> getFileInfo(File file) {
-    try {
-      final fileName = path.basename(file.path);
-      final fileExtension = path.extension(fileName).toLowerCase();
-      final fileSize = file.lengthSync();
-      final fileSizeInMB = fileSize / (1024 * 1024);
-
-      String fileType;
-      switch (fileExtension) {
-        case '.pdf':
-          fileType = 'PDF Document';
-          break;
-        case '.jpg':
-        case '.jpeg':
-          fileType = 'JPEG Image';
-          break;
-        case '.png':
-          fileType = 'PNG Image';
-          break;
-        default:
-          fileType = 'Unknown';
-      }
-
-      return {
-        'fileName': fileName,
-        'fileExtension': fileExtension,
-        'fileSize': fileSize,
-        'fileSizeInMB': fileSizeInMB,
-        'fileType': fileType,
-      };
-    } catch (e) {
-      return {};
-    }
-  }
-
-  // Test database connection
-  static Future<ApiResponse<Map<String, dynamic>>> testConnection() async {
-    try {
-      final url = Uri.parse('$baseURL$timeoffEndpoint/test-db');
-
-      final response = await http.post(url, headers: await _getHeaders());
-
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return ApiResponse<Map<String, dynamic>>.fromJson(
-          jsonResponse,
-          (data) => data as Map<String, dynamic>,
-        );
-      } else {
-        return ApiResponse<Map<String, dynamic>>(
-          success: false,
-          message: jsonResponse['message'] ?? 'Connection failed',
-          data: null,
-        );
-      }
-    } catch (e) {
-      return ApiResponse<Map<String, dynamic>>(
-        success: false,
-        message: 'Network error: ${e.toString()}',
-        data: null,
-      );
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
 }

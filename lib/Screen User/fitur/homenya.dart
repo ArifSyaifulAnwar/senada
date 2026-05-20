@@ -18,8 +18,10 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 import 'profile fitur/halaman_calendar.dart';
+
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -1030,8 +1032,8 @@ class _HomePageState extends State<HomeScreen> {
         ),
       ),
       _buildServiceIconData(
-        Icons.flag,
-        "Goal",
+        Icons.event,
+        "Acara",
         const Color(0xFF795548),
         onTap: () => _showComingSoonDialog(context),
       ),

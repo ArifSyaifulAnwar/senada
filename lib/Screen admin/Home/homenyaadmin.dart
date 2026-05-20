@@ -1086,12 +1086,10 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
         },
       ),
       _buildServiceIconData(
-        Icons.flag,
-        "Goal",
+        Icons.event,
+        "Acara",
         const Color(0xFF795548),
-        onTap: () {
-          _showComingSoonDialog(context);
-        },
+        onTap: () => _showComingSoonDialog(context),
       ),
       _buildServiceIconData(
         Icons.inventory,
