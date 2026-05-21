@@ -1,5 +1,7 @@
+// models/employee_models.dart — FULL REPLACE
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/listkaryawan.dart';
 
+// ── ApiResponse ───────────────────────────────────────────────────────────────
 class ApiResponse<T> {
   final bool success;
   final String message;
@@ -18,16 +20,17 @@ class ApiResponse<T> {
     T Function(dynamic)? fromJsonT,
   ) {
     return ApiResponse<T>(
-      success: json['Success'] ?? false,
-      message: json['Message'] ?? '',
+      success: json['Success'] ?? json['success'] ?? false,
+      message: json['Message'] ?? json['message'] ?? '',
       data: json['Data'] != null && fromJsonT != null
           ? fromJsonT(json['Data'])
           : null,
-      errorCode: json['ErrorCode'],
+      errorCode: json['ErrorCode'] ?? json['errorCode'],
     );
   }
 }
 
+// ── EmployeeListResponse ──────────────────────────────────────────────────────
 class EmployeeListResponse {
   final List<EmployeeApiData> data;
   final int totalCount;
@@ -46,68 +49,76 @@ class EmployeeListResponse {
   });
 
   factory EmployeeListResponse.fromJson(Map<String, dynamic> json) {
+    // handle both PascalCase and camelCase
+    dynamic g(String k) =>
+        json[k] ?? json[k[0].toLowerCase() + k.substring(1)];
+
     return EmployeeListResponse(
-      data: (json['Data'] as List? ?? [])
-          .map((item) => EmployeeApiData.fromJson(item))
+      data: ((g('Data') as List?) ?? [])
+          .map((item) => EmployeeApiData.fromJson(item as Map<String, dynamic>))
           .toList(),
-      totalCount: json['TotalCount'] ?? 0,
-      totalPages: json['TotalPages'] ?? 0,
-      currentPage: json['CurrentPage'] ?? 1,
-      pageSize: json['PageSize'] ?? 10,
-      stats: EmployeeStats.fromJson(json['Stats'] ?? {}),
+      totalCount: (g('TotalCount') as int?) ?? 0,
+      totalPages: (g('TotalPages') as int?) ?? 0,
+      currentPage: (g('CurrentPage') as int?) ?? 1,
+      pageSize: (g('PageSize') as int?) ?? 10,
+      stats: EmployeeStats.fromJson(
+        (g('Stats') as Map<String, dynamic>?) ?? {},
+      ),
     );
   }
 }
 
+// ── EmployeeApiData ───────────────────────────────────────────────────────────
 class EmployeeApiData {
+  // udt_users
   final int id;
   final String userId;
   final String name;
   final String email;
   final String? phone;
+  final String? additionalPhone;
   final String? address;
+  final String? citizenIdAddress;
+  final String? residentialAddress;
+  final String? postalCode;
   final String? gender;
+  final String? jobs; // jabatan teks bebas (bukan gender)
+  final String? placeOfBirth;
   final DateTime? birthDate;
+  final String? maritalStatus;
+  final String? bloodType;
+  final String? religion;
   final String? nik;
   final String? nip;
   final String? npwp;
+  final String? bpjsKetenagakerjaan; // ← BARU
+  final String? passportNumber;
+  final DateTime? passportExpiry;
   final bool active;
   final DateTime? lastLogin;
   final DateTime createdAt;
   final DateTime? updatedAt;
+  final String? profilePhotoBase64;
+
+  // udt_company_info_user
   final String employeeId;
   final String? barcode;
   final String? companyName;
   final String? branch;
-  final String? department;
+  final String? department; // = organization
   final String? jobPosition;
-  final String? jobLevel;
   final String? employmentStatus;
   final DateTime? joinDate;
   final DateTime? endContractDate;
-  final String? manager;
-  final String? approvalLine;
-  final String? grade;
-  final String? class_;
-  final String statusDisplay;
-  final List<String> skills;
-  final String? profilePhotoBase64;
-
-  // Additional fields dari detail endpoint
-  final String? additionalPhone;
-  final String? citizenIdAddress;
-  final String? residentialAddress;
-  final String? postalCode;
-  final String? jobs;
-  final String? placeOfBirth;
-  final String? maritalStatus;
-  final String? bloodType;
-  final String? religion;
-  final String? passportNumber;
-  final DateTime? passportExpiry;
   final int? workingPeriodYear;
   final int? workingPeriodMonth;
   final int? workingPeriodDay;
+  final String? manager; // nama manager (dari SP)
+  final String? managerUserId; // ← BARU: userid manager (untuk dropdown)
+
+  // derived / display
+  final String statusDisplay;
+  final List<String> skills;
 
   EmployeeApiData({
     required this.id,
@@ -115,118 +126,127 @@ class EmployeeApiData {
     required this.name,
     required this.email,
     this.phone,
+    this.additionalPhone,
     this.address,
+    this.citizenIdAddress,
+    this.residentialAddress,
+    this.postalCode,
     this.gender,
+    this.jobs,
+    this.placeOfBirth,
     this.birthDate,
+    this.maritalStatus,
+    this.bloodType,
+    this.religion,
     this.nik,
     this.nip,
     this.npwp,
+    this.bpjsKetenagakerjaan,
+    this.passportNumber,
+    this.passportExpiry,
     required this.active,
     this.lastLogin,
     required this.createdAt,
     this.updatedAt,
+    this.profilePhotoBase64,
     required this.employeeId,
     this.barcode,
     this.companyName,
     this.branch,
     this.department,
     this.jobPosition,
-    this.jobLevel,
     this.employmentStatus,
     this.joinDate,
     this.endContractDate,
-    this.manager,
-    this.approvalLine,
-    this.grade,
-    this.class_,
-    required this.statusDisplay,
-    required this.skills,
-    this.profilePhotoBase64,
-    this.additionalPhone,
-    this.citizenIdAddress,
-    this.residentialAddress,
-    this.postalCode,
-    this.jobs,
-    this.placeOfBirth,
-    this.maritalStatus,
-    this.bloodType,
-    this.religion,
-    this.passportNumber,
-    this.passportExpiry,
     this.workingPeriodYear,
     this.workingPeriodMonth,
     this.workingPeriodDay,
+    this.manager,
+    this.managerUserId,
+    required this.statusDisplay,
+    required this.skills,
   });
 
   factory EmployeeApiData.fromJson(Map<String, dynamic> json) {
+    // helper: coba PascalCase dulu, fallback snake_case / camelCase
+    dynamic g(String pascal, [String? snake]) {
+      return json[pascal] ??
+          (snake != null ? json[snake] : null) ??
+          json[pascal[0].toLowerCase() + pascal.substring(1)];
+    }
+
+    DateTime? parseDate(dynamic v) =>
+        v == null ? null : DateTime.tryParse(v.toString());
+
     return EmployeeApiData(
-      id: json['Id'] ?? 0,
-      userId: json['UserId'] ?? '',
-      name: json['Name'] ?? '',
-      email: json['Email'] ?? '',
-      phone: json['Phone'],
-      address: json['Address'],
-      gender: json['Gender'],
-      birthDate: json['BirthDate'] != null
-          ? DateTime.tryParse(json['BirthDate'].toString())
-          : null,
-      nik: json['Nik'],
-      nip: json['Nip'],
-      npwp: json['Npwp'],
-      active: json['Active'] ?? false,
-      lastLogin: json['LastLogin'] != null
-          ? DateTime.tryParse(json['LastLogin'].toString())
-          : null,
-      createdAt:
-          DateTime.tryParse(json['CreatedAt']?.toString() ?? '') ??
-          DateTime.now(),
-      updatedAt: json['UpdatedAt'] != null
-          ? DateTime.tryParse(json['UpdatedAt'].toString())
-          : null,
-      employeeId: json['EmployeeId'] ?? '',
-      barcode: json['Barcode'],
-      companyName: json['CompanyName'],
-      branch: json['Branch'],
-      department: json['Department'],
-      jobPosition: json['JobPosition'],
-      jobLevel: json['JobLevel'],
-      employmentStatus: json['EmploymentStatus'],
-      joinDate: json['JoinDate'] != null
-          ? DateTime.tryParse(json['JoinDate'].toString())
-          : null,
-      endContractDate: json['EndContractDate'] != null
-          ? DateTime.tryParse(json['EndContractDate'].toString())
-          : null,
-      manager: json['Manager'],
-      approvalLine: json['ApprovalLine'],
-      grade: json['Grade'],
-      class_: json['Class'],
-      statusDisplay: json['StatusDisplay'] ?? '',
-      skills: (json['Skills'] as List? ?? []).map((e) => e.toString()).toList(),
-      profilePhotoBase64: json['ProfilePhoto'],
-      additionalPhone: json['AdditionalPhone'],
-      citizenIdAddress: json['CitizenIdAddress'],
-      residentialAddress: json['ResidentialAddress'],
-      postalCode: json['PostalCode'],
-      jobs: json['Jobs'],
-      placeOfBirth: json['PlaceOfBirth'],
-      maritalStatus: json['MaritalStatus'],
-      bloodType: json['BloodType'],
-      religion: json['Religion'],
-      passportNumber: json['PassportNumber'],
-      passportExpiry: json['PassportExpiry'] != null
-          ? DateTime.tryParse(json['PassportExpiry'].toString())
-          : null,
-      workingPeriodYear: json['WorkingPeriodYear'],
-      workingPeriodMonth: json['WorkingPeriodMonth'],
-      workingPeriodDay: json['WorkingPeriodDay'],
+      id: (g('Id', 'id') as int?) ?? 0,
+      userId: g('UserId', 'userid')?.toString() ?? '',
+      name: g('Name', 'name')?.toString() ?? '',
+      email:
+          g('Mail', 'mail')?.toString() ??
+          g('Email', 'email')?.toString() ??
+          '',
+      phone: g('Phone', 'phone')?.toString(),
+      additionalPhone: g('AdditionalPhone', 'additional_phone')?.toString(),
+      address: g('Address', 'address')?.toString(),
+      citizenIdAddress: g('CitizenIdAddress', 'citizen_id_address')?.toString(),
+      residentialAddress: g(
+        'ResidentialAddress',
+        'residential_address',
+      )?.toString(),
+      postalCode: g('PostalCode', 'postal_code')?.toString(),
+      gender: g('Gender', 'gender')?.toString(),
+      jobs: g('Jobs', 'jobs')?.toString(),
+      placeOfBirth: g('PlaceOfBirth', 'place_of_birth')?.toString(),
+      birthDate: parseDate(g('BirthDate', 'birth_date')),
+      maritalStatus: g('MaritalStatus', 'marital_status')?.toString(),
+      bloodType: g('BloodType', 'blood_type')?.toString(),
+      religion: g('Religion', 'religion')?.toString(),
+      nik: g('Nik', 'nik')?.toString(),
+      nip: g('Nip', 'nip')?.toString(),
+      npwp: g('Npwp', 'npwp')?.toString(),
+      bpjsKetenagakerjaan: g(
+        'BpjsKetenagakerjaan',
+        'bpjs_ketenagakerjaan',
+      )?.toString(),
+      passportNumber: g('PassportNumber', 'passport_number')?.toString(),
+      passportExpiry: parseDate(g('PassportExpiry', 'passport_expiry')),
+      active: (g('Active', 'active') as bool?) ?? false,
+      lastLogin: parseDate(g('LastLogin', 'last_login')),
+      createdAt: parseDate(g('CreatedAt', 'created_at')) ?? DateTime.now(),
+      updatedAt: parseDate(g('UpdatedAt', 'updated_at')),
+      profilePhotoBase64:
+          g('ProfilePhoto', 'FotoProfil')?.toString() ??
+          g('FotoProfil')?.toString(),
+      employeeId: g('EmployeeId', 'employeeID')?.toString() ?? '',
+      barcode: g('Barcode', 'barcode')?.toString(),
+      companyName: g('CompanyName', 'company_name')?.toString(),
+      branch: g('Branch', 'branch')?.toString(),
+      department:
+          g('Department', 'organization')?.toString() ??
+          g('Organization', 'organization')?.toString(),
+      jobPosition: g('JobPosition', 'job_position')?.toString(),
+      employmentStatus: g('EmploymentStatus', 'employment_status')?.toString(),
+      joinDate: parseDate(g('JoinDate', 'join_date')),
+      endContractDate: parseDate(g('EndContractDate', 'end_contract_date')),
+      workingPeriodYear: g('WorkingPeriodYear', 'working_period_year') as int?,
+      workingPeriodMonth:
+          g('WorkingPeriodMonth', 'working_period_month') as int?,
+      workingPeriodDay: g('WorkingPeriodDay', 'working_period_day') as int?,
+      manager: g('Manager', 'manager')?.toString(),
+      managerUserId: g('ManagerUserId', 'manager_userid')?.toString(),
+      statusDisplay: g('StatusDisplay', 'status_display')?.toString() ?? '',
+      skills: (g('Skills', 'skills') as List? ?? [])
+          .map((e) => e.toString())
+          .toList(),
     );
   }
 
-  // Convert to EmployeeData for UI
+  /// Convert ke EmployeeData untuk UI
   EmployeeData toEmployeeData() {
     return EmployeeData(
       id: id,
+      userId: userId,
       nama: name,
       email: email,
       telepon: phone ?? '',
@@ -238,8 +258,10 @@ class EmployeeApiData {
       foto: profilePhotoBase64 ?? '',
       nomorKaryawan: employeeId,
       manager: manager ?? '',
+      managerUserId: managerUserId,
       skills: skills,
-      // Additional fields
+      // personal
+      gender: gender,
       additionalPhone: additionalPhone,
       citizenIdAddress: citizenIdAddress,
       residentialAddress: residentialAddress,
@@ -253,17 +275,15 @@ class EmployeeApiData {
       nik: nik,
       nip: nip,
       npwp: npwp,
+      bpjsKetenagakerjaan: bpjsKetenagakerjaan,
       passportNumber: passportNumber,
       passportExpiry: passportExpiry?.toIso8601String().split('T')[0],
+      // company
       barcode: barcode,
       branch: branch,
       companyName: companyName,
-      jobLevel: jobLevel,
       employmentStatus: employmentStatus,
       endContractDate: endContractDate?.toIso8601String().split('T')[0],
-      grade: grade,
-      class_: class_,
-      approvalLine: approvalLine,
       workingPeriodYear: workingPeriodYear,
       workingPeriodMonth: workingPeriodMonth,
       workingPeriodDay: workingPeriodDay,
@@ -271,6 +291,7 @@ class EmployeeApiData {
   }
 }
 
+// ── EmployeeStats ─────────────────────────────────────────────────────────────
 class EmployeeStats {
   final int totalEmployees;
   final int activeEmployees;
@@ -287,20 +308,20 @@ class EmployeeStats {
   });
 
   factory EmployeeStats.fromJson(Map<String, dynamic> json) {
-    var deptList = (json['DepartmentStats'] as List? ?? [])
-        .map((item) => DepartmentStats.fromJson(item))
-        .toList();
-
+    dynamic g(String k) => json[k] ?? json[k[0].toLowerCase() + k.substring(1)];
     return EmployeeStats(
-      totalEmployees: json['TotalEmployees'] ?? 0,
-      activeEmployees: json['ActiveEmployees'] ?? 0,
-      onLeaveEmployees: json['OnLeaveEmployees'] ?? 0,
-      inactiveEmployees: json['InactiveEmployees'] ?? 0,
-      departmentStats: deptList,
+      totalEmployees: (g('TotalEmployees') as int?) ?? 0,
+      activeEmployees: (g('ActiveEmployees') as int?) ?? 0,
+      onLeaveEmployees: (g('OnLeaveEmployees') as int?) ?? 0,
+      inactiveEmployees: (g('InactiveEmployees') as int?) ?? 0,
+      departmentStats: ((g('DepartmentStats') as List?) ?? [])
+          .map((i) => DepartmentStats.fromJson(i as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
 
+// ── DepartmentStats ───────────────────────────────────────────────────────────
 class DepartmentStats {
   final String department;
   final int totalEmployees;
@@ -317,16 +338,18 @@ class DepartmentStats {
   });
 
   factory DepartmentStats.fromJson(Map<String, dynamic> json) {
+    dynamic g(String k) => json[k] ?? json[k[0].toLowerCase() + k.substring(1)];
     return DepartmentStats(
-      department: json['Department'] ?? '',
-      totalEmployees: json['TotalEmployees'] ?? 0,
-      activeEmployees: json['ActiveEmployees'] ?? 0,
-      onLeaveEmployees: json['OnLeaveEmployees'] ?? 0,
-      inactiveEmployees: json['InactiveEmployees'] ?? 0,
+      department: g('Department')?.toString() ?? '',
+      totalEmployees: (g('TotalEmployees') as int?) ?? 0,
+      activeEmployees: (g('ActiveEmployees') as int?) ?? 0,
+      onLeaveEmployees: (g('OnLeaveEmployees') as int?) ?? 0,
+      inactiveEmployees: (g('InactiveEmployees') as int?) ?? 0,
     );
   }
 }
 
+// ── Request models ────────────────────────────────────────────────────────────
 class EmployeeListRequest {
   final String? searchQuery;
   final String? department;
@@ -347,24 +370,14 @@ class EmployeeListRequest {
   });
 
   Map<String, dynamic> toJson() {
-    final Map<String, dynamic> data = {};
-    if (searchQuery != null && searchQuery!.isNotEmpty) {
-      data['SearchQuery'] = searchQuery;
-    }
-    if (department != null && department!.isNotEmpty) {
-      data['Department'] = department;
-    }
-    if (status != null && status!.isNotEmpty) {
-      data['Status'] = status;
-    }
-    if (sortBy != null && sortBy!.isNotEmpty) {
-      data['SortBy'] = sortBy;
-    }
+    final data = <String, dynamic>{};
+    if (searchQuery?.isNotEmpty == true) data['SearchQuery'] = searchQuery;
+    if (department?.isNotEmpty == true) data['Department'] = department;
+    if (status?.isNotEmpty == true) data['Status'] = status;
+    if (sortBy?.isNotEmpty == true) data['SortBy'] = sortBy;
     if (page != null) data['Page'] = page;
     if (pageSize != null) data['PageSize'] = pageSize;
-    if (userId != null && userId!.isNotEmpty) {
-      data['UserId'] = userId;
-    }
+    if (userId?.isNotEmpty == true) data['UserId'] = userId;
     return data;
   }
 }
@@ -377,12 +390,10 @@ class EmployeeDetailRequest {
   EmployeeDetailRequest({this.id, this.userId, this.employeeId});
 
   Map<String, dynamic> toJson() {
-    final Map<String, dynamic> data = {};
+    final data = <String, dynamic>{};
     if (id != null) data['Id'] = id;
-    if (userId != null && userId!.isNotEmpty) data['UserId'] = userId;
-    if (employeeId != null && employeeId!.isNotEmpty) {
-      data['EmployeeId'] = employeeId;
-    }
+    if (userId?.isNotEmpty == true) data['UserId'] = userId;
+    if (employeeId?.isNotEmpty == true) data['EmployeeId'] = employeeId;
     return data;
   }
 }

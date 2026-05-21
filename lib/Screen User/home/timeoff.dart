@@ -1,11 +1,11 @@
-// screens/time_off_screen.dart
+// screens/time_off_screen.dart — FULL REPLACE
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
 import 'dart:io' show File, Directory, Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:typed_data';
 
-import 'package:absensikaryawan/Screen%20User/home/ajuantimeoff.dart';
+import 'package:absensikaryawan/Services/time_off_file_service.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -15,7 +15,9 @@ import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-// ── helper ──────────────────────────────────────────────────────────
+import 'add_time_off_screen.dart';
+import 'dl_laporan_screen.dart';
+
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
@@ -65,6 +67,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     _scrollController.dispose();
     super.dispose();
   }
+
+  // ── Data ──────────────────────────────────────────────────────────────────
 
   Future<void> _loadTimeOffData() async {
     setState(() {
@@ -143,6 +147,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     return years;
   }
 
+  // ── Navigation ────────────────────────────────────────────────────────────
+
   void _navigateToFormSubmit(BuildContext context, {TimeOffModel? editData}) {
     Navigator.push(
       context,
@@ -155,36 +161,117 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     });
   }
 
-  // ── file download/preview ────────────────────────────────────────
-  Future<void> _downloadFile(TimeOffModel timeOff) async {
-    if (timeOff.id == null) {
-      _showSnackBar('ID Izin tidak valid', isError: true);
-      return;
-    }
+  void _navigateToDlLaporan(TimeOffModel timeOff) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            DlLaporanScreen(timeOff: timeOff, userId: widget.userId),
+      ),
+    ).then((result) {
+      if (result == true) _refreshData();
+    });
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
+  void _confirmDelete(TimeOffModel timeOff) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Pengajuan'),
+        content: const Text(
+          'Hapus pengajuan ini? Tindakan tidak bisa dibatalkan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _deleteTimeOff(timeOff);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red[600],
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteTimeOff(TimeOffModel timeOff) async {
     try {
-      _showSnackBar('Mengunduh file...', isError: false);
-      final response = await TimeOffService.downloadFile(
+      final res = await TimeOffService.deleteTimeOff(
         timeOff.id!,
         widget.userId,
       );
-      if (response.success && response.data != null) {
-        await _saveAndOpenFile(
-          Uint8List.fromList(response.data!),
-          timeOff.fileName!,
-        );
+      if (res.success) {
+        _showSnackBar('Pengajuan berhasil dihapus', isError: false);
+        _refreshData();
       } else {
-        _showSnackBar(response.message, isError: true);
+        _showSnackBar(res.message, isError: true);
       }
     } catch (e) {
-      _showSnackBar('Gagal mengunduh file: $e', isError: true);
+      _showSnackBar('Gagal menghapus: $e', isError: true);
+    }
+  }
+
+  // ── File download/preview ─────────────────────────────────────────────────
+
+  Future<void> _downloadFileById(
+    int fileId,
+    int timeOffId,
+    String fileName,
+  ) async {
+    try {
+      _showSnackBar('Mengunduh $fileName...', isError: false);
+      final res = await TimeOffFileService.downloadFile(
+        fileId,
+        timeOffId,
+        widget.userId,
+      );
+      if (res.success && res.data != null) {
+        await _saveAndOpenFile(Uint8List.fromList(res.data!), fileName);
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal mengunduh: $e', isError: true);
+    }
+  }
+
+  Future<void> _previewFileById(
+    int fileId,
+    int timeOffId,
+    String fileName,
+  ) async {
+    try {
+      _showSnackBar('Membuka preview...', isError: false);
+      final res = await TimeOffFileService.downloadFile(
+        fileId,
+        timeOffId,
+        widget.userId,
+      );
+      if (res.success && res.data != null) {
+        await _openTempFile(Uint8List.fromList(res.data!), fileName);
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal membuka preview: $e', isError: true);
     }
   }
 
   Future<void> _saveAndOpenFile(Uint8List fileBytes, String fileName) async {
-    // Web: tidak bisa akses filesystem, tampilkan info saja
     if (kIsWeb) {
       _showSnackBar(
-        'File tidak dapat disimpan di web. Gunakan tombol Preview untuk melihat file.',
+        'File tidak dapat disimpan di web. Gunakan tombol Preview.',
         isError: false,
       );
       return;
@@ -212,7 +299,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Future<String> _getUniqueFilePath(String dirPath, String fileName) async {
-    if (kIsWeb) return ''; // tidak dipakai di web
+    if (kIsWeb) return '';
     String filePath = '$dirPath/$fileName';
     int counter = 1;
     while (await File(filePath).exists()) {
@@ -225,7 +312,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Future<bool> _requestStoragePermission() async {
-    if (kIsWeb) return true; // web tidak pakai storage permission
+    if (kIsWeb) return true;
     if (Platform.isIOS) return true;
     final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
     if (sdkInt >= 30) return true;
@@ -234,7 +321,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Future<Directory?> _getDownloadDirectory() async {
-    if (kIsWeb) return null; // web tidak pakai Directory
+    if (kIsWeb) return null;
     try {
       if (Platform.isAndroid) {
         final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
@@ -255,6 +342,27 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       }
     } catch (_) {}
     return null;
+  }
+
+  Future<void> _openTempFile(Uint8List fileBytes, String fileName) async {
+    if (kIsWeb) {
+      _showSnackBar('Preview file tidak tersedia di web.', isError: false);
+      return;
+    }
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(fileBytes);
+      final result = await OpenFile.open(tempFile.path);
+      if (result.type != ResultType.done) {
+        _showSnackBar(
+          'Tidak dapat membuka file: ${result.message}',
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showSnackBar('Gagal membuka file: $e', isError: true);
+    }
   }
 
   void _showOpenFileDialog(String filePath, String fileName) {
@@ -306,51 +414,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  Future<void> _previewFile(TimeOffModel timeOff) async {
-    if (timeOff.id == null) {
-      _showSnackBar('ID Izin tidak valid', isError: true);
-      return;
-    }
-    try {
-      _showSnackBar('Membuka preview...', isError: false);
-      final response = await TimeOffService.downloadFile(
-        timeOff.id!,
-        widget.userId,
-      );
-      if (response.success && response.data != null) {
-        await _openTempFile(
-          Uint8List.fromList(response.data!),
-          timeOff.fileName!,
-        );
-      } else {
-        _showSnackBar(response.message, isError: true);
-      }
-    } catch (e) {
-      _showSnackBar('Gagal membuka preview: $e', isError: true);
-    }
-  }
-
-  Future<void> _openTempFile(Uint8List fileBytes, String fileName) async {
-    if (kIsWeb) {
-      _showSnackBar('Preview file tidak tersedia di web.', isError: false);
-      return;
-    }
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File('${tempDir.path}/$fileName');
-      await tempFile.writeAsBytes(fileBytes);
-      final result = await OpenFile.open(tempFile.path);
-      if (result.type != ResultType.done) {
-        _showSnackBar(
-          'Tidak dapat membuka file: ${result.message}',
-          isError: true,
-        );
-      }
-    } catch (e) {
-      _showSnackBar('Gagal membuka file: $e', isError: true);
-    }
-  }
-
   void _showSnackBar(String message, {required bool isError}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -380,15 +443,20 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ── status helpers ───────────────────────────────────────────────
+  // ── Status helpers ────────────────────────────────────────────────────────
+
   Color _colorForStatus(String s) {
     switch (s.toLowerCase()) {
-      case "approved":
-      case "disetujui":
+      case 'approved':
+      case 'disetujui':
         return const Color(0xFF10B981);
-      case "rejected":
-      case "ditolak":
+      case 'rejected':
+      case 'ditolak':
         return const Color(0xFFEF4444);
+      case 'menunggu laporan':
+        return const Color(0xFF7C3AED);
+      case 'menunggu manager':
+        return const Color(0xFFF59E0B);
       default:
         return const Color(0xFFF59E0B);
     }
@@ -396,12 +464,16 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
 
   IconData _iconForStatus(String s) {
     switch (s.toLowerCase()) {
-      case "approved":
-      case "disetujui":
+      case 'approved':
+      case 'disetujui':
         return Icons.check_circle_rounded;
-      case "rejected":
-      case "ditolak":
+      case 'rejected':
+      case 'ditolak':
         return Icons.cancel_rounded;
+      case 'menunggu laporan':
+        return Icons.upload_file_rounded;
+      case 'menunggu manager':
+        return Icons.person_outline_rounded;
       default:
         return Icons.schedule_rounded;
     }
@@ -409,30 +481,68 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
 
   String _getJenisIcon(String j) {
     switch (j) {
-      case "Izin Tahunan":
-        return "🏖️";
-      case "Sakit":
-        return "🏥";
-      case "Izin Khusus":
-        return "🎉";
-      case "Izin Pribadi":
-        return "👤";
+      case 'Izin Tahunan':
+        return '🏖️';
+      case 'Sakit':
+        return '🏥';
+      case 'Umrah dan Haji':
+        return '🕋';
+      case 'Izin Datang Terlambat':
+        return '⏰';
+      case 'Izin Lahiran':
+        return '👶';
+      case 'Dinas Luar':
+        return '🧳';
+      case 'Keluarga Meninggal':
+        return '🕯️';
       default:
-        return "📅";
+        return '📅';
     }
   }
 
-  String _getFileExtension(String f) => f.split('.').last.toLowerCase();
-  bool _isImageFile(String f) =>
-      ['jpg', 'jpeg', 'png'].contains(_getFileExtension(f));
 
-  // ─────────────────────────────────────────────────────────────────
-  // BUILD UTAMA
-  // ─────────────────────────────────────────────────────────────────
+  // ── File icon helpers ─────────────────────────────────────────────────────
+
+  IconData _getFileIcon(TimeOffFileItem file) {
+    if (file.isImage) return Icons.image_rounded;
+    if (file.isPdf) return Icons.picture_as_pdf_rounded;
+    switch (file.ext) {
+      case 'doc':
+      case 'docx':
+        return Icons.description_rounded;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart_rounded;
+      default:
+        return Icons.insert_drive_file_rounded;
+    }
+  }
+
+  Color _getFileIconColor(TimeOffFileItem file) {
+    if (file.isImage) return const Color(0xFF10B981);
+    if (file.isPdf) return const Color(0xFFEF4444);
+    switch (file.ext) {
+      case 'doc':
+      case 'docx':
+        return const Color(0xFF3B82F6);
+      case 'xls':
+      case 'xlsx':
+        return const Color(0xFF059669);
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  String _getFileSubtitle(TimeOffFileItem file) {
+    final ext = file.ext.isEmpty ? 'FILE' : file.ext.toUpperCase();
+    return file.sizeLabel.isEmpty ? ext : '$ext • ${file.sizeLabel}';
+  }
+
+  // ── BUILD ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final isWeb = _isWideScreen(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -464,7 +574,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ),
         ),
         actions: [
-          // Web: tombol Ajukan di AppBar
           if (isWeb)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
@@ -499,7 +608,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         ],
       ),
       body: isWeb ? _buildWebLayout() : _buildMobileLayout(),
-      // Mobile: FAB tetap
       floatingActionButton: isWeb
           ? null
           : Container(
@@ -531,9 +639,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // MOBILE LAYOUT (asli)
-  // ─────────────────────────────────────────────────────────────────
+  // ── Mobile layout ─────────────────────────────────────────────────────────
+
   Widget _buildMobileLayout() {
     return RefreshIndicator(
       onRefresh: _refreshData,
@@ -555,14 +662,12 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // WEB LAYOUT (2 kolom: filter kiri | list kanan)
-  // ─────────────────────────────────────────────────────────────────
+  // ── Web layout ────────────────────────────────────────────────────────────
+
   Widget _buildWebLayout() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Panel kiri: filter (sticky) ───────────────────────
         SizedBox(
           width: 300,
           child: Container(
@@ -593,8 +698,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
             ),
           ),
         ),
-
-        // ── Panel kanan: list cards ───────────────────────────
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refreshData,
@@ -616,13 +719,11 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ── Web filter panel (tidak accordion, selalu terbuka) ────────
   Widget _buildWebFilterContent() {
     final availableYears = _getAvailableYears();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Tahun
         const Text(
           'Tahun',
           style: TextStyle(
@@ -660,7 +761,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        // Bulan
         const Text(
           'Bulan',
           style: TextStyle(
@@ -689,13 +789,12 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                     child: Text(_monthNames[i]),
                   ),
                 ),
-              ),
+              ).toList(),
               icon: const Icon(Icons.arrow_drop_down),
             ),
           ),
         ),
         const SizedBox(height: 16),
-        // Buttons
         Row(
           children: [
             Expanded(
@@ -741,7 +840,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ── Stats summary di panel kiri web ──────────────────────────
   Widget _buildWebStats() {
     final approved = _filteredTimeOffList
         .where(
@@ -751,11 +849,10 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         )
         .length;
     final pending = _filteredTimeOffList
-        .where(
-          (t) =>
-              t.status.toLowerCase() == 'pending' ||
-              t.status.toLowerCase() == 'menunggu',
-        )
+        .where((t) => t.status.toLowerCase() == 'pending')
+        .length;
+    final menungguLaporan = _filteredTimeOffList
+        .where((t) => t.status.toLowerCase() == 'menunggu laporan')
         .length;
     final rejected = _filteredTimeOffList
         .where(
@@ -793,6 +890,14 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           _buildStatRow('Disetujui', approved, const Color(0xFF10B981)),
           const SizedBox(height: 6),
           _buildStatRow('Menunggu', pending, const Color(0xFFF59E0B)),
+          if (menungguLaporan > 0) ...[
+            const SizedBox(height: 6),
+            _buildStatRow(
+              'Menunggu Laporan',
+              menungguLaporan,
+              const Color(0xFF7C3AED),
+            ),
+          ],
           const SizedBox(height: 6),
           _buildStatRow('Ditolak', rejected, const Color(0xFFEF4444)),
         ],
@@ -827,7 +932,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ── List header (shared) ───────────────────────────────────────
   Widget _buildListHeader() {
     return Row(
       children: [
@@ -862,7 +966,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ── List content (shared) ──────────────────────────────────────
   Widget _buildListContent() {
     if (_isLoading) return _buildLoadingState();
     if (_errorMessage.isNotEmpty && _allTimeOffList.isEmpty) {
@@ -874,9 +977,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // SHARED WIDGETS (tidak berubah dari asli)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildFilterSection() {
     final availableYears = _getAvailableYears();
     return Container(
@@ -1052,7 +1152,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                                     child: Text(_monthNames[i]),
                                   ),
                                 ),
-                              ),
+                              ).toList(),
                               icon: const Icon(Icons.arrow_drop_down),
                               isExpanded: true,
                             ),
@@ -1253,16 +1353,28 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     ),
   );
 
+  // ── Time off card ─────────────────────────────────────────────────────────
+
   Widget _buildTimeOffCard(TimeOffModel timeOff) {
+    final isMenungguLaporan = timeOff.status == 'Menunggu Laporan';
+    final canEditDelete =
+        timeOff.status == 'Pending' || timeOff.status == 'Menunggu Manager';
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(
+          color: isMenungguLaporan
+              ? const Color(0xFF7C3AED).withOpacity(0.4)
+              : const Color(0xFFE5E7EB),
+          width: isMenungguLaporan ? 2 : 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: (isMenungguLaporan ? const Color(0xFF7C3AED) : Colors.black)
+                .withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -1273,6 +1385,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Header row ──────────────────────────────────────────────
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1309,6 +1422,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                               ),
                             ),
                           ),
+                          // Status badge
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -1335,7 +1449,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  timeOff.status,
+                                  timeOff.statusLabel,
                                   style: TextStyle(
                                     color: _colorForStatus(timeOff.status),
                                     fontWeight: FontWeight.w600,
@@ -1348,6 +1462,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
+                      // Tanggal
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
@@ -1367,7 +1482,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    '${DateFormat('dd MMM yyyy').format(timeOff.tanggalMulai)} s/d ${DateFormat('dd MMM yyyy').format(timeOff.tanggalSelesai)}',
+                                    '${DateFormat('dd MMM yyyy').format(timeOff.tanggalMulai)}'
+                                    ' s/d ${DateFormat('dd MMM yyyy').format(timeOff.tanggalSelesai)}',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       color: Color(0xFF374151),
@@ -1405,8 +1521,184 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ],
             ),
 
+            // ── Banner "Menunggu Laporan" ─────────────────────────────
+            if (isMenungguLaporan) ...[
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7C3AED).withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF7C3AED).withOpacity(0.2),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.upload_file_rounded,
+                          size: 16,
+                          color: Color(0xFF7C3AED),
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Aksi Diperlukan',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF7C3AED),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Dinas Luar kamu sudah disetujui. Upload laporan hasil kerja dan laporan anggaran untuk menyelesaikan proses.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF4C1D95),
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _navigateToDlLaporan(timeOff),
+                        icon: const Icon(Icons.upload_file_rounded, size: 18),
+                        label: const Text(
+                          'Upload Laporan DL',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF7C3AED),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Laporan sudah disubmit ────────────────────────────────
+            if (timeOff.isDinasLuar &&
+                timeOff.status == 'Approved' &&
+                timeOff.laporanStatus != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.green[200]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      size: 16,
+                      color: Colors.green[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Laporan sudah disubmit',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (timeOff.laporanSubmittedAt != null) ...[
+                      const Spacer(),
+                      Text(
+                        DateFormat(
+                          'dd MMM yyyy',
+                        ).format(timeOff.laporanSubmittedAt!),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.green[600],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Info DL ───────────────────────────────────────────────
+            if (timeOff.isDinasLuar && timeOff.jenisPekerjaan != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F3FF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFDDD6FE)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.work_outline,
+                      size: 14,
+                      color: Color(0xFF7C3AED),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Jenis: ${timeOff.jenisPekerjaan}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF5B21B6),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (timeOff.rabType != null) ...[
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEDE9FE),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          timeOff.rabType == 'reimbursement'
+                              ? '💸 Reimbursement'
+                              : '🏢 Uang Kantor',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF5B21B6),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
+            // ── File lampiran ─────────────────────────────────────────
             _buildFilePreview(timeOff),
 
+            // ── Catatan ───────────────────────────────────────────────
             if (timeOff.catatan != null && timeOff.catatan!.isNotEmpty) ...[
               const SizedBox(height: 16),
               Container(
@@ -1453,6 +1745,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ),
             ],
 
+            // ── Alasan penolakan ──────────────────────────────────────
             if (timeOff.status.toLowerCase() == 'rejected' &&
                 timeOff.rejectionReason != null &&
                 timeOff.rejectionReason!.isNotEmpty) ...[
@@ -1502,34 +1795,81 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                 ),
               ),
             ],
+
+            // ── Edit / Delete ─────────────────────────────────────────
+            if (canEditDelete) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          _navigateToFormSubmit(context, editData: timeOff),
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text(
+                        'Edit',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF3B82F6),
+                        side: const BorderSide(color: Color(0xFF3B82F6)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _confirmDelete(timeOff),
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text(
+                        'Hapus',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red[600],
+                        side: BorderSide(color: Colors.red[300]!),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
+  // ── File preview ──────────────────────────────────────────────────────────
+
   Widget _buildFilePreview(TimeOffModel timeOff) {
-    if (timeOff.fileName == null || timeOff.fileName!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final fileName = timeOff.fileName!;
-    final isImage = _isImageFile(fileName);
+    final files = timeOff.allFiles;
+    if (files.isEmpty) return const SizedBox.shrink();
+
     return Container(
       margin: const EdgeInsets.only(top: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.attach_file_rounded,
                 size: 16,
                 color: Color(0xFF6B7280),
               ),
-              SizedBox(width: 6),
+              const SizedBox(width: 6),
               Text(
-                'File Lampiran',
-                style: TextStyle(
+                'File Lampiran (${files.length})',
+                style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: Color(0xFF6B7280),
@@ -1539,237 +1879,125 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: isImage
-                ? _buildImagePreview(timeOff)
-                : _buildDocumentPreview(timeOff),
+          Column(
+            children: files
+                .map((file) => _buildSingleFileItem(timeOff, file))
+                .toList(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildImagePreview(TimeOffModel timeOff) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Column(
-        children: [
-          Container(
-            height: 120,
-            width: double.infinity,
-            color: Colors.grey[100],
-            child: Stack(
-              children: [
-                Container(
-                  width: double.infinity,
-                  height: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(12),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.image_rounded,
-                        size: 40,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Preview Gambar',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _getFileExtension(timeOff.fileName!).toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+  Widget _buildSingleFileItem(TimeOffModel timeOff, TimeOffFileItem file) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: _getFileIconColor(file).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
           ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        timeOff.fileName!,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF374151),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Gambar • ${_getFileExtension(timeOff.fileName!).toUpperCase()}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildDownloadButton(timeOff),
-              ],
-            ),
+          child: Icon(
+            _getFileIcon(file),
+            color: _getFileIconColor(file),
+            size: 22,
           ),
-        ],
+        ),
+        title: Text(
+          file.fileName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1F2937),
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            _getFileSubtitle(file),
+            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+          ),
+        ),
+        trailing: Wrap(
+          spacing: 4,
+          children: [
+            // Gunakan file.id jika ada (tabel baru), fallback ke timeOff.id (file lama)
+            IconButton(
+              tooltip: 'Preview',
+              icon: const Icon(
+                Icons.visibility_rounded,
+                size: 20,
+                color: Color(0xFF3B82F6),
+              ),
+              onPressed: file.id > 0
+                  ? () => _previewFileById(file.id, timeOff.id!, file.fileName)
+                  : () => _previewFileLegacy(timeOff),
+            ),
+            IconButton(
+              tooltip: 'Download',
+              icon: const Icon(
+                Icons.download_rounded,
+                size: 20,
+                color: Color(0xFF10B981),
+              ),
+              onPressed: file.id > 0
+                  ? () => _downloadFileById(file.id, timeOff.id!, file.fileName)
+                  : () => _downloadFileLegacy(timeOff),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildDocumentPreview(TimeOffModel timeOff) {
-    final ext = _getFileExtension(timeOff.fileName!);
-    IconData fileIcon;
-    Color iconColor;
-    String fileType;
-    switch (ext) {
-      case 'pdf':
-        fileIcon = Icons.picture_as_pdf_rounded;
-        iconColor = const Color(0xFFEF4444);
-        fileType = 'PDF Document';
-        break;
-      case 'doc':
-      case 'docx':
-        fileIcon = Icons.description_rounded;
-        iconColor = const Color(0xFF2563EB);
-        fileType = 'Word Document';
-        break;
-      default:
-        fileIcon = Icons.insert_drive_file_rounded;
-        iconColor = const Color(0xFF6B7280);
-        fileType = 'Document';
+  // Legacy download (kolom file_name lama di udt_timeoff, id = 0)
+  Future<void> _downloadFileLegacy(TimeOffModel timeOff) async {
+    if (timeOff.id == null || timeOff.fileName == null) {
+      _showSnackBar('File tidak tersedia', isError: true);
+      return;
     }
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(fileIcon, size: 24, color: iconColor),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  timeOff.fileName!,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$fileType • ${ext.toUpperCase()}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF6B7280),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          _buildDownloadButton(timeOff),
-        ],
-      ),
-    );
+    try {
+      _showSnackBar('Mengunduh file...', isError: false);
+      final res = await TimeOffService.downloadFile(timeOff.id!, widget.userId);
+      if (res.success && res.data != null) {
+        await _saveAndOpenFile(
+          Uint8List.fromList(res.data!),
+          timeOff.fileName!,
+        );
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal mengunduh: $e', isError: true);
+    }
   }
 
-  Widget _buildDownloadButton(TimeOffModel timeOff) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          onTap: () => _previewFile(timeOff),
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFF10B981).withOpacity(0.2),
-              ),
-            ),
-            child: const Icon(
-              Icons.visibility_rounded,
-              size: 16,
-              color: Color(0xFF10B981),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        InkWell(
-          onTap: () => _downloadFile(timeOff),
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF3B82F6).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFF3B82F6).withOpacity(0.2),
-              ),
-            ),
-            child: const Icon(
-              Icons.download_rounded,
-              size: 16,
-              color: Color(0xFF3B82F6),
-            ),
-          ),
-        ),
-      ],
-    );
+  Future<void> _previewFileLegacy(TimeOffModel timeOff) async {
+    if (timeOff.id == null || timeOff.fileName == null) {
+      _showSnackBar('File tidak tersedia', isError: true);
+      return;
+    }
+    try {
+      _showSnackBar('Membuka preview...', isError: false);
+      final res = await TimeOffService.downloadFile(timeOff.id!, widget.userId);
+      if (res.success && res.data != null) {
+        await _openTempFile(Uint8List.fromList(res.data!), timeOff.fileName!);
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal membuka: $e', isError: true);
+    }
   }
 }

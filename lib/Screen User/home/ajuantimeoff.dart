@@ -1,392 +1,675 @@
-// screens/add_time_off_screen.dart — FULL REPLACE
-// ignore_for_file: use_build_context_synchronously, deprecated_member_use, curly_braces_in_flow_control_structures
+// screens/time_off_screen.dart — FULL REPLACE
+// ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
-import 'dart:io' show File;
+import 'dart:io' show File, Directory, Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:typed_data';
 
+import 'package:absensikaryawan/Services/time_off_file_service.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../fitur/ajukanreimbursement.dart';
+import 'add_time_off_screen.dart';
+import 'dl_laporan_screen.dart';
 
-bool _isWideScreen(BuildContext ctx) => MediaQuery.of(ctx).size.width >= 768;
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
 
-const List<String> _jenisPekerjaanOptions = [
-  'Legal',
-  'IT',
-  'Finance',
-  'Marketing',
-  'Operasional',
-  'Pengadaan',
-  'SDM',
-  'Teknis',
-  'Lainnya',
-];
-
-class AddTimeOffScreen extends StatefulWidget {
+class TimeOffScreen extends StatefulWidget {
   final String userId;
-  final TimeOffModel? editData;
-  const AddTimeOffScreen({super.key, required this.userId, this.editData});
+  const TimeOffScreen({super.key, required this.userId});
 
   @override
-  State<AddTimeOffScreen> createState() => _AddTimeOffScreenState();
+  State<TimeOffScreen> createState() => _TimeOffScreenState();
 }
 
-class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _catatanCtrl = TextEditingController();
-  final _nominalKantorCtrl = TextEditingController();
+class _TimeOffScreenState extends State<TimeOffScreen> {
+  List<TimeOffModel> _allTimeOffList = [];
+  List<TimeOffModel> _filteredTimeOffList = [];
+  bool _isLoading = true;
+  String _errorMessage = '';
+  final ScrollController _scrollController = ScrollController();
 
-  String? _selectedJenis;
-  DateTime? _tanggalMulai;
-  DateTime? _tanggalSelesai;
-  bool _isLoading = false;
-  bool _isEditMode = false;
+  int _selectedYear = DateTime.now().year;
+  int _selectedMonth = DateTime.now().month;
+  bool _isFilterExpanded = false;
 
-  // File receipt
-  XFile? _selectedImage;
-  int _selectedImageSize = 0;
-  bool _hasExistingFile = false;
-  String? _existingFileName;
-  bool _keepExistingFile = true;
-  bool _isDownloadingFile = false;
-
-  // DL
-  String? _selectedJenisPekerjaan;
-  String? _selectedRabType;
-  final List<_ReimburseRow> _reimburseRows = [];
-
-  final List<Map<String, dynamic>> _jenisTimeOff = [
-    {
-      'value': 'Izin Tahunan',
-      'label': 'Izin Tahunan',
-      'icon': '🏖️',
-      'description': 'Cuti tahunan — memotong jatah cuti',
-    },
-    {
-      'value': 'Sakit',
-      'label': 'Izin Sakit',
-      'icon': '🏥',
-      'description': 'Izin sakit — tidak memotong cuti tahunan',
-    },
-    {
-      'value': 'Umrah dan Haji',
-      'label': 'Umrah dan Haji',
-      'icon': '🕋',
-      'description': 'Izin ibadah umrah/haji',
-    },
-    {
-      'value': 'Izin Datang Terlambat',
-      'label': 'Izin Datang Terlambat',
-      'icon': '⏰',
-      'description': 'Harus diajukan sebelum jam 10:00 pagi',
-    },
-    {
-      'value': 'Izin Lahiran',
-      'label': 'Izin Lahiran',
-      'icon': '👶',
-      'description': 'Izin melahirkan / mendampingi melahirkan',
-    },
-    {
-      'value': 'Dinas Luar',
-      'label': 'Dinas Luar',
-      'icon': '🧳',
-      'description': 'Perjalanan dinas — memerlukan laporan',
-    },
-    {
-      'value': 'Keluarga Meninggal',
-      'label': 'Keluarga Meninggal',
-      'icon': '🕯️',
-      'description': 'Izin duka cita',
-    },
+  final List<String> _monthNames = [
+    'Semua Bulan',
+    'Januari',
+    'Februari',
+    'Maret',
+    'April',
+    'Mei',
+    'Juni',
+    'Juli',
+    'Agustus',
+    'September',
+    'Oktober',
+    'November',
+    'Desember',
   ];
 
-  bool get _isDinasLuar => _selectedJenis == 'Dinas Luar';
-
-  bool _isFileRequired() => _selectedJenis == 'Sakit';
-
-  String _fileUploadInfo() {
-    if (_selectedJenis == 'Sakit') return 'Upload surat dokter (WAJIB)';
-    if (_selectedJenis == null)
-      return 'Pilih jenis izin untuk melihat persyaratan file';
-    return 'Upload dokumen pendukung (OPSIONAL)';
-  }
-
-  double _getResponsivePadding(BuildContext ctx, double base) =>
-      (base * (MediaQuery.of(ctx).size.width / 375)).clamp(
-        base * 0.85,
-        base * 1.1,
-      );
-
-  // ── Init ───────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-    _initializeNotifications();
-    _isEditMode = widget.editData != null;
-    if (_isEditMode) _loadEditData();
+    _loadTimeOffData();
   }
 
-  void _loadEditData() {
-    final d = widget.editData!;
-    _selectedJenis = d.jenisTimeOff;
-    _tanggalMulai = d.tanggalMulai;
-    _tanggalSelesai = d.tanggalSelesai;
-    _catatanCtrl.text = d.catatan ?? '';
-    _selectedJenisPekerjaan = d.jenisPekerjaan;
-    _selectedRabType = d.rabType;
-    if (d.nominalUangKantor != null)
-      _nominalKantorCtrl.text = d.nominalUangKantor!.toStringAsFixed(0);
-    if (d.reimbursementItems != null) {
-      for (final item in d.reimbursementItems!) {
-        _reimburseRows.add(
-          _ReimburseRow(
-            namaCtrl: TextEditingController(text: item.namaItem),
-            nominalCtrl: TextEditingController(
-              text: item.nominal.toStringAsFixed(0),
-            ),
-            ketCtrl: TextEditingController(text: item.keterangan ?? ''),
-          ),
-        );
-      }
-    }
-    if (d.fileName != null && d.fileName!.isNotEmpty) {
-      _hasExistingFile = true;
-      _existingFileName = d.fileName;
-      _keepExistingFile = true;
-    }
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
-  // ── Submit ─────────────────────────────────────────────────────────────────
-  void _submitForm() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_selectedJenis == null) {
-      _showSnackBar('Pilih jenis izin', isError: true);
-      return;
-    }
-    if (_tanggalMulai == null) {
-      _showSnackBar('Pilih tanggal mulai', isError: true);
-      return;
-    }
-    if (_tanggalSelesai == null) {
-      _showSnackBar('Pilih tanggal selesai', isError: true);
-      return;
-    }
-    if (!_isEditMode && _isFileRequired() && _selectedImage == null) {
-      _showSnackBar(
-        'File pendukung WAJIB untuk "$_selectedJenis".',
-        isError: true,
-      );
-      return;
-    }
-    if (_isDinasLuar &&
-        (_selectedJenisPekerjaan == null || _selectedJenisPekerjaan!.isEmpty)) {
-      _showSnackBar(
-        'Jenis pekerjaan wajib diisi untuk Dinas Luar',
-        isError: true,
-      );
-      return;
-    }
+  // ── Data ──────────────────────────────────────────────────────────────────
 
-    setState(() => _isLoading = true);
+  Future<void> _loadTimeOffData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
     try {
-      final reimburseItems = _selectedRabType == 'reimbursement'
-          ? _reimburseRows
-                .where((r) => r.namaCtrl.text.trim().isNotEmpty)
-                .map(
-                  (r) => ReimbursementItem(
-                    namaItem: r.namaCtrl.text.trim(),
-                    nominal:
-                        double.tryParse(
-                          r.nominalCtrl.text.trim().replaceAll(
-                            RegExp(r'[^0-9.]'),
-                            '',
-                          ),
-                        ) ??
-                        0,
-                    keterangan: r.ketCtrl.text.trim().isEmpty
-                        ? null
-                        : r.ketCtrl.text.trim(),
-                  ),
-                )
-                .toList()
-          : null;
-
-      final double? nominalKantor =
-          _selectedRabType == 'uang_kantor' &&
-              _nominalKantorCtrl.text.trim().isNotEmpty
-          ? double.tryParse(
-              _nominalKantorCtrl.text.trim().replaceAll(RegExp(r'[^0-9.]'), ''),
-            )
-          : null;
-
-      if (_isEditMode) {
-        final req = UpdateTimeOffRequest(
-          id: widget.editData!.id!,
-          userId: widget.userId,
-          jenisTimeOff: _selectedJenis!.trim(),
-          tanggalMulai: _tanggalMulai!,
-          tanggalSelesai: _tanggalSelesai!,
-          catatan: _catatanCtrl.text.trim().isEmpty
-              ? null
-              : _catatanCtrl.text.trim(),
-          receiptFile: (!_keepExistingFile && _selectedImage != null && !kIsWeb)
-              ? File(_selectedImage!.path)
-              : null,
-          jenisPekerjaan: _selectedJenisPekerjaan,
-          rabType: _selectedRabType,
-          nominalUangKantor: nominalKantor,
-          reimbursementItems: reimburseItems,
-        );
-        final res = await TimeOffService.updateTimeOff(req);
-        if (res.success) {
-          _showSnackBar('Izin berhasil diupdate!', isError: false);
-          Navigator.of(context).pop(true);
-        } else {
-          _showSnackBar(res.message, isError: true);
-        }
+      final response = await TimeOffService.getMyTimeOff(widget.userId);
+      if (response.success && response.data != null) {
+        setState(() {
+          _allTimeOffList = response.data!.data;
+          _applyClientSideFilter();
+        });
       } else {
-        final req = TimeOffRequest(
-          userId: widget.userId,
-          jenisTimeOff: _selectedJenis!.trim(),
-          tanggalMulai: _tanggalMulai!,
-          tanggalSelesai: _tanggalSelesai!,
-          catatan: _catatanCtrl.text.trim().isEmpty
-              ? null
-              : _catatanCtrl.text.trim(),
-          receiptFile: (_selectedImage != null && !kIsWeb)
-              ? File(_selectedImage!.path)
-              : null,
-          jenisPekerjaan: _selectedJenisPekerjaan,
-          rabType: _selectedRabType,
-          nominalUangKantor: nominalKantor,
-          reimbursementItems: reimburseItems,
-        );
-        final res = await TimeOffService.submitTimeOff(req);
-        if (res.success && res.data != null) {
-          _showSnackBar('Izin berhasil diajukan!', isError: false);
-          await _showSuccessNotification(res.data.toString());
-          Navigator.of(context).pop(true);
-        } else {
-          _showSnackBar(res.message, isError: true);
-        }
+        setState(() {
+          _errorMessage = response.message;
+          _isLoading = false;
+        });
       }
     } catch (e) {
-      _showSnackBar('Terjadi kesalahan: $e', isError: true);
+      setState(() {
+        _errorMessage = 'Terjadi kesalahan: ${e.toString()}';
+        _isLoading = false;
+      });
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
+  void _applyClientSideFilter() {
+    List<TimeOffModel> filtered = _allTimeOffList
+        .where((t) => t.tanggalMulai.year == _selectedYear)
+        .toList();
+    if (_selectedMonth != 0) {
+      filtered = filtered
+          .where((t) => t.tanggalMulai.month == _selectedMonth)
+          .toList();
+    }
+    filtered.sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
+    setState(() => _filteredTimeOffList = filtered);
+  }
+
+  Future<void> _refreshData() async => _loadTimeOffData();
+
+  void _applyFilter() {
+    setState(() => _isFilterExpanded = false);
+    _applyClientSideFilter();
+  }
+
+  void _resetFilter() {
+    setState(() {
+      _selectedYear = DateTime.now().year;
+      _selectedMonth = DateTime.now().month;
+      _isFilterExpanded = false;
+    });
+    _applyClientSideFilter();
+  }
+
+  String _getFilterDisplayText() {
+    final monthName = _selectedMonth == 0
+        ? 'Semua'
+        : _monthNames[_selectedMonth];
+    return '$monthName $_selectedYear';
+  }
+
+  List<int> _getAvailableYears() {
+    final years = _allTimeOffList
+        .map((t) => t.tanggalMulai.year)
+        .toSet()
+        .toList();
+    years.sort((a, b) => b.compareTo(a));
+    if (years.isEmpty) {
+      final y = DateTime.now().year;
+      return List.generate(5, (i) => y - 2 + i);
+    }
+    return years;
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────
+
+  void _navigateToFormSubmit(BuildContext context, {TimeOffModel? editData}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            AddTimeOffScreen(userId: widget.userId, editData: editData),
+      ),
+    ).then((result) {
+      if (result == true) _refreshData();
+    });
+  }
+
+  void _navigateToDlLaporan(TimeOffModel timeOff) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            DlLaporanScreen(timeOff: timeOff, userId: widget.userId),
+      ),
+    ).then((result) {
+      if (result == true) _refreshData();
+    });
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
+  void _confirmDelete(TimeOffModel timeOff) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Pengajuan'),
+        content: const Text(
+          'Hapus pengajuan ini? Tindakan tidak bisa dibatalkan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _deleteTimeOff(timeOff);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red[600],
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteTimeOff(TimeOffModel timeOff) async {
+    try {
+      final res = await TimeOffService.deleteTimeOff(
+        timeOff.id!,
+        widget.userId,
+      );
+      if (res.success) {
+        _showSnackBar('Pengajuan berhasil dihapus', isError: false);
+        _refreshData();
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal menghapus: $e', isError: true);
+    }
+  }
+
+  // ── File download/preview ─────────────────────────────────────────────────
+
+  Future<void> _downloadFileById(
+    int fileId,
+    int timeOffId,
+    String fileName,
+  ) async {
+    try {
+      _showSnackBar('Mengunduh $fileName...', isError: false);
+      final res = await TimeOffFileService.downloadFile(
+        fileId,
+        timeOffId,
+        widget.userId,
+      );
+      if (res.success && res.data != null) {
+        await _saveAndOpenFile(Uint8List.fromList(res.data!), fileName);
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal mengunduh: $e', isError: true);
+    }
+  }
+
+  Future<void> _previewFileById(
+    int fileId,
+    int timeOffId,
+    String fileName,
+  ) async {
+    try {
+      _showSnackBar('Membuka preview...', isError: false);
+      final res = await TimeOffFileService.downloadFile(
+        fileId,
+        timeOffId,
+        widget.userId,
+      );
+      if (res.success && res.data != null) {
+        await _openTempFile(Uint8List.fromList(res.data!), fileName);
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal membuka preview: $e', isError: true);
+    }
+  }
+
+  Future<void> _saveAndOpenFile(Uint8List fileBytes, String fileName) async {
+    if (kIsWeb) {
+      _showSnackBar(
+        'File tidak dapat disimpan di web. Gunakan tombol Preview.',
+        isError: false,
+      );
+      return;
+    }
+    try {
+      if (!await _requestStoragePermission()) {
+        _showSnackBar('Izin akses storage diperlukan', isError: true);
+        return;
+      }
+      final directory = await _getDownloadDirectory();
+      if (directory == null) {
+        _showSnackBar('Tidak dapat mengakses folder download', isError: true);
+        return;
+      }
+      final filePath = await _getUniqueFilePath(directory.path, fileName);
+      await File(filePath).writeAsBytes(fileBytes);
+      _showSnackBar('File berhasil diunduh ke Downloads', isError: false);
+      final result = await OpenFile.open(filePath);
+      if (result.type != ResultType.done) {
+        _showOpenFileDialog(filePath, fileName);
+      }
+    } catch (e) {
+      _showSnackBar('Gagal menyimpan file: $e', isError: true);
+    }
+  }
+
+  Future<String> _getUniqueFilePath(String dirPath, String fileName) async {
+    if (kIsWeb) return '';
+    String filePath = '$dirPath/$fileName';
+    int counter = 1;
+    while (await File(filePath).exists()) {
+      final name = fileName.split('.').first;
+      final ext = fileName.split('.').last;
+      filePath = '$dirPath/${name}_$counter.$ext';
+      counter++;
+    }
+    return filePath;
+  }
+
+  Future<bool> _requestStoragePermission() async {
+    if (kIsWeb) return true;
+    if (Platform.isIOS) return true;
+    final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
+    if (sdkInt >= 30) return true;
+    if (sdkInt >= 23) return (await Permission.storage.request()).isGranted;
+    return true;
+  }
+
+  Future<Directory?> _getDownloadDirectory() async {
+    if (kIsWeb) return null;
+    try {
+      if (Platform.isAndroid) {
+        final sdkInt = (await DeviceInfoPlugin().androidInfo).version.sdkInt;
+        if (sdkInt >= 30) {
+          final appDir = await getExternalStorageDirectory();
+          if (appDir != null) {
+            final d = Directory('${appDir.path}/Downloads');
+            if (!await d.exists()) await d.create(recursive: true);
+            return d;
+          }
+        } else {
+          final d = Directory('/storage/emulated/0/Download');
+          if (await d.exists()) return d;
+        }
+        return await getExternalStorageDirectory();
+      } else if (Platform.isIOS) {
+        return await getApplicationDocumentsDirectory();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _openTempFile(Uint8List fileBytes, String fileName) async {
+    if (kIsWeb) {
+      _showSnackBar('Preview file tidak tersedia di web.', isError: false);
+      return;
+    }
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(fileBytes);
+      final result = await OpenFile.open(tempFile.path);
+      if (result.type != ResultType.done) {
+        _showSnackBar(
+          'Tidak dapat membuka file: ${result.message}',
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showSnackBar('Gagal membuka file: $e', isError: true);
+    }
+  }
+
+  void _showOpenFileDialog(String filePath, String fileName) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.download_done_rounded, color: Color(0xFF10B981)),
+            SizedBox(width: 12),
+            Text('Download Selesai'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('File "$fileName" telah diunduh.'),
+            const SizedBox(height: 16),
+            const Text(
+              'Apakah Anda ingin membuka file sekarang?',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Nanti'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(context);
+              await OpenFile.open(filePath);
+            },
+            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+            label: const Text('Buka File'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF3B82F6),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSnackBar(String message, {required bool isError}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_rounded : Icons.check_circle_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: isError
+            ? const Color(0xFFEF4444)
+            : const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  // ── Status helpers ────────────────────────────────────────────────────────
+
+  Color _colorForStatus(String s) {
+    switch (s.toLowerCase()) {
+      case 'approved':
+      case 'disetujui':
+        return const Color(0xFF10B981);
+      case 'rejected':
+      case 'ditolak':
+        return const Color(0xFFEF4444);
+      case 'menunggu laporan':
+        return const Color(0xFF7C3AED);
+      case 'menunggu manager':
+        return const Color(0xFFF59E0B);
+      default:
+        return const Color(0xFFF59E0B);
+    }
+  }
+
+  IconData _iconForStatus(String s) {
+    switch (s.toLowerCase()) {
+      case 'approved':
+      case 'disetujui':
+        return Icons.check_circle_rounded;
+      case 'rejected':
+      case 'ditolak':
+        return Icons.cancel_rounded;
+      case 'menunggu laporan':
+        return Icons.upload_file_rounded;
+      case 'menunggu manager':
+        return Icons.person_outline_rounded;
+      default:
+        return Icons.schedule_rounded;
+    }
+  }
+
+  String _getJenisIcon(String j) {
+    switch (j) {
+      case 'Izin Tahunan':
+        return '🏖️';
+      case 'Sakit':
+        return '🏥';
+      case 'Umrah dan Haji':
+        return '🕋';
+      case 'Izin Datang Terlambat':
+        return '⏰';
+      case 'Izin Lahiran':
+        return '👶';
+      case 'Dinas Luar':
+        return '🧳';
+      case 'Keluarga Meninggal':
+        return '🕯️';
+      default:
+        return '📅';
+    }
+  }
+
+
+  // ── File icon helpers ─────────────────────────────────────────────────────
+
+  IconData _getFileIcon(TimeOffFileItem file) {
+    if (file.isImage) return Icons.image_rounded;
+    if (file.isPdf) return Icons.picture_as_pdf_rounded;
+    switch (file.ext) {
+      case 'doc':
+      case 'docx':
+        return Icons.description_rounded;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart_rounded;
+      default:
+        return Icons.insert_drive_file_rounded;
+    }
+  }
+
+  Color _getFileIconColor(TimeOffFileItem file) {
+    if (file.isImage) return const Color(0xFF10B981);
+    if (file.isPdf) return const Color(0xFFEF4444);
+    switch (file.ext) {
+      case 'doc':
+      case 'docx':
+        return const Color(0xFF3B82F6);
+      case 'xls':
+      case 'xlsx':
+        return const Color(0xFF059669);
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  String _getFileSubtitle(TimeOffFileItem file) {
+    final ext = file.ext.isEmpty ? 'FILE' : file.ext.toUpperCase();
+    return file.sizeLabel.isEmpty ? ext : '$ext • ${file.sizeLabel}';
+  }
+
+  // ── BUILD ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final accent = _isEditMode
-        ? const Color(0xFFEF4444)
-        : const Color(0xFF3B82F6);
+    final isWeb = _isWideScreen(context);
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text(
-          _isEditMode ? 'Edit Izin' : 'Ajukan Izin',
-          style: const TextStyle(
-            fontSize: 22,
+        title: const Text(
+          'Izin',
+          style: TextStyle(
+            fontSize: 20,
             fontWeight: FontWeight.w700,
-            color: Color(0xFF1F2937),
+            color: Colors.black87,
+            letterSpacing: 0.3,
           ),
         ),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
         leading: Container(
           margin: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF3F4F6),
+            color: Colors.grey[100],
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
           ),
           child: IconButton(
             icon: const Icon(
-              Icons.close_rounded,
-              color: Color(0xFF374151),
-              size: 20,
+              Icons.arrow_back_ios,
+              color: Colors.black87,
+              size: 18,
             ),
             onPressed: () => Navigator.of(context).pop(),
           ),
         ),
+        actions: [
+          if (isWeb)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+              child: ElevatedButton.icon(
+                onPressed: () => _navigateToFormSubmit(context),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text(
+                  'Ajukan Izin',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          Container(
+            margin: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.black87, size: 18),
+              onPressed: _refreshData,
+            ),
+          ),
+        ],
       ),
-      body: _isWideScreen(context)
-          ? _buildWebLayout(accent)
-          : _buildMobileLayout(accent),
+      body: isWeb ? _buildWebLayout() : _buildMobileLayout(),
+      floatingActionButton: isWeb
+          ? null
+          : Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF3B82F6).withOpacity(0.3),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: FloatingActionButton.extended(
+                onPressed: () => _navigateToFormSubmit(context),
+                label: const Text(
+                  'Ajukan Izin',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                ),
+                icon: const Icon(Icons.add_rounded, size: 22),
+                backgroundColor: const Color(0xFF3B82F6),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
     );
   }
 
-  // ── Mobile layout ──────────────────────────────────────────────────────────
-  Widget _buildMobileLayout(Color accent) => SingleChildScrollView(
-    padding: const EdgeInsets.all(20),
-    child: Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeaderBanner(accent),
-          const SizedBox(height: 24),
-          _buildSectionTitle('Jenis Izin', Icons.category_rounded),
-          const SizedBox(height: 12),
-          _buildJenisSelector(),
-          const SizedBox(height: 24),
-          _buildSectionTitle('Periode Izin', Icons.date_range_rounded),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildDateField(
-                  label: 'Tanggal Mulai',
-                  date: _tanggalMulai,
-                  onTap: () => _selectDate(isStartDate: true),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildDateField(
-                  label: 'Tanggal Selesai',
-                  date: _tanggalSelesai,
-                  onTap: () => _selectDate(isStartDate: false),
-                  enabled: _tanggalMulai != null,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          _buildSectionTitle('Catatan & Alasan', Icons.note_alt_rounded),
-          const SizedBox(height: 12),
-          _buildCatatanField(),
-          if (_isDinasLuar) ...[const SizedBox(height: 24), _buildDlSection()],
-          const SizedBox(height: 24),
-          _buildFileSection(),
-          const SizedBox(height: 24),
-          _buildSubmitButton(accent),
-          const SizedBox(height: 20),
-        ],
-      ),
-    ),
-  );
+  // ── Mobile layout ─────────────────────────────────────────────────────────
 
-  // ── Web layout ─────────────────────────────────────────────────────────────
-  Widget _buildWebLayout(Color accent) => Form(
-    key: _formKey,
-    child: Row(
+  Widget _buildMobileLayout() {
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildFilterSection(),
+            const SizedBox(height: 24),
+            _buildListHeader(),
+            const SizedBox(height: 16),
+            _buildListContent(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Web layout ────────────────────────────────────────────────────────────
+
+  Widget _buildWebLayout() {
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 360,
+          width: 300,
           child: Container(
             height: double.infinity,
             decoration: BoxDecoration(
@@ -394,871 +677,1283 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
               border: Border(right: BorderSide(color: Colors.grey.shade200)),
             ),
             child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Filter Periode',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildWebFilterContent(),
+                  const SizedBox(height: 20),
+                  _buildWebStats(),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshData,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeaderBanner(accent),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('Jenis Izin', Icons.category_rounded),
-                  const SizedBox(height: 12),
-                  _buildJenisSelector(),
+                  _buildListHeader(),
+                  const SizedBox(height: 16),
+                  _buildListContent(),
                 ],
               ),
-            ),
-          ),
-        ),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSectionTitle('Periode Izin', Icons.date_range_rounded),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildDateField(
-                        label: 'Tanggal Mulai',
-                        date: _tanggalMulai,
-                        onTap: () => _selectDate(isStartDate: true),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _buildDateField(
-                        label: 'Tanggal Selesai',
-                        date: _tanggalSelesai,
-                        onTap: () => _selectDate(isStartDate: false),
-                        enabled: _tanggalMulai != null,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                _buildSectionTitle('Catatan & Alasan', Icons.note_alt_rounded),
-                const SizedBox(height: 12),
-                _buildCatatanField(),
-                if (_isDinasLuar) ...[
-                  const SizedBox(height: 24),
-                  _buildDlSection(),
-                ],
-                const SizedBox(height: 24),
-                _buildFileSection(),
-                const SizedBox(height: 24),
-                _buildSubmitButton(accent),
-                const SizedBox(height: 20),
-              ],
             ),
           ),
         ),
       ],
-    ),
-  );
+    );
+  }
 
-  // ── DL Section ─────────────────────────────────────────────────────────────
-  Widget _buildDlSection() {
+  Widget _buildWebFilterContent() {
+    final availableYears = _getAvailableYears();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle('Detail Dinas Luar', Icons.work_outline_rounded),
-        const SizedBox(height: 12),
+        const Text(
+          'Tahun',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 6),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: const Color(0xFFE5E7EB)),
+            borderRadius: BorderRadius.circular(8),
           ),
           child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selectedJenisPekerjaan,
+            child: DropdownButton<int>(
+              value: availableYears.contains(_selectedYear)
+                  ? _selectedYear
+                  : availableYears.first,
               isExpanded: true,
-              hint: const Text(
-                'Pilih Jenis Pekerjaan *',
-                style: TextStyle(color: Color(0xFF9CA3AF)),
-              ),
-              items: _jenisPekerjaanOptions
-                  .map((j) => DropdownMenuItem(value: j, child: Text(j)))
+              onChanged: (v) => setState(() => _selectedYear = v!),
+              items: availableYears
+                  .map(
+                    (y) => DropdownMenuItem(
+                      value: y,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(y.toString()),
+                      ),
+                    ),
+                  )
                   .toList(),
-              onChanged: (v) => setState(() => _selectedJenisPekerjaan = v),
+              icon: const Icon(Icons.arrow_drop_down),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Bulan',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: _selectedMonth,
+              isExpanded: true,
+              onChanged: (v) => setState(() => _selectedMonth = v!),
+              items: List.generate(
+                _monthNames.length,
+                (i) => DropdownMenuItem(
+                  value: i,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(_monthNames[i]),
+                  ),
+                ),
+              ).toList(),
+              icon: const Icon(Icons.arrow_drop_down),
             ),
           ),
         ),
         const SizedBox(height: 16),
-        _buildSectionTitle(
-          'Rencana Anggaran Biaya',
-          Icons.account_balance_wallet_outlined,
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 10,
+        Row(
           children: [
-            _buildRabChip('reimbursement', '💸 Reimbursement'),
-            _buildRabChip('uang_kantor', '🏢 Uang Kantor'),
-            _buildRabChip(null, '❌ Tidak Ada'),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _resetFilter,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF6B7280),
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Reset',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                onPressed: _applyFilter,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Terapkan',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ),
           ],
-        ),
-        if (_selectedRabType == 'uang_kantor') ...[
-          const SizedBox(height: 12),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
-            ),
-            child: TextFormField(
-              controller: _nominalKantorCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'Nominal uang kantor (Rp)',
-                hintStyle: TextStyle(color: Color(0xFF9CA3AF)),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.all(16),
-                prefixText: 'Rp ',
-              ),
-              style: const TextStyle(fontSize: 15, color: Color(0xFF1F2937)),
-            ),
-          ),
-        ],
-        if (_selectedRabType == 'reimbursement') ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue[200]!),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Detail Pengeluaran',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1D4ED8),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                ..._reimburseRows.asMap().entries.map(
-                  (e) => _buildReimburseRow(e.key, e.value),
-                ),
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: () => setState(
-                    () => _reimburseRows.add(
-                      _ReimburseRow(
-                        namaCtrl: TextEditingController(),
-                        nominalCtrl: TextEditingController(),
-                        ketCtrl: TextEditingController(),
-                      ),
-                    ),
-                  ),
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                  label: const Text('Tambah Item'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF3B82F6),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.orange[50],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.orange[200]!),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.info_outline, size: 16, color: Colors.orange[700]),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Dinas Luar memerlukan 2 tahap persetujuan: Manager → HRD. Setelah selesai, upload laporan & anggaran.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF92400E),
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ],
     );
   }
 
-  Widget _buildRabChip(String? value, String label) => GestureDetector(
-    onTap: () => setState(() => _selectedRabType = value),
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: _selectedRabType == value
-            ? const Color(0xFF3B82F6)
-            : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: _selectedRabType == value
-              ? const Color(0xFF3B82F6)
-              : const Color(0xFFE5E7EB),
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: _selectedRabType == value
-              ? Colors.white
-              : const Color(0xFF374151),
-        ),
-      ),
-    ),
-  );
+  Widget _buildWebStats() {
+    final approved = _filteredTimeOffList
+        .where(
+          (t) =>
+              t.status.toLowerCase() == 'approved' ||
+              t.status.toLowerCase() == 'disetujui',
+        )
+        .length;
+    final pending = _filteredTimeOffList
+        .where((t) => t.status.toLowerCase() == 'pending')
+        .length;
+    final menungguLaporan = _filteredTimeOffList
+        .where((t) => t.status.toLowerCase() == 'menunggu laporan')
+        .length;
+    final rejected = _filteredTimeOffList
+        .where(
+          (t) =>
+              t.status.toLowerCase() == 'rejected' ||
+              t.status.toLowerCase() == 'ditolak',
+        )
+        .length;
 
-  Widget _buildReimburseRow(int index, _ReimburseRow row) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Row(
-      children: [
-        Expanded(
-          flex: 3,
-          child: TextFormField(
-            controller: row.namaCtrl,
-            decoration: InputDecoration(
-              hintText: 'Item (Bensin, Makan...)',
-              hintStyle: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF9CA3AF),
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 10,
-              ),
-              isDense: true,
-            ),
-            style: const TextStyle(fontSize: 13),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          flex: 2,
-          child: TextFormField(
-            controller: row.nominalCtrl,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              hintText: 'Nominal',
-              hintStyle: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF9CA3AF),
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 10,
-              ),
-              isDense: true,
-              prefixText: 'Rp ',
-            ),
-            style: const TextStyle(fontSize: 13),
-          ),
-        ),
-        const SizedBox(width: 4),
-        IconButton(
-          icon: const Icon(
-            Icons.remove_circle_outline,
-            color: Colors.red,
-            size: 20,
-          ),
-          onPressed: () => setState(() => _reimburseRows.removeAt(index)),
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
-        ),
-      ],
-    ),
-  );
-
-  // ── Header Banner ──────────────────────────────────────────────────────────
-  Widget _buildHeaderBanner(Color accent) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: _isEditMode
-              ? [const Color(0xFFEF4444), const Color(0xFFDC2626)]
-              : [const Color(0xFF3B82F6), const Color(0xFF1D4ED8)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _isEditMode ? 'Edit Pengajuan' : 'Informasi Pengajuan',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            _isEditMode
-                ? 'Anda sedang mengedit pengajuan izin. Pastikan data sudah benar.'
-                : 'Pastikan data yang Anda masukkan sudah benar. Pengajuan akan direview.',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.white70,
-              height: 1.4,
-            ),
-          ),
-          if (_calculateDays() > 0) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.calendar_month_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Total: ${_calculateDays()} hari',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(String title, IconData icon) => Row(
-    children: [
-      Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF3B82F6).withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(icon, size: 20, color: const Color(0xFF3B82F6)),
-      ),
-      const SizedBox(width: 12),
-      Text(
-        title,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF1F2937),
-        ),
-      ),
-    ],
-  );
-
-  Widget _buildJenisSelector() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: Column(
-        children: _jenisTimeOff.map((jenis) {
-          final isSelected = _selectedJenis == jenis['value'];
-          final isLast = jenis == _jenisTimeOff.last;
-          return InkWell(
-            onTap: () => setState(() {
-              _selectedJenis = jenis['value'];
-              if (_selectedJenis != 'Dinas Luar') {
-                _selectedJenisPekerjaan = null;
-                _selectedRabType = null;
-                _reimburseRows.clear();
-                _nominalKantorCtrl.clear();
-              }
-            }),
-            borderRadius: BorderRadius.vertical(
-              top: jenis == _jenisTimeOff.first
-                  ? const Radius.circular(12)
-                  : Radius.zero,
-              bottom: isLast ? const Radius.circular(12) : Radius.zero,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Statistik',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
             ),
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? const Color(0xFF3B82F6).withOpacity(0.08)
-                    : Colors.transparent,
-                border: !isLast
-                    ? const Border(bottom: BorderSide(color: Color(0xFFE5E7EB)))
-                    : null,
-              ),
+          ),
+          const SizedBox(height: 10),
+          _buildStatRow(
+            'Total',
+            _filteredTimeOffList.length,
+            const Color(0xFF3B82F6),
+          ),
+          const SizedBox(height: 6),
+          _buildStatRow('Disetujui', approved, const Color(0xFF10B981)),
+          const SizedBox(height: 6),
+          _buildStatRow('Menunggu', pending, const Color(0xFFF59E0B)),
+          if (menungguLaporan > 0) ...[
+            const SizedBox(height: 6),
+            _buildStatRow(
+              'Menunggu Laporan',
+              menungguLaporan,
+              const Color(0xFF7C3AED),
+            ),
+          ],
+          const SizedBox(height: 6),
+          _buildStatRow('Ditolak', rejected, const Color(0xFFEF4444)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatRow(String label, int count, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+          ),
+        ),
+        Text(
+          count.toString(),
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildListHeader() {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFF3B82F6),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Text(
+          'Riwayat Izin',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+            color: Color(0xFF1F2937),
+            letterSpacing: -0.3,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          '${_filteredTimeOffList.length} data',
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildListContent() {
+    if (_isLoading) return _buildLoadingState();
+    if (_errorMessage.isNotEmpty && _allTimeOffList.isEmpty) {
+      return _buildErrorState();
+    }
+    if (_filteredTimeOffList.isEmpty) return _buildEmptyState();
+    return Column(
+      children: _filteredTimeOffList.map(_buildTimeOffCard).toList(),
+    );
+  }
+
+  Widget _buildFilterSection() {
+    final availableYears = _getAvailableYears();
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
+            borderRadius: BorderRadius.vertical(
+              top: const Radius.circular(16),
+              bottom: _isFilterExpanded
+                  ? Radius.zero
+                  : const Radius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Text(jenis['icon'], style: const TextStyle(fontSize: 22)),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          jenis['label'],
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: isSelected
-                                ? const Color(0xFF3B82F6)
-                                : const Color(0xFF1F2937),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3B82F6).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.filter_list_rounded,
+                      size: 20,
+                      color: Color(0xFF3B82F6),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Filter Periode',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _getFilterDisplayText(),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF374151),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _isFilterExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: const Color(0xFF6B7280),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_isFilterExpanded) ...[
+            const Divider(height: 1, color: Color(0xFFE5E7EB)),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 20,
+                        color: Color(0xFF6B7280),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Tahun:',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF374151),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFFE5E7EB)),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: availableYears.contains(_selectedYear)
+                                  ? _selectedYear
+                                  : availableYears.first,
+                              onChanged: (v) =>
+                                  setState(() => _selectedYear = v!),
+                              items: availableYears
+                                  .map(
+                                    (y) => DropdownMenuItem(
+                                      value: y,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                        ),
+                                        child: Text(y.toString()),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              icon: const Icon(Icons.arrow_drop_down),
+                              isExpanded: true,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 2),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_month_rounded,
+                        size: 20,
+                        color: Color(0xFF6B7280),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Bulan:',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF374151),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFFE5E7EB)),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: _selectedMonth,
+                              onChanged: (v) =>
+                                  setState(() => _selectedMonth = v!),
+                              items: List.generate(
+                                _monthNames.length,
+                                (i) => DropdownMenuItem(
+                                  value: i,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    child: Text(_monthNames[i]),
+                                  ),
+                                ),
+                              ).toList(),
+                              icon: const Icon(Icons.arrow_drop_down),
+                              isExpanded: true,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _resetFilter,
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text(
+                            'Reset',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF6B7280),
+                            side: const BorderSide(color: Color(0xFFE5E7EB)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton.icon(
+                          onPressed: _applyFilter,
+                          icon: const Icon(Icons.search_rounded, size: 18),
+                          label: const Text(
+                            'Terapkan Filter',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF3B82F6),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() => const Center(
+    child: Padding(
+      padding: EdgeInsets.all(60),
+      child: CircularProgressIndicator(
+        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
+      ),
+    ),
+  );
+
+  Widget _buildErrorState() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(40),
+    margin: const EdgeInsets.only(top: 20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFE5E7EB)),
+    ),
+    child: Column(
+      children: [
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEF4444).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: const Icon(
+            Icons.error_outline_rounded,
+            size: 40,
+            color: Color(0xFFEF4444),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Terjadi Kesalahan',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _errorMessage,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _refreshData,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text(
+            'Coba Lagi',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF3B82F6),
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildEmptyState() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(40),
+    margin: const EdgeInsets.only(top: 20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFE5E7EB)),
+    ),
+    child: Column(
+      children: [
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: const Icon(
+            Icons.calendar_month_outlined,
+            size: 40,
+            color: Color(0xFF9CA3AF),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Tidak ada data Izin',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Tidak ada data untuk periode ${_getFilterDisplayText()}.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF6B7280),
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: () => _navigateToFormSubmit(context),
+          icon: const Icon(Icons.add_rounded, size: 18),
+          label: const Text(
+            'Ajukan Izin',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF3B82F6),
+            foregroundColor: Colors.white,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  // ── Time off card ─────────────────────────────────────────────────────────
+
+  Widget _buildTimeOffCard(TimeOffModel timeOff) {
+    final isMenungguLaporan = timeOff.status == 'Menunggu Laporan';
+    final canEditDelete =
+        timeOff.status == 'Pending' || timeOff.status == 'Menunggu Manager';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isMenungguLaporan
+              ? const Color(0xFF7C3AED).withOpacity(0.4)
+              : const Color(0xFFE5E7EB),
+          width: isMenungguLaporan ? 2 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (isMenungguLaporan ? const Color(0xFF7C3AED) : Colors.black)
+                .withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header row ──────────────────────────────────────────────
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: _colorForStatus(timeOff.status).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      _getJenisIcon(timeOff.jenisTimeOff),
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              timeOff.jenisTimeOff,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                                color: Color(0xFF1F2937),
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                          ),
+                          // Status badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _colorForStatus(
+                                timeOff.status,
+                              ).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: _colorForStatus(
+                                  timeOff.status,
+                                ).withOpacity(0.3),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _iconForStatus(timeOff.status),
+                                  size: 14,
+                                  color: _colorForStatus(timeOff.status),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  timeOff.statusLabel,
+                                  style: TextStyle(
+                                    color: _colorForStatus(timeOff.status),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Tanggal
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE5E7EB)),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.calendar_today_rounded,
+                                  size: 16,
+                                  color: Color(0xFF6B7280),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${DateFormat('dd MMM yyyy').format(timeOff.tanggalMulai)}'
+                                    ' s/d ${DateFormat('dd MMM yyyy').format(timeOff.tanggalSelesai)}',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Color(0xFF374151),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.access_time_rounded,
+                                  size: 16,
+                                  color: Color(0xFF6B7280),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Total: ${timeOff.totalHari} hari',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Color(0xFF374151),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            // ── Banner "Menunggu Laporan" ─────────────────────────────
+            if (isMenungguLaporan) ...[
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7C3AED).withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF7C3AED).withOpacity(0.2),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.upload_file_rounded,
+                          size: 16,
+                          color: Color(0xFF7C3AED),
+                        ),
+                        SizedBox(width: 8),
                         Text(
-                          jenis['description'],
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF6B7280),
+                          'Aksi Diperlukan',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF7C3AED),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  if (isSelected)
-                    const Icon(
-                      Icons.check_circle_rounded,
-                      color: Color(0xFF3B82F6),
-                      size: 22,
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Dinas Luar kamu sudah disetujui. Upload laporan hasil kerja dan laporan anggaran untuk menyelesaikan proses.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF4C1D95),
+                        height: 1.4,
+                      ),
                     ),
-                ],
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildDateField({
-    required String label,
-    required DateTime? date,
-    required VoidCallback onTap,
-    bool enabled = true,
-  }) {
-    return InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: enabled ? Colors.white : const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: enabled
-                    ? const Color(0xFF6B7280)
-                    : const Color(0xFF9CA3AF),
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(
-                  Icons.calendar_today_rounded,
-                  size: 17,
-                  color: enabled
-                      ? (date != null
-                            ? const Color(0xFF3B82F6)
-                            : const Color(0xFF9CA3AF))
-                      : const Color(0xFF9CA3AF),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    date != null
-                        ? DateFormat('dd MMM yyyy').format(date)
-                        : 'Pilih tanggal',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: enabled
-                          ? (date != null
-                                ? const Color(0xFF1F2937)
-                                : const Color(0xFF9CA3AF))
-                          : const Color(0xFF9CA3AF),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _navigateToDlLaporan(timeOff),
+                        icon: const Icon(Icons.upload_file_rounded, size: 18),
+                        label: const Text(
+                          'Upload Laporan DL',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF7C3AED),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+              ),
+            ],
 
-  Widget _buildCatatanField() => Container(
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFFE5E7EB)),
-    ),
-    child: TextFormField(
-      controller: _catatanCtrl,
-      maxLines: 4,
-      decoration: const InputDecoration(
-        hintText: 'Jelaskan alasan atau detail izin Anda...',
-        hintStyle: TextStyle(color: Color(0xFF9CA3AF)),
-        border: InputBorder.none,
-        contentPadding: EdgeInsets.all(16),
-      ),
-      style: const TextStyle(
-        fontSize: 15,
-        color: Color(0xFF1F2937),
-        height: 1.5,
-      ),
-      validator: (v) {
-        if (v == null || v.trim().isEmpty) return 'Catatan tidak boleh kosong';
-        if (v.trim().length < 10) return 'Catatan minimal 10 karakter';
-        return null;
-      },
-    ),
-  );
-
-  // ── File Section ───────────────────────────────────────────────────────────
-  Widget _buildFileSection() {
-    final isRequired = _isFileRequired();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionTitle(
-          isRequired ? 'Upload File (Wajib)' : 'Upload File (Opsional)',
-          Icons.upload_file_outlined,
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: EdgeInsets.all(_getResponsivePadding(context, 16)),
-          decoration: BoxDecoration(
-            color: Colors.grey[50],
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            // ── Laporan sudah disubmit ────────────────────────────────
+            if (timeOff.isDinasLuar &&
+                timeOff.status == 'Approved' &&
+                timeOff.laporanStatus != null) ...[
+              const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
-                  color: isRequired ? Colors.red[50] : Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isRequired ? Colors.red[200]! : Colors.blue[200]!,
-                  ),
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.green[200]!),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      isRequired ? Icons.warning_rounded : Icons.info_outline,
+                      Icons.check_circle_outline,
                       size: 16,
-                      color: isRequired ? Colors.red[600] : Colors.blue[600],
+                      color: Colors.green[700],
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _fileUploadInfo(),
+                    Text(
+                      'Laporan sudah disubmit',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (timeOff.laporanSubmittedAt != null) ...[
+                      const Spacer(),
+                      Text(
+                        DateFormat(
+                          'dd MMM yyyy',
+                        ).format(timeOff.laporanSubmittedAt!),
                         style: TextStyle(
-                          fontSize: 12,
-                          color: isRequired
-                              ? Colors.red[700]
-                              : Colors.blue[700],
-                          fontWeight: FontWeight.w500,
+                          fontSize: 11,
+                          color: Colors.green[600],
                         ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Info DL ───────────────────────────────────────────────
+            if (timeOff.isDinasLuar && timeOff.jenisPekerjaan != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F3FF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFDDD6FE)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.work_outline,
+                      size: 14,
+                      color: Color(0xFF7C3AED),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Jenis: ${timeOff.jenisPekerjaan}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF5B21B6),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (timeOff.rabType != null) ...[
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEDE9FE),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          timeOff.rabType == 'reimbursement'
+                              ? '💸 Reimbursement'
+                              : '🏢 Uang Kantor',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF5B21B6),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+
+            // ── File lampiran ─────────────────────────────────────────
+            _buildFilePreview(timeOff),
+
+            // ── Catatan ───────────────────────────────────────────────
+            if (timeOff.catatan != null && timeOff.catatan!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.note_alt_rounded,
+                          size: 16,
+                          color: Color(0xFF6B7280),
+                        ),
+                        SizedBox(width: 6),
+                        Text(
+                          'Catatan',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6B7280),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      timeOff.catatan!,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF374151),
+                        height: 1.5,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              if (_isEditMode && _hasExistingFile) ...[
-                _buildExistingFilePreview(),
-                const SizedBox(height: 12),
-                Row(
+            ],
+
+            // ── Alasan penolakan ──────────────────────────────────────
+            if (timeOff.status.toLowerCase() == 'rejected' &&
+                timeOff.rejectionReason != null &&
+                timeOff.rejectionReason!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFEF4444).withOpacity(0.2),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _keepExistingFile
-                            ? null
-                            : _keepExistingFileOption,
-                        icon: Icon(
-                          _keepExistingFile
-                              ? Icons.check_circle
-                              : Icons.restore,
-                          size: 17,
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 16,
+                          color: Color(0xFFEF4444),
                         ),
-                        label: const Text(
-                          'Pertahankan',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _keepExistingFile
-                              ? Colors.green[100]
-                              : Colors.grey[100],
-                          foregroundColor: _keepExistingFile
-                              ? Colors.green[700]
-                              : Colors.grey[700],
-                          side: BorderSide(
-                            color: _keepExistingFile
-                                ? Colors.green[300]!
-                                : Colors.grey[300]!,
-                          ),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                        SizedBox(width: 6),
+                        Text(
+                          'Alasan Penolakan',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFEF4444),
+                            letterSpacing: 0.5,
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: !_keepExistingFile ? null : _chooseNewFile,
-                        icon: Icon(
-                          !_keepExistingFile
-                              ? Icons.check_circle
-                              : Icons.refresh_outlined,
-                          size: 17,
-                        ),
-                        label: const Text(
-                          'Ganti File',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: !_keepExistingFile
-                              ? Colors.blue[100]
-                              : Colors.grey[100],
-                          foregroundColor: !_keepExistingFile
-                              ? Colors.blue[700]
-                              : Colors.grey[700],
-                          side: BorderSide(
-                            color: !_keepExistingFile
-                                ? Colors.blue[300]!
-                                : Colors.grey[300]!,
-                          ),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
+                    const SizedBox(height: 8),
+                    Text(
+                      timeOff.rejectionReason!,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFFDC2626),
+                        height: 1.5,
                       ),
                     ),
                   ],
                 ),
-              ],
-              if (!_isEditMode || !_keepExistingFile) _buildFilePreview(),
+              ),
             ],
-          ),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildExistingFilePreview() {
-    if (!_hasExistingFile || _existingFileName == null)
-      return const SizedBox.shrink();
-    final ext = _existingFileName!.split('.').last.toLowerCase();
-    IconData icon;
-    Color iconColor;
-    switch (ext) {
-      case 'pdf':
-        icon = Icons.picture_as_pdf;
-        iconColor = Colors.red[600]!;
-        break;
-      case 'jpg':
-      case 'jpeg':
-        icon = Icons.image;
-        iconColor = Colors.blue[600]!;
-        break;
-      case 'png':
-        icon = Icons.image;
-        iconColor = Colors.green[600]!;
-        break;
-      default:
-        icon = Icons.insert_drive_file;
-        iconColor = Colors.grey[600]!;
-    }
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: _keepExistingFile ? Colors.green[300]! : Colors.grey[300]!,
-          width: 2,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Icon(icon, color: iconColor, size: 32),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            // ── Edit / Delete ─────────────────────────────────────────
+            if (canEditDelete) ...[
+              const SizedBox(height: 16),
+              Row(
                 children: [
-                  Text(
-                    _existingFileName!,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          _navigateToFormSubmit(context, editData: timeOff),
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text(
+                        'Edit',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF3B82F6),
+                        side: const BorderSide(color: Color(0xFF3B82F6)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                   ),
-                  Text(
-                    ext.toUpperCase(),
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _confirmDelete(timeOff),
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text(
+                        'Hapus',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red[600],
+                        side: BorderSide(color: Colors.red[300]!),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
-            ),
-            if (_isDownloadingFile)
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else
-              IconButton(
-                icon: Icon(Icons.download, color: Colors.grey[600], size: 18),
-                onPressed: _downloadExistingFile,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _buildFilePreview() {
-    final isRequired = _isFileRequired();
-    if (_selectedImage == null) {
-      return GestureDetector(
-        onTap: () => _showFileSourceOptions(context),
-        child: Container(
-          margin: const EdgeInsets.only(top: 8),
-          height: 110,
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: isRequired ? Colors.red[300]! : Colors.grey[300]!,
-              width: isRequired ? 2 : 1,
-            ),
-            borderRadius: BorderRadius.circular(12),
-            color: Colors.white,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+  // ── File preview ──────────────────────────────────────────────────────────
+
+  Widget _buildFilePreview(TimeOffModel timeOff) {
+    final files = timeOff.allFiles;
+    if (files.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Icon(
-                Icons.upload_file_outlined,
-                size: 28,
-                color: isRequired ? Colors.red[400] : Colors.grey[500],
+              const Icon(
+                Icons.attach_file_rounded,
+                size: 16,
+                color: Color(0xFF6B7280),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(width: 6),
               Text(
-                isRequired
-                    ? 'Tap untuk upload (WAJIB)'
-                    : 'Tap untuk upload (OPSIONAL)',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isRequired ? Colors.red[600] : Colors.grey[600],
+                'File Lampiran (${files.length})',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B7280),
+                  letterSpacing: 0.5,
                 ),
-              ),
-              Text(
-                'JPG, PNG, atau PDF (Max 10MB)',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
               ),
             ],
           ),
-        ),
-      );
-    }
-    final fileName = _selectedImage!.name.isNotEmpty
-        ? _selectedImage!.name
-        : _selectedImage!.path.split('/').last;
-    final ext = fileName.contains('.')
-        ? fileName.split('.').last.toLowerCase()
-        : '';
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.blue[300]!, width: 2),
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white,
+          const SizedBox(height: 8),
+          Column(
+            children: files
+                .map((file) => _buildSingleFileItem(timeOff, file))
+                .toList(),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
+    );
+  }
+
+  Widget _buildSingleFileItem(TimeOffModel timeOff, TimeOffFileItem file) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: _getFileIconColor(file).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            _getFileIcon(file),
+            color: _getFileIconColor(file),
+            size: 22,
+          ),
+        ),
+        title: Text(
+          file.fileName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1F2937),
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            _getFileSubtitle(file),
+            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+          ),
+        ),
+        trailing: Wrap(
+          spacing: 4,
           children: [
-            Icon(_getFileIcon(ext), color: Colors.blue[600], size: 30),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  Text(
-                    '${(_selectedImageSize / (1024 * 1024)).toStringAsFixed(1)} MB',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                  ),
-                ],
+            // Gunakan file.id jika ada (tabel baru), fallback ke timeOff.id (file lama)
+            IconButton(
+              tooltip: 'Preview',
+              icon: const Icon(
+                Icons.visibility_rounded,
+                size: 20,
+                color: Color(0xFF3B82F6),
               ),
+              onPressed: file.id > 0
+                  ? () => _previewFileById(file.id, timeOff.id!, file.fileName)
+                  : () => _previewFileLegacy(timeOff),
             ),
             IconButton(
-              icon: Icon(Icons.close, color: Colors.red[600], size: 18),
-              onPressed: () => setState(() {
-                _selectedImage = null;
-                _selectedImageSize = 0;
-                if (_isEditMode && _hasExistingFile) _keepExistingFile = true;
-              }),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
+              tooltip: 'Download',
+              icon: const Icon(
+                Icons.download_rounded,
+                size: 20,
+                color: Color(0xFF10B981),
+              ),
+              onPressed: file.id > 0
+                  ? () => _downloadFileById(file.id, timeOff.id!, file.fileName)
+                  : () => _downloadFileLegacy(timeOff),
             ),
           ],
         ),
@@ -1266,535 +1961,43 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     );
   }
 
-  IconData _getFileIcon(String ext) {
-    switch (ext) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-        return Icons.image;
-      default:
-        return Icons.insert_drive_file;
-    }
-  }
-
-  Widget _buildSubmitButton(Color accent) => SizedBox(
-    width: double.infinity,
-    child: ElevatedButton(
-      onPressed: _isLoading ? null : _submitForm,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: accent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        disabledBackgroundColor: const Color(0xFF9CA3AF),
-      ),
-      child: _isLoading
-          ? const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                ),
-                SizedBox(width: 12),
-                Text(
-                  'Memproses...',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ],
-            )
-          : Text(
-              _isEditMode ? 'Update Izin' : 'Ajukan Izin',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-    ),
-  );
-
-  // ── Utilities ──────────────────────────────────────────────────────────────
-
-  int _calculateDays() {
-    if (_tanggalMulai != null && _tanggalSelesai != null)
-      return _tanggalSelesai!.difference(_tanggalMulai!).inDays + 1;
-    return 0;
-  }
-
-  Future<void> _selectDate({required bool isStartDate}) async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: isStartDate
-          ? (_tanggalMulai ?? DateTime.now())
-          : (_tanggalSelesai ?? _tanggalMulai ?? DateTime.now()),
-      firstDate: DateTime.now().subtract(const Duration(days: 7)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: Color(0xFF3B82F6),
-            onPrimary: Colors.white,
-            surface: Colors.white,
-            onSurface: Color(0xFF1F2937),
-          ),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null)
-      setState(() {
-        if (isStartDate) {
-          _tanggalMulai = picked;
-          if (_tanggalSelesai != null && _tanggalSelesai!.isBefore(picked))
-            _tanggalSelesai = null;
-        } else {
-          _tanggalSelesai = picked;
-        }
-      });
-  }
-
-  Future<void> _downloadExistingFile() async {
-    if (!_hasExistingFile || widget.editData?.id == null) {
-      _showErrorSnackBar('File tidak tersedia');
+  // Legacy download (kolom file_name lama di udt_timeoff, id = 0)
+  Future<void> _downloadFileLegacy(TimeOffModel timeOff) async {
+    if (timeOff.id == null || timeOff.fileName == null) {
+      _showSnackBar('File tidak tersedia', isError: true);
       return;
     }
-    setState(() => _isDownloadingFile = true);
     try {
-      final res = await TimeOffService.downloadFile(
-        widget.editData!.id!,
-        widget.userId,
-      );
-      _showSnackBar(
-        res.success ? 'File berhasil didownload' : res.message,
-        isError: !res.success,
-      );
+      _showSnackBar('Mengunduh file...', isError: false);
+      final res = await TimeOffService.downloadFile(timeOff.id!, widget.userId);
+      if (res.success && res.data != null) {
+        await _saveAndOpenFile(
+          Uint8List.fromList(res.data!),
+          timeOff.fileName!,
+        );
+      } else {
+        _showSnackBar(res.message, isError: true);
+      }
     } catch (e) {
-      _showErrorSnackBar('Gagal mendownload: $e');
-    } finally {
-      setState(() => _isDownloadingFile = false);
+      _showSnackBar('Gagal mengunduh: $e', isError: true);
     }
   }
 
-  void _chooseNewFile() {
-    setState(() {
-      _keepExistingFile = false;
-      _selectedImage = null;
-    });
-    _showFileSourceOptions(context);
-  }
-
-  void _keepExistingFileOption() {
-    setState(() {
-      _keepExistingFile = true;
-      _selectedImage = null;
-    });
-  }
-
-  void _showFileSourceOptions(BuildContext ctx) {
-    showModalBottomSheet(
-      context: ctx,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 4),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                'Pilih Sumber File',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-            ),
-            const Divider(),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.camera_alt, color: Colors.blue[600]),
-              ),
-              title: const Text(
-                'Kamera',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                kIsWeb ? 'Ambil foto (browser)' : 'Ambil foto dari kamera',
-              ),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickFromCamera();
-              },
-            ),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.photo_library, color: Colors.green[600]),
-              ),
-              title: const Text(
-                'Galeri',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                kIsWeb ? 'Pilih gambar (JPG, PNG)' : 'Pilih foto dari galeri',
-              ),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickFromGallery();
-              },
-            ),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.insert_drive_file, color: Colors.orange[600]),
-              ),
-              title: const Text(
-                'File Dokumen',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text('Pilih file PDF, JPG, atau PNG'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickFromFiles();
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickFromGallery() async {
-    if (kIsWeb) {
-      final r = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['jpg', 'jpeg', 'png'],
-        allowMultiple: false,
-        withData: true,
-      );
-      if (r != null && r.files.isNotEmpty)
-        await _validateAndSetFileFromPicker(r.files.first);
-    } else {
-      final img = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-      if (img != null) await _validateAndSetFile(img);
+  Future<void> _previewFileLegacy(TimeOffModel timeOff) async {
+    if (timeOff.id == null || timeOff.fileName == null) {
+      _showSnackBar('File tidak tersedia', isError: true);
+      return;
     }
-  }
-
-  Future<void> _pickFromCamera() async {
-    if (kIsWeb) {
-      final r = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        allowMultiple: false,
-        withData: true,
-      );
-      if (r != null && r.files.isNotEmpty)
-        await _validateAndSetFileFromPicker(r.files.first);
-    } else {
-      final img = await ImagePicker().pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-      if (img != null) await _validateAndSetFile(img);
-    }
-  }
-
-  Future<void> _pickFromFiles() async {
-    final r = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
-      allowMultiple: false,
-      withData: kIsWeb,
-    );
-    if (r != null && r.files.isNotEmpty) {
-      final f = r.files.first;
-      if (kIsWeb)
-        await _validateAndSetFileFromPicker(f);
-      else if (f.path != null)
-        await _validateAndSetFile(XFile(f.path!));
-      else if (f.bytes != null)
-        await _validateAndSetFileFromPicker(f);
-    }
-  }
-
-  Future<void> _validateAndSetFile(XFile file) async {
     try {
-      final bytes = await file.readAsBytes();
-      if (bytes.length > 10 * 1024 * 1024) {
-        _showErrorSnackBar('Ukuran file maksimal 10MB');
-        return;
+      _showSnackBar('Membuka preview...', isError: false);
+      final res = await TimeOffService.downloadFile(timeOff.id!, widget.userId);
+      if (res.success && res.data != null) {
+        await _openTempFile(Uint8List.fromList(res.data!), timeOff.fileName!);
+      } else {
+        _showSnackBar(res.message, isError: true);
       }
-      final ext = file.name.split('.').last.toLowerCase();
-      if (!['jpg', 'jpeg', 'png', 'pdf'].contains(ext)) {
-        _showErrorSnackBar('Format tidak didukung');
-        return;
-      }
-      setState(() {
-        _selectedImage = file;
-        _selectedImageSize = bytes.length;
-        if (_isEditMode) _keepExistingFile = false;
-      });
-      _showSuccessSnackBar('File berhasil dipilih');
     } catch (e) {
-      _showErrorSnackBar('Gagal memproses file: $e');
+      _showSnackBar('Gagal membuka: $e', isError: true);
     }
   }
-
-  Future<void> _validateAndSetFileFromPicker(PlatformFile file) async {
-    try {
-      final bytes = file.bytes;
-      if (bytes == null) {
-        _showErrorSnackBar('Tidak dapat membaca file');
-        return;
-      }
-      if (bytes.length > 10 * 1024 * 1024) {
-        _showErrorSnackBar('Ukuran file maksimal 10MB');
-        return;
-      }
-      final ext = (file.extension ?? '').toLowerCase();
-      if (!['jpg', 'jpeg', 'png', 'pdf'].contains(ext)) {
-        _showErrorSnackBar('Format tidak didukung');
-        return;
-      }
-      final xf = XFile.fromData(
-        bytes,
-        name: file.name,
-        mimeType: _getMimeType(ext),
-      );
-      setState(() {
-        _selectedImage = xf;
-        _selectedImageSize = bytes.length;
-        if (_isEditMode) _keepExistingFile = false;
-      });
-      _showSuccessSnackBar('File berhasil dipilih: ${file.name}');
-    } catch (e) {
-      _showErrorSnackBar('Gagal memproses file: $e');
-    }
-  }
-
-  String _getMimeType(String ext) {
-    switch (ext) {
-      case 'pdf':
-        return 'application/pdf';
-      case 'png':
-        return 'image/png';
-      default:
-        return 'image/jpeg';
-    }
-  }
-
-  // ── Notifications ──────────────────────────────────────────────────────────
-
-  Future<void> _initializeNotifications() async {
-    const init = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: DarwinInitializationSettings(
-        requestAlertPermission: true,
-        requestBadgePermission: true,
-        requestSoundPermission: true,
-      ),
-    );
-    await flutterLocalNotificationsPlugin.initialize(
-      init,
-      onDidReceiveNotificationResponse: (_) {},
-    );
-    await _createNotificationChannel();
-    await _requestNotificationPermission();
-  }
-
-  Future<void> _createNotificationChannel() async {
-    const ch = AndroidNotificationChannel(
-      'timeoff_channel',
-      'Time Off Notifications',
-      description: 'Notifikasi pengajuan izin',
-      importance: Importance.high,
-    );
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(ch);
-  }
-
-  Future<void> _requestNotificationPermission() async {
-    try {
-      if (Theme.of(context).platform == TargetPlatform.android) {
-        final s = await Permission.notification.request();
-        if (s.isDenied && mounted) _showPermissionDialog();
-        if (s.isPermanentlyDenied && mounted) _showSettingsDialog();
-      }
-    } catch (_) {}
-  }
-
-  void _showPermissionDialog() => showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('Izin Notifikasi'),
-      content: const Text('Diperlukan untuk notifikasi status izin.'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Nanti'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context);
-            _requestNotificationPermission();
-          },
-          child: const Text('Berikan Izin'),
-        ),
-      ],
-    ),
-  );
-
-  void _showSettingsDialog() => showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('Izin Notifikasi Diperlukan'),
-      content: const Text(
-        'Buka pengaturan aplikasi untuk mengaktifkan notifikasi.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Batal'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context);
-            openAppSettings();
-          },
-          child: const Text('Buka Pengaturan'),
-        ),
-      ],
-    ),
-  );
-
-  Future<void> _showSuccessNotification(String timeOffId) async {
-    if (!await _checkNotificationPermission()) return;
-    final jenis = _selectedJenis ?? 'Izin';
-    const title = 'Izin Berhasil Diajukan ✅';
-    final body = 'Pengajuan $jenis telah dikirim untuk review';
-    await flutterLocalNotificationsPlugin.show(
-      DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      title,
-      body,
-      NotificationDetails(
-        android: const AndroidNotificationDetails(
-          'timeoff_channel',
-          'Time Off Notifications',
-          channelDescription: 'Notifikasi pengajuan izin',
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-        iOS: const DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
-      ),
-      payload: 'timeoff_success_$timeOffId',
-    );
-  }
-
-  Future<bool> _checkNotificationPermission() async {
-    try {
-      if (Theme.of(context).platform == TargetPlatform.android)
-        return (await Permission.notification.status).isGranted;
-    } catch (_) {}
-    return false;
-  }
-
-  // ── SnackBars ──────────────────────────────────────────────────────────────
-
-  void _showSnackBar(String msg, {required bool isError}) =>
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(
-                isError ? Icons.error_rounded : Icons.check_circle_rounded,
-                color: Colors.white,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  msg,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: isError
-              ? const Color(0xFFEF4444)
-              : const Color(0xFF10B981),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
-
-  void _showErrorSnackBar(String msg) => _showSnackBar(msg, isError: true);
-  void _showSuccessSnackBar(String msg) => _showSnackBar(msg, isError: false);
-
-  @override
-  void dispose() {
-    _catatanCtrl.dispose();
-    _nominalKantorCtrl.dispose();
-    for (final r in _reimburseRows) {
-      r.namaCtrl.dispose();
-      r.nominalCtrl.dispose();
-      r.ketCtrl.dispose();
-    }
-    super.dispose();
-  }
-}
-
-// ── Helper class ───────────────────────────────────────────────────────────────
-class _ReimburseRow {
-  final TextEditingController namaCtrl;
-  final TextEditingController nominalCtrl;
-  final TextEditingController ketCtrl;
-
-  _ReimburseRow({
-    required this.namaCtrl,
-    required this.nominalCtrl,
-    required this.ketCtrl,
-  });
 }

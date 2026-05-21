@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as path;
 
+import '../Screen User/fitur/org_approval_screen.dart';
+
 class TimeOffService {
   static const String _base = '/api/timeoff';
 
@@ -320,6 +322,101 @@ class TimeOffService {
           data: AnnualQuota.fromJson(
             _get(body, 'data') as Map<String, dynamic>,
           ),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── ORGANIZATION LIST (untuk dropdown DL) ──────────────────────────────────
+  static Future<ApiResponse<List<String>>> getOrganizationList(
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/organization-list'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final raw = _get(body, 'data') as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: raw.map((e) => e.toString()).toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── ORG REVIEW (anggota divisi approve/reject DL) ─────────────────────────
+  static Future<ApiResponse<void>> orgReview({
+    required int timeOffId,
+    required String reviewerUserId,
+    required String status, // 'Approved' | 'Rejected'
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/org-review'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': timeOffId,
+          'reviewerUserId': reviewerUserId,
+          'status': status,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── PENDING ORG REVIEW (list DL yang perlu di-approve user) ──────────────
+  static Future<ApiResponse<List<PendingOrgItem>>> getPendingOrgReview(
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/pending-org-review'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final rawList = rawData?['items'] as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: rawList
+              .map((e) => PendingOrgItem.fromJson(e as Map<String, dynamic>))
+              .toList(),
         );
       }
       return ApiResponse(

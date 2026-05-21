@@ -11,6 +11,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kontakdarura
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/profile.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -18,7 +19,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:device_info_plus/device_info_plus.dart';
 
-// ── helper ──────────────────────────────────────────────────────────
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
@@ -184,17 +184,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   static Future<String?> _getToken() async {
     try {
-      final response = await http
+      final r = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: {'grant_type': 'password', 'password': 'ASN_DBS'},
           )
           .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
+      if (r.statusCode == 200) {
+        final d = json.decode(r.body);
+        if (d.containsKey('access_token') && d['access_token'] != null) {
+          return d['access_token'];
         }
       }
       return null;
@@ -218,7 +218,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     setState(() => _email = email);
     try {
-      final response = await http.post(
+      final r = await http.post(
         Uri.parse('$baseURL/api/asn/getDataUser'),
         headers: {
           'Authorization': 'bearer $_accessToken',
@@ -227,10 +227,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
         body: json.encode({'Email': email}),
       );
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+      if (r.statusCode == 200) {
         setState(() {
-          _profileDisplay = ProfileDisplay.fromJson(data);
+          _profileDisplay = ProfileDisplay.fromJson(json.decode(r.body));
           _isLoadingDisplay = false;
         });
       } else {
@@ -241,11 +240,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // ── FIX: Foto Profil — pakai XFile.readAsBytes(), tidak pakai File() ─────
   Future<void> _pickImageFromGallery() async {
     try {
-      if (!await _checkGalleryPermission()) {
-        _showErrorSnackBar('Permission galeri tidak diberikan');
-        return;
+      // Permission hanya di mobile native
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        if (!await _checkGalleryPermission()) {
+          _showErrorSnackBar('Permission galeri tidak diberikan');
+          return;
+        }
       }
       final XFile? image = await _picker.pickImage(
         source: ImageSource.gallery,
@@ -253,17 +256,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxHeight: 800,
         imageQuality: 80,
       );
-      if (image != null) await _uploadProfilePhotoBase64(File(image.path));
+      if (image != null) {
+        // ← readAsBytes() bekerja di semua platform
+        final bytes = await image.readAsBytes();
+        await _uploadProfilePhotoBytes(bytes);
+      }
     } catch (e) {
-      _showErrorSnackBar('Gagal memilih gambar: ${e.toString()}');
+      _showErrorSnackBar('Gagal memilih gambar: $e');
     }
   }
 
   Future<void> _pickImageFromCamera() async {
     try {
-      if (!await _checkCameraPermission()) {
-        _showErrorSnackBar('Permission kamera tidak diberikan');
-        return;
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        if (!await _checkCameraPermission()) {
+          _showErrorSnackBar('Permission kamera tidak diberikan');
+          return;
+        }
       }
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
@@ -271,43 +280,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxHeight: 800,
         imageQuality: 80,
       );
-      if (photo != null) await _uploadProfilePhotoBase64(File(photo.path));
+      if (photo != null) {
+        final bytes = await photo.readAsBytes();
+        await _uploadProfilePhotoBytes(bytes);
+      }
     } catch (e) {
-      _showErrorSnackBar('Gagal mengambil foto: ${e.toString()}');
+      _showErrorSnackBar('Gagal mengambil foto: $e');
     }
   }
 
   Future<bool> _checkCameraPermission() async {
-    var status = await Permission.camera.status;
-    if (status.isDenied || status.isPermanentlyDenied) {
-      status = await Permission.camera.request();
+    var s = await Permission.camera.status;
+    if (s.isDenied || s.isPermanentlyDenied) {
+      s = await Permission.camera.request();
     }
-    if (status.isPermanentlyDenied) {
+    if (s.isPermanentlyDenied) {
       _showPermissionDialog('Kamera', 'kamera');
       return false;
     }
-    return status.isGranted;
+    return s.isGranted;
   }
 
   Future<bool> _checkGalleryPermission() async {
-    Permission permission;
+    Permission p;
     if (Platform.isAndroid) {
-      final androidInfo = await DeviceInfoPlugin().androidInfo;
-      permission = androidInfo.version.sdkInt >= 33
-          ? Permission.photos
-          : Permission.storage;
+      final info = await DeviceInfoPlugin().androidInfo;
+      p = info.version.sdkInt >= 33 ? Permission.photos : Permission.storage;
     } else {
-      permission = Permission.photos;
+      p = Permission.photos;
     }
-    var status = await permission.status;
-    if (status.isDenied || status.isPermanentlyDenied) {
-      status = await permission.request();
-    }
-    if (status.isPermanentlyDenied) {
+    var s = await p.status;
+    if (s.isDenied || s.isPermanentlyDenied) s = await p.request();
+    if (s.isPermanentlyDenied) {
       _showPermissionDialog('Galeri', 'mengakses galeri');
       return false;
     }
-    return status.isGranted;
+    return s.isGranted;
   }
 
   void _showPermissionDialog(String name, String action) {
@@ -335,10 +343,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _uploadProfilePhotoBase64(File imageFile) async {
+  // ← Terima Uint8List langsung (bukan File)
+  Future<void> _uploadProfilePhotoBytes(List<int> bytes) async {
     setState(() => _isUploadingPhoto = true);
     try {
-      final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
       final prefs = await SharedPreferences.getInstance();
       final email = prefs.getString('Email') ?? '';
@@ -358,7 +366,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       final token = json.decode(tokenResp.body)['access_token'];
 
-      final response = await http.post(
+      final r = await http.post(
         Uri.parse('$baseURL/api/asn/user/profile/photo/upload-base64'),
         headers: {
           'Authorization': 'Bearer $token',
@@ -367,10 +375,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
         body: json.encode({'Email': email, 'FotoProfilBase64': base64Image}),
       );
-
       if (!mounted) return;
-      if (response.statusCode == 200) {
-        final rb = json.decode(response.body);
+      if (r.statusCode == 200) {
+        final rb = json.decode(r.body);
         if (rb['success'] == true) {
           _showSuccessSnackBar(
             rb['message'] ?? 'Foto profil berhasil diperbarui',
@@ -380,11 +387,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _showErrorSnackBar(rb['message'] ?? 'Gagal memperbarui foto profil');
         }
       } else {
-        final rb = json.decode(response.body);
+        final rb = json.decode(r.body);
         _showErrorSnackBar(rb['message'] ?? 'Gagal memperbarui foto profil');
       }
     } catch (e) {
-      if (mounted) _showErrorSnackBar('Error upload: ${e.toString()}');
+      if (mounted) _showErrorSnackBar('Error upload: $e');
     } finally {
       if (mounted) setState(() => _isUploadingPhoto = false);
     }
@@ -393,7 +400,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _showSuccessSnackBar(String msg) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.green));
-
   void _showErrorSnackBar(String msg) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
@@ -431,10 +437,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: TextButton(
                     style: TextButton.styleFrom(
                       backgroundColor: Colors.blue[100],
+                      foregroundColor: Colors.blue[800],
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      foregroundColor: Colors.blue[800],
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                     onPressed: () => Navigator.pop(context),
@@ -635,7 +641,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final email = prefs.getString('Email') ?? '';
-      final response = await http
+      final r = await http
           .post(
             Uri.parse('$baseURL/api/asn/user/deleteAccount'),
             headers: {
@@ -650,10 +656,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           )
           .timeout(const Duration(seconds: 30));
       if (!mounted) return;
-      if (response.statusCode == 200) {
-        final rb = json.decode(response.body);
-        final message = rb['Message'] ?? rb['message'] ?? '';
-        if (message.toLowerCase().contains('successfully')) {
+      if (r.statusCode == 200) {
+        final rb = json.decode(r.body);
+        final msg = rb['Message'] ?? rb['message'] ?? '';
+        if (msg.toLowerCase().contains('successfully')) {
           _showSuccessSnackBar(_l('successDeleteAccount'));
           await Future.delayed(const Duration(seconds: 2));
           await prefs.clear();
@@ -662,16 +668,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
             MaterialPageRoute(builder: (_) => const SplashScreen()),
           );
         } else {
-          _showErrorSnackBar(message);
+          _showErrorSnackBar(msg);
         }
       } else {
-        final rb = json.decode(response.body);
+        final rb = json.decode(r.body);
         _showErrorSnackBar(
           rb['Message'] ?? rb['message'] ?? _l('errorDeleteAccount'),
         );
       }
     } catch (e) {
-      if (mounted) _showErrorSnackBar('Kesalahan: ${e.toString()}');
+      if (mounted) _showErrorSnackBar('Kesalahan: $e');
     } finally {
       if (mounted) setState(() => _isDeletingAccount = false);
     }
@@ -703,22 +709,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // BUILD UTAMA
-  // ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isWeb = _isWideScreen(context);
-
     return Scaffold(
       backgroundColor: Colors.grey[50],
       body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // MOBILE LAYOUT (layout asli — ListView)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildMobileLayout() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmall = screenWidth < 360;
@@ -728,7 +727,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     const sectionFs = 18.0;
     const menuFs = 16.0;
     const iconSz = 22.0;
-
     return ListView(
       padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 16),
       children: [
@@ -764,19 +762,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // WEB LAYOUT (2 kolom: panel kiri profil | panel kanan menu)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildWebLayout() {
     const avatarRadius = 60.0;
     const menuFs = 15.0;
     const iconSz = 20.0;
     const sectionFs = 16.0;
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Panel kiri: foto + info + logout/delete ───────────
         SizedBox(
           width: 280,
           child: Container(
@@ -810,15 +803,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ),
-
-        // ── Panel kanan: menu grid 2 kolom ────────────────────
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 2 kolom: Informasi Saya + Pengaturan
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -857,11 +847,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // SHARED WIDGETS
-  // ─────────────────────────────────────────────────────────────────
-
-  // ── Foto profil + nama + email + jabatan ──────────────────────
   Widget _buildProfileHeader(double avatarRadius, double menuFs) {
     if (_isLoadingDisplay) {
       return const Center(child: CircularProgressIndicator());
@@ -906,33 +891,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 borderRadius: BorderRadius.circular(30),
                 onTap: _isUploadingPhoto
                     ? null
-                    : () {
-                        showModalBottomSheet(
-                          context: context,
-                          builder: (_) => SafeArea(
-                            child: Wrap(
-                              children: [
-                                ListTile(
-                                  leading: const Icon(Icons.photo_library),
-                                  title: Text(_l('selectFromGallery')),
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    _pickImageFromGallery();
-                                  },
-                                ),
-                                ListTile(
-                                  leading: const Icon(Icons.camera_alt),
-                                  title: Text(_l('takePhoto')),
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    _pickImageFromCamera();
-                                  },
-                                ),
-                              ],
-                            ),
+                    : () => showModalBottomSheet(
+                        context: context,
+                        builder: (_) => SafeArea(
+                          child: Wrap(
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.photo_library),
+                                title: Text(_l('selectFromGallery')),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  _pickImageFromGallery();
+                                },
+                              ),
+                              ListTile(
+                                leading: const Icon(Icons.camera_alt),
+                                title: Text(_l('takePhoto')),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  _pickImageFromCamera();
+                                },
+                              ),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                      ),
                 child: CircleAvatar(
                   radius: 14,
                   backgroundColor: _isUploadingPhoto
@@ -964,192 +947,175 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ── Section informasi saya ────────────────────────────────────
-  Widget _buildInfoSection(double iconSz, double menuFs) {
-    return _buildMenuSection([
-      _buildMenuItem(
-        Icons.person_outline,
-        _l('personalInfo'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const InfoProfileScreen()),
+  Widget _buildInfoSection(double iconSz, double menuFs) => _buildMenuSection([
+    _buildMenuItem(
+      Icons.person_outline,
+      _l('personalInfo'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const InfoProfileScreen()),
+      ),
+    ),
+    _buildMenuItem(
+      Icons.emergency,
+      _l('emergencyContact'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              EmergencyContactScreen(userId: _profileDisplay?.userId ?? ''),
         ),
       ),
-      _buildMenuItem(
-        Icons.emergency,
-        _l('emergencyContact'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                EmergencyContactScreen(userId: _profileDisplay?.userId ?? ''),
+    ),
+    _buildMenuItem(
+      Icons.family_restroom,
+      _l('familyInfo'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => _showComingSoonDialog(context),
+    ),
+    _buildMenuItem(
+      Icons.school_outlined,
+      _l('education'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => _showComingSoonDialog(context),
+    ),
+    _buildMenuItem(
+      Icons.payment_outlined,
+      _l('salaryInfo'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => _showComingSoonDialog(context),
+    ),
+    _buildMenuItem(
+      Icons.warning_amber_outlined,
+      _l('reprimand'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => _showComingSoonDialog(context),
+    ),
+  ]);
+
+  Widget _buildSettingsSection(double iconSz, double menuFs) =>
+      _buildMenuSection([
+        _buildMenuItem(
+          Icons.lock_outline,
+          _l('changeSecurity'),
+          iconSize: iconSz,
+          fontSize: menuFs,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const HalamanPengaturanKeamanan(),
+            ),
           ),
         ),
-      ),
-      _buildMenuItem(
-        Icons.family_restroom,
-        _l('familyInfo'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => _showComingSoonDialog(context),
-      ),
-      _buildMenuItem(
-        Icons.school_outlined,
-        _l('education'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => _showComingSoonDialog(context),
-      ),
-      _buildMenuItem(
-        Icons.payment_outlined,
-        _l('salaryInfo'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => _showComingSoonDialog(context),
-      ),
-      _buildMenuItem(
-        Icons.warning_amber_outlined,
-        _l('reprimand'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => _showComingSoonDialog(context),
-      ),
-    ]);
-  }
+        _buildMenuItem(
+          Icons.access_time_outlined,
+          _l('attendanceReminder'),
+          iconSize: iconSz,
+          fontSize: menuFs,
+          onTap: () => _showComingSoonDialog(context),
+        ),
+      ]);
 
-  // ── Section pengaturan ────────────────────────────────────────
-  Widget _buildSettingsSection(double iconSz, double menuFs) {
-    return _buildMenuSection([
-      _buildMenuItem(
-        Icons.lock_outline,
-        _l('changeSecurity'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const HalamanPengaturanKeamanan()),
-        ),
+  Widget _buildHelpSection(double iconSz, double menuFs) => _buildMenuSection([
+    _buildMenuItem(
+      Icons.privacy_tip_outlined,
+      _l('privacyPolicy'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanKebijakanPrivasi()),
       ),
-      _buildMenuItem(
-        Icons.access_time_outlined,
-        _l('attendanceReminder'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => _showComingSoonDialog(context),
+    ),
+    _buildMenuItem(
+      Icons.help_outline,
+      _l('helpSupport'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanBantuanDukungan()),
       ),
-    ]);
-  }
+    ),
+    _buildMenuItem(
+      Icons.contact_mail_outlined,
+      _l('contactUs'),
+      iconSize: iconSz,
+      fontSize: menuFs,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanHubungiKami()),
+      ),
+    ),
+  ]);
 
-  // ── Section bantuan ───────────────────────────────────────────
-  Widget _buildHelpSection(double iconSz, double menuFs) {
-    return _buildMenuSection([
-      _buildMenuItem(
-        Icons.privacy_tip_outlined,
-        _l('privacyPolicy'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const HalamanKebijakanPrivasi()),
-        ),
+  Widget _buildLogoutButton(double menuFs) => SizedBox(
+    width: double.infinity,
+    child: TextButton.icon(
+      onPressed: _showLogoutBottomSheet,
+      icon: const Icon(Icons.logout, color: Colors.blue),
+      label: Text(
+        _l('logout'),
+        style: TextStyle(color: Colors.blue, fontSize: menuFs),
       ),
-      _buildMenuItem(
-        Icons.help_outline,
-        _l('helpSupport'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const HalamanBantuanDukungan()),
-        ),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 12),
       ),
-      _buildMenuItem(
-        Icons.contact_mail_outlined,
-        _l('contactUs'),
-        iconSize: iconSz,
-        fontSize: menuFs,
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const HalamanHubungiKami()),
-        ),
-      ),
-    ]);
-  }
+    ),
+  );
 
-  // ── Tombol logout ─────────────────────────────────────────────
-  Widget _buildLogoutButton(double menuFs) {
-    return SizedBox(
-      width: double.infinity,
-      child: TextButton.icon(
-        onPressed: _showLogoutBottomSheet,
-        icon: const Icon(Icons.logout, color: Colors.blue),
-        label: Text(
-          _l('logout'),
-          style: TextStyle(color: Colors.blue, fontSize: menuFs),
-        ),
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-        ),
+  Widget _buildDeleteAccountButton(double menuFs) => SizedBox(
+    width: double.infinity,
+    child: TextButton.icon(
+      onPressed: _isDeletingAccount ? null : _showDeleteAccountBottomSheet,
+      icon: Icon(
+        Icons.delete_forever,
+        color: _isDeletingAccount ? Colors.grey : Colors.red,
       ),
-    );
-  }
-
-  // ── Tombol hapus akun ─────────────────────────────────────────
-  Widget _buildDeleteAccountButton(double menuFs) {
-    return SizedBox(
-      width: double.infinity,
-      child: TextButton.icon(
-        onPressed: _isDeletingAccount ? null : _showDeleteAccountBottomSheet,
-        icon: Icon(
-          Icons.delete_forever,
+      label: Text(
+        _l('deleteAccount'),
+        style: TextStyle(
           color: _isDeletingAccount ? Colors.grey : Colors.red,
-        ),
-        label: Text(
-          _l('deleteAccount'),
-          style: TextStyle(
-            color: _isDeletingAccount ? Colors.grey : Colors.red,
-            fontSize: menuFs,
-          ),
-        ),
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          fontSize: menuFs,
         ),
       ),
-    );
-  }
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+    ),
+  );
 
-  // ── Section container ─────────────────────────────────────────
-  Widget _buildSectionTitle(String title, double fontSize) {
-    return Text(
-      title,
-      style: TextStyle(
-        fontSize: fontSize,
-        fontWeight: FontWeight.w600,
-        color: Colors.black87,
-      ),
-    );
-  }
+  Widget _buildSectionTitle(String title, double fontSize) => Text(
+    title,
+    style: TextStyle(
+      fontSize: fontSize,
+      fontWeight: FontWeight.w600,
+      color: Colors.black87,
+    ),
+  );
 
-  Widget _buildMenuSection(List<Widget> items) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(children: items),
-    );
-  }
+  Widget _buildMenuSection(List<Widget> items) => Container(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.grey.withOpacity(0.1),
+          blurRadius: 4,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(children: items),
+  );
 
   Widget _buildMenuItem(
     IconData icon,
@@ -1158,46 +1124,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
     VoidCallback? onTap,
     double iconSize = 22,
     double fontSize = 16,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(icon, color: Colors.grey.shade700, size: iconSize),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: fontSize,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  ),
+  }) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.grey.shade700, size: iconSize),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
                 ),
               ),
-              if (trailingText != null)
-                Flexible(
-                  child: Text(
-                    trailingText,
-                    style: TextStyle(
-                      fontSize: fontSize - 2,
-                      color: Colors.grey.shade600,
-                    ),
-                    textAlign: TextAlign.end,
-                    overflow: TextOverflow.ellipsis,
+            ),
+            if (trailingText != null)
+              Flexible(
+                child: Text(
+                  trailingText,
+                  style: TextStyle(
+                    fontSize: fontSize - 2,
+                    color: Colors.grey.shade600,
                   ),
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              const SizedBox(width: 6),
-              Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
-            ],
-          ),
+              ),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+          ],
         ),
       ),
-    );
-  }
+    ),
+  );
 }

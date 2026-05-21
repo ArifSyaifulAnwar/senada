@@ -1,3 +1,4 @@
+// Screen User/home/home_screen.dart — FULL REPLACE
 // ignore_for_file: unused_local_variable, unused_element, unused_field, deprecated_member_use, use_build_context_synchronously
 import 'dart:convert';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
@@ -11,12 +12,14 @@ import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
+import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/attendance_summary.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
+import 'org_approval_screen.dart';
 import 'profile fitur/halaman_calendar.dart';
 
 bool _isWideScreen(BuildContext context) =>
@@ -50,6 +53,9 @@ class _HomePageState extends State<HomeScreen> {
   bool _debugShowTestBadge = false;
   String? userID;
 
+  // ── Org approval count ──────────────────────────────────────────────────
+  int _pendingOrgCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -62,6 +68,18 @@ class _HomePageState extends State<HomeScreen> {
     final prefs = await SharedPreferences.getInstance();
     userID = prefs.getString('UserID');
     return userID;
+  }
+
+  // ── Load pending org count ───────────────────────────────────────────────
+  Future<void> _loadPendingOrgCount() async {
+    try {
+      if (userID == null) await loadUserId();
+      if (userID == null || userID!.isEmpty) return;
+      final res = await TimeOffService.getPendingOrgReview(userID!);
+      if (res.success && res.data != null && mounted) {
+        setState(() => _pendingOrgCount = res.data!.length);
+      }
+    } catch (_) {}
   }
 
   void _debugTestNotificationBadge() {
@@ -169,9 +187,8 @@ class _HomePageState extends State<HomeScreen> {
     }
   }
 
-  Future<void> refreshNotificationCount() async {
-    await _loadUnreadNotificationCount();
-  }
+  Future<void> refreshNotificationCount() async =>
+      _loadUnreadNotificationCount();
 
   Future<void> _checkTodayAttendanceStatus() async {
     if (!mounted) return;
@@ -244,6 +261,9 @@ class _HomePageState extends State<HomeScreen> {
       _accessToken = await _getToken();
       if (_accessToken != null) {
         await _loadProfileData();
+        // Load org count setelah profile selesai (userId sudah tersedia)
+        await loadUserId();
+        await _loadPendingOrgCount();
       } else {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan token akses';
@@ -398,23 +418,18 @@ class _HomePageState extends State<HomeScreen> {
     if (mounted) _checkTodayAttendanceStatus();
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // BUILD UTAMA
-  // ─────────────────────────────────────────────────────────────────
+  // ── BUILD ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final screenWidth = screenSize.width;
     final screenHeight = screenSize.height;
     final isWeb = _isWideScreen(context);
-
-    const double baseWidth = 375;
-    const double baseHeight = 812;
-    final double widthScale = screenWidth / baseWidth;
-    final double heightScale = screenHeight / baseHeight;
-    // Di web pakai scale = 1.0 supaya teks tidak terlalu besar
-    final double scale = isWeb ? 1.0 : (widthScale + heightScale) / 2;
-
+    const double baseWidth = 375, baseHeight = 812;
+    final double scale = isWeb
+        ? 1.0
+        : ((screenWidth / baseWidth) + (screenHeight / baseHeight)) / 2;
     final double horizontalPadding = isWeb ? 24 : screenWidth * 0.04;
     final double bottomSafeArea = MediaQuery.of(context).padding.bottom;
     final double slideButtonBottomPadding = isWeb
@@ -440,9 +455,6 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // MOBILE LAYOUT (layout asli)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildMobileLayout(
     double scale,
     double hPad,
@@ -480,14 +492,10 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // WEB LAYOUT (2 kolom: panel kiri | panel kanan)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildWebLayout(double scale, double hPad, double slidePad) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Panel kiri: Profil + Status + Aktivitas + Slide ────
         SizedBox(
           width: 340,
           child: Container(
@@ -513,7 +521,6 @@ class _HomePageState extends State<HomeScreen> {
                     ),
                   ),
                 ),
-                // Slide button sticky di bawah panel kiri
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -527,8 +534,6 @@ class _HomePageState extends State<HomeScreen> {
             ),
           ),
         ),
-
-        // ── Panel kanan: Kalender + Summary + Layanan + Tasks ──
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
@@ -541,7 +546,6 @@ class _HomePageState extends State<HomeScreen> {
                 const SizedBox(height: 16),
                 _buildServiceIconsSection(scale, isWeb: true),
                 const SizedBox(height: 16),
-                // Tugas + Timesheet side by side di web
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -559,14 +563,12 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  // ── Slide button (reusable mobile & web) ──────────────────────
   Widget _buildSlideButton(
     double scale,
     double hPad,
     double bottomPad,
     double height,
   ) {
-    final screenHeight = MediaQuery.of(context).size.height;
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(hPad, 12, hPad, bottomPad),
@@ -630,9 +632,301 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // SHARED WIDGETS
-  // ─────────────────────────────────────────────────────────────────
+  // ── Service icons ─────────────────────────────────────────────────────────
+
+  Widget _buildServiceIconsSection(double scale, {required bool isWeb}) {
+    final allServices = [
+      _buildServiceIconData(
+        Icons.receipt_long,
+        "Reimbursement",
+        const Color(0xFF4ECDC4),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanReimbursement()),
+        ),
+      ),
+      _buildServiceIconData(
+        Icons.calendar_today,
+        "Kalender",
+        const Color(0xFF007AFF),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanCalendar()),
+        ),
+      ),
+      _buildServiceIconData(
+        Icons.schedule,
+        "Izin",
+        const Color(0xFF007AFF),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                TimeOffScreen(userId: _profileDisplay?.userId ?? ''),
+          ),
+        ),
+      ),
+      _buildServiceIconData(
+        Icons.location_on,
+        "Live Attendance",
+        const Color(0xFFFF9500),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const LiveAttendanceScreen()),
+        ),
+      ),
+      _buildServiceIconData(
+        Icons.access_time_filled,
+        "Lembur",
+        const Color(0xFFFF6B35),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => OvertimeScreen()),
+        ),
+      ),
+      _buildServiceIconData(
+        Icons.folder_open,
+        "File Saya",
+        const Color(0xFFFFCC02),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const InfoProfileScreen(initialTabIndex: 2),
+          ),
+        ),
+      ),
+      // ── BARU: Persetujuan Divisi ──────────────────────────────────────────
+      _buildServiceIconData(
+        Icons.groups_rounded,
+        "Persetujuan\nDivisi",
+        const Color(0xFF0EA5E9),
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => OrgApprovalScreen(
+                userId: _profileDisplay?.userId ?? userID ?? '',
+              ),
+            ),
+          );
+          // Refresh count setelah kembali
+          _loadPendingOrgCount();
+        },
+        badge: _pendingOrgCount,
+      ),
+      _buildServiceIconData(
+        Icons.event,
+        "Acara",
+        const Color(0xFF795548),
+        onTap: () => _showComingSoonDialog(context),
+      ),
+      _buildServiceIconData(
+        Icons.inventory,
+        "Asset",
+        const Color(0xFF607D8B),
+        onTap: () => _showComingSoonDialog(context),
+      ),
+    ];
+
+    return Container(
+      padding: EdgeInsets.all(14 * scale),
+      decoration: BoxDecoration(
+        color: isWeb ? const Color(0xFFF8FAFC) : Colors.white,
+        borderRadius: BorderRadius.circular(12 * scale),
+        boxShadow: isWeb
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 4 * scale,
+                  offset: Offset(0, 2 * scale),
+                ),
+              ],
+        border: isWeb ? Border.all(color: Colors.grey.shade200) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Layanan',
+            style: TextStyle(
+              fontSize: 15 * scale,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[800],
+            ),
+          ),
+          SizedBox(height: 14 * scale),
+          if (isWeb)
+            Wrap(
+              spacing: 8,
+              runSpacing: 12,
+              children: allServices.map((s) {
+                return GestureDetector(
+                  onTap: s.onTap,
+                  child: SizedBox(
+                    width: 80,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Stack(
+                          children: [
+                            Container(
+                              width: 46,
+                              height: 46,
+                              decoration: BoxDecoration(
+                                color: s.color.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                              child: Icon(s.icon, size: 22, color: s.color),
+                            ),
+                            if (s.badge != null && s.badge! > 0)
+                              Positioned(
+                                top: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFEF4444),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    s.badge! > 99 ? '99+' : '${s.badge}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          s.label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 11,
+                            color: Colors.grey[800],
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            )
+          else
+            SizedBox(
+              height: 176 * scale,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Column(
+                  children: [
+                    Row(
+                      children: allServices
+                          .sublist(0, 4)
+                          .map(
+                            (s) => Container(
+                              width: 70 * scale,
+                              height: 80 * scale,
+                              margin: EdgeInsets.only(right: 12 * scale),
+                              child: _buildServiceIconWidget(s, scale),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    SizedBox(height: 16 * scale),
+                    Row(
+                      children: allServices
+                          .sublist(4)
+                          .map(
+                            (s) => Container(
+                              width: 70 * scale,
+                              height: 80 * scale,
+                              margin: EdgeInsets.only(right: 12 * scale),
+                              child: _buildServiceIconWidget(s, scale),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServiceIconWidget(ServiceIconData s, double scale) {
+    return GestureDetector(
+      onTap: s.onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            flex: 3,
+            child: Stack(
+              children: [
+                Container(
+                  width: 45 * scale,
+                  height: 45 * scale,
+                  decoration: BoxDecoration(
+                    color: s.color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12 * scale),
+                  ),
+                  child: Icon(s.icon, size: 22 * scale, color: s.color),
+                ),
+                if (s.badge != null && s.badge! > 0)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        s.badge! > 99 ? '99+' : '${s.badge}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          SizedBox(height: 5 * scale),
+          Flexible(
+            flex: 2,
+            child: Text(
+              s.label,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 10 * scale,
+                color: Colors.grey[800],
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Notification icon ─────────────────────────────────────────────────────
+
   Widget _buildNotificationIcon(double scale) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmall = screenWidth < 360;
@@ -970,207 +1264,6 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildServiceIconsSection(double scale, {required bool isWeb}) {
-    final allServices = [
-      _buildServiceIconData(
-        Icons.receipt_long,
-        "Reimbursement",
-        const Color(0xFF4ECDC4),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const HalamanReimbursement()),
-        ),
-      ),
-      _buildServiceIconData(
-        Icons.calendar_today,
-        "Kalender",
-        const Color(0xFF007AFF),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const HalamanCalendar()),
-        ),
-      ),
-      _buildServiceIconData(
-        Icons.schedule,
-        "Izin",
-        const Color(0xFF007AFF),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                TimeOffScreen(userId: _profileDisplay?.userId ?? ''),
-          ),
-        ),
-      ),
-      _buildServiceIconData(
-        Icons.location_on,
-        "Live Attendance",
-        const Color(0xFFFF9500),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const LiveAttendanceScreen()),
-        ),
-      ),
-      _buildServiceIconData(
-        Icons.access_time_filled,
-        "Lembur",
-        const Color(0xFFFF6B35),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => OvertimeScreen()),
-        ),
-      ),
-      _buildServiceIconData(
-        Icons.folder_open,
-        "File Saya",
-        const Color(0xFFFFCC02),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const InfoProfileScreen(initialTabIndex: 2),
-          ),
-        ),
-      ),
-      _buildServiceIconData(
-        Icons.event,
-        "Acara",
-        const Color(0xFF795548),
-        onTap: () => _showComingSoonDialog(context),
-      ),
-      _buildServiceIconData(
-        Icons.inventory,
-        "Asset",
-        const Color(0xFF607D8B),
-        onTap: () => _showComingSoonDialog(context),
-      ),
-    ];
-
-    return Container(
-      padding: EdgeInsets.all(14 * scale),
-      decoration: BoxDecoration(
-        color: isWeb ? const Color(0xFFF8FAFC) : Colors.white,
-        borderRadius: BorderRadius.circular(12 * scale),
-        boxShadow: isWeb
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 4 * scale,
-                  offset: Offset(0, 2 * scale),
-                ),
-              ],
-        border: isWeb ? Border.all(color: Colors.grey.shade200) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Layanan',
-            style: TextStyle(
-              fontSize: 15 * scale,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
-            ),
-          ),
-          SizedBox(height: 14 * scale),
-          if (isWeb)
-            // Web: Wrap — semua icon tampil tanpa scroll horizontal
-            Wrap(
-              spacing: 8,
-              runSpacing: 12,
-              children: allServices.map((s) {
-                return GestureDetector(
-                  onTap: s.onTap,
-                  child: SizedBox(
-                    width: 80,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: s.color.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(13),
-                          ),
-                          child: Icon(s.icon, size: 22, color: s.color),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          s.label,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 11,
-                            color: Colors.grey[800],
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            )
-          else
-            // Mobile: scroll horizontal 2 baris (asli)
-            SizedBox(
-              height: 176 * scale,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Column(
-                  children: [
-                    Row(
-                      children: allServices
-                          .sublist(0, 4)
-                          .map(
-                            (s) => Container(
-                              width: 70 * scale,
-                              height: 80 * scale,
-                              margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIcon(
-                                s.icon,
-                                s.label,
-                                s.color,
-                                s.color,
-                                scale,
-                                onTap: s.onTap,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                    SizedBox(height: 16 * scale),
-                    Row(
-                      children: allServices
-                          .sublist(4)
-                          .map(
-                            (s) => Container(
-                              width: 70 * scale,
-                              height: 80 * scale,
-                              margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIcon(
-                                s.icon,
-                                s.label,
-                                s.color,
-                                s.color,
-                                scale,
-                                onTap: s.onTap,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildActivitiesSection(double scale) {
     return Container(
       padding: EdgeInsets.all(14 * scale),
@@ -1292,15 +1385,13 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildTasksAndTimesheetSection(double scale) {
-    return Column(
-      children: [
-        _buildTasksSection(scale),
-        SizedBox(height: 12 * scale),
-        _buildTimesheetSection(scale),
-      ],
-    );
-  }
+  Widget _buildTasksAndTimesheetSection(double scale) => Column(
+    children: [
+      _buildTasksSection(scale),
+      SizedBox(height: 12 * scale),
+      _buildTimesheetSection(scale),
+    ],
+  );
 
   Widget _buildTasksSection(double scale) {
     return Container(
@@ -1543,53 +1634,6 @@ class _HomePageState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildServiceIcon(
-    IconData icon,
-    String label,
-    Color bgColor,
-    Color iconColor,
-    double scale, {
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            flex: 3,
-            child: Container(
-              width: 45 * scale,
-              height: 45 * scale,
-              decoration: BoxDecoration(
-                color: bgColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12 * scale),
-              ),
-              child: Icon(icon, size: 22 * scale, color: iconColor),
-            ),
-          ),
-          SizedBox(height: 5 * scale),
-          Flexible(
-            flex: 2,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 10 * scale,
-                color: Colors.grey[800],
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Helper methods ─────────────────────────────────────────────
   String _formatTime(String? ts) {
     if (ts == null) return '-';
     try {
@@ -1635,16 +1679,19 @@ class _HomePageState extends State<HomeScreen> {
   }
 }
 
+// ── ServiceIconData (dengan field badge) ─────────────────────────────────────
 class ServiceIconData {
   final IconData icon;
   final String label;
   final Color color;
   final VoidCallback? onTap;
+  final int? badge;
   const ServiceIconData({
     required this.icon,
     required this.label,
     required this.color,
     this.onTap,
+    this.badge,
   });
 }
 
@@ -1653,6 +1700,11 @@ ServiceIconData _buildServiceIconData(
   String label,
   Color color, {
   VoidCallback? onTap,
-}) {
-  return ServiceIconData(icon: icon, label: label, color: color, onTap: onTap);
-}
+  int? badge,
+}) => ServiceIconData(
+  icon: icon,
+  label: label,
+  color: color,
+  onTap: onTap,
+  badge: badge,
+);

@@ -1,4 +1,5 @@
-// ignore_for_file: deprecated_member_use, use_build_context_synchronously
+// Screen HRD/Home/home_screen_hrd.dart — FULL REPLACE
+// ignore_for_file: curly_braces_in_flow_control_structures, deprecated_member_use, use_build_context_synchronously
 
 import 'dart:convert';
 import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
@@ -13,22 +14,20 @@ import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
+import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
-// ─────────────────────────────────────────────
-// Helper: deteksi layar lebar (web/tablet)
-// ─────────────────────────────────────────────
-bool _isWideScreen(BuildContext context) {
-  return MediaQuery.of(context).size.width >= 768;
-}
+import '../../Screen User/fitur/org_approval_screen.dart';
+
+bool _isWideScreen(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
 
 class HomeScreenHRD extends StatefulWidget {
   const HomeScreenHRD({super.key});
-
   @override
   State<HomeScreenHRD> createState() => _HomeScreenHRDState();
 }
@@ -53,6 +52,9 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   String? _notificationError;
   String? userID;
 
+  // ── Org approval count ──────────────────────────────────────────────────
+  int _pendingOrgCount = 0;
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +67,17 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     final prefs = await SharedPreferences.getInstance();
     userID = prefs.getString('UserID');
     return userID;
+  }
+
+  Future<void> _loadPendingOrgCount() async {
+    try {
+      if (userID == null) await loadUserId();
+      if (userID == null || userID!.isEmpty) return;
+      final res = await TimeOffService.getPendingOrgReview(userID!);
+      if (res.success && res.data != null && mounted) {
+        setState(() => _pendingOrgCount = res.data!.length);
+      }
+    } catch (_) {}
   }
 
   static Future<String?> _getToken() async {
@@ -83,7 +96,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         }
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
@@ -101,11 +114,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       _notificationError = null;
     });
     try {
-      String? currentToken = _accessToken;
-      if (currentToken == null) {
-        currentToken = await _getToken();
-        if (currentToken == null) throw Exception('Failed to get access token');
-      }
+      String? currentToken = _accessToken ?? await _getToken();
+      if (currentToken == null) throw Exception('Failed to get access token');
       if (userID == null) await loadUserId();
       if (userID == null || userID!.isEmpty) {
         throw Exception('User ID not found');
@@ -122,25 +132,22 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           )
           .timeout(
             const Duration(seconds: 10),
-            onTimeout: () {
-              throw Exception('Request timeout');
-            },
+            onTimeout: () => throw Exception('Request timeout'),
           );
 
       if (mounted) {
         if (response.statusCode == 200) {
-          final responseData = json.decode(response.body);
-          if (responseData['Success'] == true) {
+          final d = json.decode(response.body);
+          if (d['Success'] == true) {
             setState(() {
-              _unreadNotificationCount =
-                  responseData['Data']['UnreadCount'] ?? 0;
+              _unreadNotificationCount = d['Data']['UnreadCount'] ?? 0;
               _isLoadingNotifications = false;
               _notificationError = null;
             });
           } else {
             setState(() {
               _isLoadingNotifications = false;
-              _notificationError = responseData['Message'] ?? 'Unknown error';
+              _notificationError = d['Message'] ?? 'Unknown error';
             });
           }
         } else if (response.statusCode == 401) {
@@ -170,17 +177,16 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     }
   }
 
-  Future<void> refreshNotificationCount() async {
-    await _loadUnreadNotificationCount();
-  }
+  Future<void> refreshNotificationCount() async =>
+      _loadUnreadNotificationCount();
 
   Future<void> _checkTodayAttendanceStatus() async {
     if (!mounted) return;
     setState(() => _isLoadingAttendance = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('UserID') ?? '';
-      if (userId.isEmpty) {
+      final uid = prefs.getString('UserID') ?? '';
+      if (uid.isEmpty) {
         if (mounted) {
           setState(() {
             _isLoadingAttendance = false;
@@ -190,23 +196,21 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         return;
       }
       final result = await FaceRecognitionService.getTodayAttendance(
-        userId: userId,
+        userId: uid,
       );
       if (mounted) {
         if (result['success']) {
-          final attendanceData = result['data'];
+          final data = result['data'];
           setState(() {
-            _todayAttendanceData = attendanceData;
-            if (attendanceData != null) {
-              _hasCheckedIn = attendanceData['CheckInTime'] != null;
-              _hasCheckedOut = attendanceData['CheckOutTime'] != null;
-              if (_hasCheckedOut) {
-                _attendanceStatusMessage = 'Anda sudah check out hari ini';
-              } else if (_hasCheckedIn) {
-                _attendanceStatusMessage = 'Siap untuk check out';
-              } else {
-                _attendanceStatusMessage = 'Siap untuk check in';
-              }
+            _todayAttendanceData = data;
+            if (data != null) {
+              _hasCheckedIn = data['CheckInTime'] != null;
+              _hasCheckedOut = data['CheckOutTime'] != null;
+              _attendanceStatusMessage = _hasCheckedOut
+                  ? 'Anda sudah check out hari ini'
+                  : _hasCheckedIn
+                  ? 'Siap untuk check out'
+                  : 'Siap untuk check in';
             } else {
               _hasCheckedIn = false;
               _hasCheckedOut = false;
@@ -234,8 +238,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     }
   }
 
-  void _safeSetState(VoidCallback callback) {
-    if (mounted) setState(callback);
+  void _safeSetState(VoidCallback cb) {
+    if (mounted) setState(cb);
   }
 
   Future<void> _initializeUserInfo() async {
@@ -248,9 +252,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       if (token != null) {
         _accessToken = token;
         await _loadProfileData();
-      }
-      if (_accessToken != null) {
-        await _loadProfileData();
+        await loadUserId();
+        await _loadPendingOrgCount();
       } else {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan token akses';
@@ -295,10 +298,10 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       );
       if (!mounted) return;
       if (userResponse.statusCode == 200) {
-        final responseJson = json.decode(userResponse.body);
-        if (responseJson['data'] != null) {
+        final rj = json.decode(userResponse.body);
+        if (rj['data'] != null) {
           _safeSetState(() {
-            _profileDisplay = ProfileDisplay.fromJson(responseJson);
+            _profileDisplay = ProfileDisplay.fromJson(rj);
             _isLoading = false;
             _errorMessage = null;
           });
@@ -341,16 +344,15 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       final result = await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) =>
+          builder: (_) =>
               AbsensiScreen(isCheckOut: _hasCheckedIn, showBackButton: true),
         ),
       );
       if (mounted && (result == true || result != null)) {
         await _checkTodayAttendanceStatus();
         _safeResetSlider();
-      } else if (mounted) {
+      } else if (mounted)
         _safeResetSlider();
-      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -373,9 +375,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           _slideActionKey.currentState!.mounted) {
         try {
           _slideActionKey.currentState?.reset();
-        } catch (e) {
-          return null;
-        }
+        } catch (_) {}
       }
     });
   }
@@ -403,22 +403,18 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     return Icons.login;
   }
 
-  // ─────────────────────────────────────────────
-  // BUILD UTAMA
-  // ─────────────────────────────────────────────
+  // ── BUILD ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final screenWidth = screenSize.width;
     final screenHeight = screenSize.height;
     final bool isWeb = _isWideScreen(context);
-
-    const double baseWidth = 375;
-    const double baseHeight = 812;
-    final double widthScale = screenWidth / baseWidth;
-    final double heightScale = screenHeight / baseHeight;
-    final double scale = isWeb ? 1.0 : (widthScale + heightScale) / 2;
-
+    const double baseWidth = 375, baseHeight = 812;
+    final double scale = isWeb
+        ? 1.0
+        : ((screenWidth / baseWidth) + (screenHeight / baseHeight)) / 2;
     final double horizontalPadding = isWeb ? 32 : screenWidth * 0.04;
     final double verticalPadding = isWeb ? 24 : screenHeight * 0.02;
     final double bottomSafeArea = MediaQuery.of(context).padding.bottom;
@@ -441,27 +437,21 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // MOBILE LAYOUT (layout asli, tidak berubah)
-  // ─────────────────────────────────────────────
   Widget _buildMobileLayout(
     double scale,
-    double horizontalPadding,
-    double verticalPadding,
-    double slideButtonBottomPadding,
+    double hPad,
+    double vPad,
+    double slidePad,
   ) {
     return Column(
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: EdgeInsets.symmetric(
-              vertical: verticalPadding,
-              horizontal: horizontalPadding,
-            ),
+            padding: EdgeInsets.symmetric(vertical: vPad, horizontal: hPad),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildProfileSection(scale, horizontalPadding),
+                _buildProfileSection(scale, hPad),
                 SizedBox(height: 20 * scale),
                 _buildAttendanceStatusInfo(scale),
                 SizedBox(height: 20 * scale),
@@ -478,23 +468,15 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             ),
           ),
         ),
-        _buildSlideButton(scale, horizontalPadding, slideButtonBottomPadding),
+        _buildSlideButton(scale, hPad, slidePad),
       ],
     );
   }
 
-  // ─────────────────────────────────────────────
-  // WEB LAYOUT (2 kolom: sidebar kiri + konten kanan)
-  // ─────────────────────────────────────────────
-  Widget _buildWebLayout(
-    double scale,
-    double horizontalPadding,
-    double verticalPadding,
-  ) {
+  Widget _buildWebLayout(double scale, double hPad, double vPad) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Panel Kiri
         SizedBox(
           width: 300,
           child: Container(
@@ -532,8 +514,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             ),
           ),
         ),
-
-        // Konten Kanan
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
@@ -563,23 +543,11 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // SLIDE BUTTON (dipakai ulang mobile & web)
-  // ─────────────────────────────────────────────
-  Widget _buildSlideButton(
-    double scale,
-    double horizontalPadding,
-    double bottomPadding,
-  ) {
+  Widget _buildSlideButton(double scale, double hPad, double bottomPad) {
     final screenHeight = MediaQuery.of(context).size.height;
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.fromLTRB(
-        horizontalPadding,
-        16,
-        horizontalPadding,
-        bottomPadding,
-      ),
+      padding: EdgeInsets.fromLTRB(hPad, 16, hPad, bottomPad),
       child: Column(
         children: [
           if (_attendanceStatusMessage.isNotEmpty)
@@ -639,15 +607,14 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // NOTIFICATION ICON
-  // ─────────────────────────────────────────────
+  // ── Notification icon (sama dengan asli) ─────────────────────────────────
+
   Widget _buildNotificationIcon(double scale) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
+    final isSmall = screenWidth < 360;
     final iconSize = 28.0 * scale;
-    final badgeSize = isSmallScreen ? 16.0 * scale : 18.0 * scale;
-    final badgeFontSize = isSmallScreen ? 9.0 * scale : 10.0 * scale;
+    final badgeSize = isSmall ? 16.0 * scale : 18.0 * scale;
+    final badgeFontSize = isSmall ? 9.0 * scale : 10.0 * scale;
 
     return SizedBox(
       width: 48,
@@ -668,7 +635,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const HalamanNotifikasiAdmin(),
+                  builder: (_) => const HalamanNotifikasiAdmin(),
                 ),
               );
               await refreshNotificationCount();
@@ -756,10 +723,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // PROFILE SECTION
-  // ─────────────────────────────────────────────
-  Widget _buildProfileSection(double scale, double horizontalPadding) {
+  Widget _buildProfileSection(double scale, double hPad) {
     return Row(
       children: [
         Container(
@@ -825,9 +789,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // ATTENDANCE STATUS INFO
-  // ─────────────────────────────────────────────
   Widget _buildAttendanceStatusInfo(double scale) {
     if (_isLoadingAttendance) {
       return Container(
@@ -861,7 +822,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         ),
       );
     }
-
     if (_todayAttendanceData != null) {
       return Container(
         padding: EdgeInsets.all(16 * scale),
@@ -987,85 +947,89 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         ),
       );
     }
-
     return const SizedBox.shrink();
   }
 
-  // ─────────────────────────────────────────────
-  // SERVICE ICONS SECTION
-  // ─────────────────────────────────────────────
+  // ── Service icons section (dengan OrgApproval) ────────────────────────────
+
   Widget _buildServiceIconsSection(double scale) {
     final bool isWeb = _isWideScreen(context);
 
-    final List<ServiceIconData> firstRowServices = [
+    final firstRow = [
       _buildServiceIconData(
         Icons.receipt_long,
         'Reimbursement',
         const Color(0xFF4ECDC4),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const HalamanHRDReimbursement()),
-          );
-        },
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanHRDReimbursement()),
+        ),
       ),
       _buildServiceIconData(
         Icons.calendar_today,
         'Kalender',
         const Color(0xFF007AFF),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const HalamanCalendar()),
-          );
-        },
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanCalendar()),
+        ),
       ),
       _buildServiceIconData(
         Icons.schedule,
         'Izin',
         const Color(0xFF007AFF),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => TimeOffHRDScreen()),
-          );
-        },
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => TimeOffHRDScreen()),
+        ),
       ),
       _buildServiceIconData(
         Icons.location_on,
         'Absensi',
         const Color(0xFFFF9500),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const LiveAttendanceScreenAdmin(),
-            ),
-          );
-        },
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const LiveAttendanceScreenAdmin()),
+        ),
       ),
     ];
 
-    final List<ServiceIconData> secondRowServices = [
+    final secondRow = [
       _buildServiceIconData(
         Icons.access_time_filled,
         'Lembur',
         const Color(0xFFFF6B35),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => OvertimeHRDScreen()),
-          );
-        },
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => OvertimeHRDScreen()),
+        ),
       ),
       _buildServiceIconData(
         Icons.folder_open,
         'File Saya',
         const Color(0xFFFFCC02),
       ),
+      // ── BARU: Persetujuan Divisi ──────────────────────────────────────────
+      _buildServiceIconData(
+        Icons.groups_rounded,
+        'Persetujuan\nDivisi',
+        const Color(0xFF0EA5E9),
+        badge: _pendingOrgCount,
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => OrgApprovalScreen(
+                userId: _profileDisplay?.userId ?? userID ?? '',
+              ),
+            ),
+          );
+          _loadPendingOrgCount();
+        },
+      ),
       _buildServiceIconData(
         Icons.event,
-        "Acara",
+        'Acara',
         const Color(0xFF795548),
         onTap: () => _showComingSoonDialog(context),
       ),
@@ -1077,7 +1041,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       ),
     ];
 
-    final allServices = [...firstRowServices, ...secondRowServices];
+    final allServices = [...firstRow, ...secondRow];
 
     return Container(
       padding: EdgeInsets.all(16 * scale),
@@ -1104,17 +1068,69 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             ),
           ),
           SizedBox(height: 16 * scale),
-
-          // ── WEB: Wrap dengan item lebih lebar, teks tidak terpotong ──
           if (isWeb)
             Wrap(
               spacing: 8,
               runSpacing: 12,
-              children: allServices
-                  .map((service) => _buildServiceIconWeb(service))
-                  .toList(),
+              children: allServices.map((s) {
+                return GestureDetector(
+                  onTap: s.onTap,
+                  child: SizedBox(
+                    width: 90,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Stack(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: s.color.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Icon(s.icon, size: 24, color: s.color),
+                            ),
+                            if (s.badge != null && s.badge! > 0)
+                              Positioned(
+                                top: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFEF4444),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    s.badge! > 99 ? '99+' : '${s.badge}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          s.label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 11,
+                            color: Colors.grey[800],
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
             )
-          // ── MOBILE: scroll horizontal dua baris (layout asli) ──
           else
             SizedBox(
               height: 176 * scale,
@@ -1123,26 +1139,26 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                 child: Column(
                   children: [
                     Row(
-                      children: firstRowServices
+                      children: firstRow
                           .map(
-                            (service) => Container(
+                            (s) => Container(
                               width: 70 * scale,
                               height: 80 * scale,
                               margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIconMobile(service, scale),
+                              child: _buildServiceIconMobile(s, scale),
                             ),
                           )
                           .toList(),
                     ),
                     SizedBox(height: 16 * scale),
                     Row(
-                      children: secondRowServices
+                      children: secondRow
                           .map(
-                            (service) => Container(
+                            (s) => Container(
                               width: 70 * scale,
                               height: 80 * scale,
                               margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIconMobile(service, scale),
+                              child: _buildServiceIconMobile(s, scale),
                             ),
                           )
                           .toList(),
@@ -1156,67 +1172,54 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ── Item layanan versi WEB: lebar 90px, teks tidak terpotong ──
-  Widget _buildServiceIconWeb(ServiceIconData service) {
+  Widget _buildServiceIconMobile(ServiceIconData s, double scale) {
     return GestureDetector(
-      onTap: service.onTap,
-      child: SizedBox(
-        width: 90,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: service.color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(service.icon, size: 24, color: service.color),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              service.label,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 11,
-                color: Colors.grey[800],
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Item layanan versi MOBILE (tidak berubah) ──
-  Widget _buildServiceIconMobile(ServiceIconData service, double scale) {
-    return GestureDetector(
-      onTap: service.onTap,
+      onTap: s.onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Flexible(
             flex: 3,
-            child: Container(
-              width: 45 * scale,
-              height: 45 * scale,
-              decoration: BoxDecoration(
-                color: service.color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12 * scale),
-              ),
-              child: Icon(service.icon, size: 22 * scale, color: service.color),
+            child: Stack(
+              children: [
+                Container(
+                  width: 45 * scale,
+                  height: 45 * scale,
+                  decoration: BoxDecoration(
+                    color: s.color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12 * scale),
+                  ),
+                  child: Icon(s.icon, size: 22 * scale, color: s.color),
+                ),
+                if (s.badge != null && s.badge! > 0)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        s.badge! > 99 ? '99+' : '${s.badge}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           SizedBox(height: 6 * scale),
           Flexible(
             flex: 2,
             child: Text(
-              service.label,
+              s.label,
               style: TextStyle(
                 fontWeight: FontWeight.w500,
                 fontSize: 10 * scale,
@@ -1232,26 +1235,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  void _showComingSoonDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Coming Soon'),
-        content: const Text('Untuk saat ini masih dalam pengembangan.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Tutup'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────
-  // ACTIVITIES SECTION
-  // ─────────────────────────────────────────────
   Widget _buildActivitiesSection(double scale) {
     return Container(
       padding: EdgeInsets.all(16 * scale),
@@ -1373,22 +1356,16 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // TASKS & TIMESHEET (mobile: stacked, web: side-by-side via Row)
-  // ─────────────────────────────────────────────
-  Widget _buildTasksAndTimesheetSection(double scale) {
-    return Column(
-      children: [
-        _buildTasksSection(scale),
-        SizedBox(height: 12 * scale),
-        _buildTimesheetSection(scale),
-      ],
-    );
-  }
+  Widget _buildTasksAndTimesheetSection(double scale) => Column(
+    children: [
+      _buildTasksSection(scale),
+      SizedBox(height: 12 * scale),
+      _buildTimesheetSection(scale),
+    ],
+  );
 
   Widget _buildTasksSection(double scale) {
     return Container(
-      margin: EdgeInsets.only(bottom: 0),
       padding: EdgeInsets.all(16 * scale),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1529,9 +1506,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // ACTIVITY ITEM
-  // ─────────────────────────────────────────────
   Widget _buildActivityItem({
     required IconData icon,
     required String title,
@@ -1604,21 +1578,35 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     );
   }
 
-  // ─────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────
-  String _formatTime(String? timeString) {
-    if (timeString == null) return '-';
+  void _showComingSoonDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Coming Soon'),
+        content: const Text('Untuk saat ini masih dalam pengembangan.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(String? ts) {
+    if (ts == null) return '-';
     try {
-      final dateTime = DateTime.parse(timeString);
-      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return timeString;
+      final dt = DateTime.parse(ts);
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return ts;
     }
   }
 
-  String _formatStatus(String? status) {
-    switch (status) {
+  String _formatStatus(String? s) {
+    switch (s) {
       case 'on_time':
         return 'Tepat Waktu';
       case 'late':
@@ -1630,12 +1618,12 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       case 'overtime':
         return 'Lembur';
       default:
-        return status ?? '-';
+        return s ?? '-';
     }
   }
 
-  Color _getStatusColor(String? status) {
-    switch (status) {
+  Color _getStatusColor(String? s) {
+    switch (s) {
       case 'on_time':
         return Colors.green;
       case 'late':
@@ -1656,20 +1644,18 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   }
 }
 
-// ─────────────────────────────────────────────
-// ServiceIconData model
-// ─────────────────────────────────────────────
 class ServiceIconData {
   final IconData icon;
   final String label;
   final Color color;
   final VoidCallback? onTap;
-
+  final int? badge;
   ServiceIconData({
     required this.icon,
     required this.label,
     required this.color,
     this.onTap,
+    this.badge,
   });
 }
 
@@ -1678,6 +1664,11 @@ ServiceIconData _buildServiceIconData(
   String label,
   Color color, {
   VoidCallback? onTap,
-}) {
-  return ServiceIconData(icon: icon, label: label, color: color, onTap: onTap);
-}
+  int? badge,
+}) => ServiceIconData(
+  icon: icon,
+  label: label,
+  color: color,
+  onTap: onTap,
+  badge: badge,
+);
