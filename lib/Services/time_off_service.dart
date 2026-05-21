@@ -57,6 +57,10 @@ class TimeOffService {
     }
   }
 
+  /// Helper: baca value dari JSON yang bisa PascalCase atau camelCase
+  static dynamic _get(Map<String, dynamic> json, String key) =>
+      json[key[0].toUpperCase() + key.substring(1)] ?? json[key];
+
   // ── SUBMIT ─────────────────────────────────────────────────────────────────
   static Future<ApiResponse<int>> submitTimeOff(TimeOffRequest request) async {
     try {
@@ -70,7 +74,6 @@ class TimeOffService {
         'tanggalMulai': request.tanggalMulai.toIso8601String(),
         'tanggalSelesai': request.tanggalSelesai.toIso8601String(),
         'catatan': request.catatan,
-        // DL
         'jenisPekerjaan': request.jenisPekerjaan,
         'rabType': request.rabType,
         'nominalUangKantor': request.nominalUangKantor,
@@ -91,23 +94,22 @@ class TimeOffService {
         );
       }
 
-      final streamed = await mr.send();
-      final res = await http.Response.fromStream(streamed);
+      final res = await http.Response.fromStream(await mr.send());
       if (res.body.isEmpty) {
         return ApiResponse(success: false, message: 'Response kosong');
       }
 
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (res.statusCode == 200 && body['success'] == true) {
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
         return ApiResponse(
           success: true,
-          message: body['message'] ?? '',
-          data: body['data'] as int?,
+          message: (_get(body, 'message') ?? '') as String,
+          data: _get(body, 'data') as int?,
         );
       }
       return ApiResponse(
         success: false,
-        message: body['message'] ?? 'Terjadi kesalahan',
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
@@ -129,8 +131,6 @@ class TimeOffService {
       mr.fields['tanggalMulai'] = request.tanggalMulai.toIso8601String();
       mr.fields['tanggalSelesai'] = request.tanggalSelesai.toIso8601String();
       if (request.catatan != null) mr.fields['catatan'] = request.catatan!;
-
-      // DL
       if (request.jenisPekerjaan != null) {
         mr.fields['jenisPekerjaan'] = request.jenisPekerjaan!;
       }
@@ -161,16 +161,16 @@ class TimeOffService {
       }
 
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (res.statusCode == 200 && body['success'] == true) {
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
         return ApiResponse(
           success: true,
-          message: body['message'] ?? '',
-          data: body['data'] as Map<String, dynamic>?,
+          message: (_get(body, 'message') ?? '') as String,
+          data: _get(body, 'data') as Map<String, dynamic>?,
         );
       }
       return ApiResponse(
         success: false,
-        message: body['message'] ?? 'Terjadi kesalahan',
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
@@ -188,7 +188,6 @@ class TimeOffService {
 
       mr.fields['timeOffId'] = request.timeOffId.toString();
       mr.fields['userId'] = request.userId;
-
       mr.files.add(
         await http.MultipartFile.fromPath(
           'laporanFile',
@@ -209,8 +208,8 @@ class TimeOffService {
       final res = await http.Response.fromStream(await mr.send());
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
-        success: body['success'] == true,
-        message: body['message'] ?? '',
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
@@ -227,17 +226,23 @@ class TimeOffService {
         headers: await _jsonHeaders(),
         body: jsonEncode({'userId': userId}),
       );
+
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (res.statusCode == 200 && body['success'] == true) {
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data');
         return ApiResponse(
           success: true,
           message: '',
-          data: TimeOffListResponse.fromJson(body['data']),
+          data: TimeOffListResponse.fromJson(rawData as Map<String, dynamic>),
         );
       }
       return ApiResponse(
         success: false,
-        message: body['message'] ?? 'Terjadi kesalahan',
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
@@ -256,16 +261,16 @@ class TimeOffService {
         body: jsonEncode({'id': id, 'userId': userId}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (res.statusCode == 200 && body['success'] == true) {
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
         return ApiResponse(
           success: true,
-          message: body['message'] ?? '',
-          data: body['data'] as Map<String, dynamic>?,
+          message: (_get(body, 'message') ?? '') as String,
+          data: _get(body, 'data') as Map<String, dynamic>?,
         );
       }
       return ApiResponse(
         success: false,
-        message: body['message'] ?? 'Terjadi kesalahan',
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
@@ -289,7 +294,7 @@ class TimeOffService {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: false,
-        message: body['message'] ?? 'Gagal download',
+        message: (_get(body, 'message') ?? 'Gagal download') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
@@ -308,16 +313,18 @@ class TimeOffService {
         body: jsonEncode({'userId': userId, 'tahun': tahun}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (res.statusCode == 200 && body['success'] == true) {
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
         return ApiResponse(
           success: true,
           message: '',
-          data: AnnualQuota.fromJson(body['data']),
+          data: AnnualQuota.fromJson(
+            _get(body, 'data') as Map<String, dynamic>,
+          ),
         );
       }
       return ApiResponse(
         success: false,
-        message: body['message'] ?? 'Terjadi kesalahan',
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
       );
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');

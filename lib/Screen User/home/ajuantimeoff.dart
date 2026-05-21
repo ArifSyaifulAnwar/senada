@@ -1,5 +1,5 @@
 // screens/add_time_off_screen.dart — FULL REPLACE
-// ignore_for_file: curly_braces_in_flow_control_structures, use_build_context_synchronously, deprecated_member_use
+// ignore_for_file: use_build_context_synchronously, deprecated_member_use, curly_braces_in_flow_control_structures
 
 import 'dart:io' show File;
 
@@ -17,7 +17,6 @@ import '../fitur/ajukanreimbursement.dart';
 
 bool _isWideScreen(BuildContext ctx) => MediaQuery.of(ctx).size.width >= 768;
 
-// ── Jenis pekerjaan DL ──────────────────────────────────────────────────────
 const List<String> _jenisPekerjaanOptions = [
   'Legal',
   'IT',
@@ -58,12 +57,11 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
   bool _keepExistingFile = true;
   bool _isDownloadingFile = false;
 
-  // ── DL fields ──────────────────────────────────────────────────────────────
+  // DL
   String? _selectedJenisPekerjaan;
-  String? _selectedRabType; // 'reimbursement' | 'uang_kantor' | null
+  String? _selectedRabType;
   final List<_ReimburseRow> _reimburseRows = [];
 
-  // ── Jenis list ─────────────────────────────────────────────────────────────
   final List<Map<String, dynamic>> _jenisTimeOff = [
     {
       'value': 'Izin Tahunan',
@@ -109,26 +107,16 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     },
   ];
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
   bool get _isDinasLuar => _selectedJenis == 'Dinas Luar';
 
-  bool _isFileRequired() =>
-      _selectedJenis == 'Sakit' || _selectedJenis == 'Izin Khusus';
+  bool _isFileRequired() => _selectedJenis == 'Sakit';
 
   String _fileUploadInfo() {
     if (_selectedJenis == 'Sakit') return 'Upload surat dokter (WAJIB)';
-    if (_selectedJenis == null) {
+    if (_selectedJenis == null)
       return 'Pilih jenis izin untuk melihat persyaratan file';
-    }
     return 'Upload dokumen pendukung (OPSIONAL)';
   }
-
-  // ignore: unused_element
-  double _getResponsiveFontSize(BuildContext ctx, double base) =>
-      (base * (MediaQuery.of(ctx).size.width / 375)).clamp(
-        base * 0.85,
-        base * 1.15,
-      );
 
   double _getResponsivePadding(BuildContext ctx, double base) =>
       (base * (MediaQuery.of(ctx).size.width / 375)).clamp(
@@ -153,9 +141,8 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     _catatanCtrl.text = d.catatan ?? '';
     _selectedJenisPekerjaan = d.jenisPekerjaan;
     _selectedRabType = d.rabType;
-    if (d.nominalUangKantor != null) {
+    if (d.nominalUangKantor != null)
       _nominalKantorCtrl.text = d.nominalUangKantor!.toStringAsFixed(0);
-    }
     if (d.reimbursementItems != null) {
       for (final item in d.reimbursementItems!) {
         _reimburseRows.add(
@@ -381,7 +368,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           _buildSectionTitle('Catatan & Alasan', Icons.note_alt_rounded),
           const SizedBox(height: 12),
           _buildCatatanField(),
-          // ── DL section ─────────────────────────────────────────────────
           if (_isDinasLuar) ...[const SizedBox(height: 24), _buildDlSection()],
           const SizedBox(height: 24),
           _buildFileSection(),
@@ -399,7 +385,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Kolom kiri
         SizedBox(
           width: 360,
           child: Container(
@@ -423,7 +408,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
             ),
           ),
         ),
-        // Kolom kanan
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -480,8 +464,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
       children: [
         _buildSectionTitle('Detail Dinas Luar', Icons.work_outline_rounded),
         const SizedBox(height: 12),
-
-        // Jenis pekerjaan dropdown
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           decoration: BoxDecoration(
@@ -504,26 +486,20 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
             ),
           ),
         ),
-
         const SizedBox(height: 16),
-
-        // RAB type
         _buildSectionTitle(
           'Rencana Anggaran Biaya',
           Icons.account_balance_wallet_outlined,
         ),
         const SizedBox(height: 8),
-        Row(
+        Wrap(
+          spacing: 10,
           children: [
             _buildRabChip('reimbursement', '💸 Reimbursement'),
-            const SizedBox(width: 10),
             _buildRabChip('uang_kantor', '🏢 Uang Kantor'),
-            const SizedBox(width: 10),
             _buildRabChip(null, '❌ Tidak Ada'),
           ],
         ),
-
-        // Uang kantor nominal
         if (_selectedRabType == 'uang_kantor') ...[
           const SizedBox(height: 12),
           Container(
@@ -546,8 +522,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
             ),
           ),
         ],
-
-        // Reimbursement items
         if (_selectedRabType == 'reimbursement') ...[
           const SizedBox(height: 12),
           Container(
@@ -592,8 +566,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
             ),
           ),
         ],
-
-        // Info multi-step approval
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(12),
@@ -719,8 +691,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     ),
   );
 
-  // ── Shared Widgets (preserved from original) ───────────────────────────────
-
+  // ── Header Banner ──────────────────────────────────────────────────────────
   Widget _buildHeaderBanner(Color accent) {
     return Container(
       width: double.infinity,
@@ -826,7 +797,6 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           return InkWell(
             onTap: () => setState(() {
               _selectedJenis = jenis['value'];
-              // Reset DL fields when switching away
               if (_selectedJenis != 'Dinas Luar') {
                 _selectedJenisPekerjaan = null;
                 _selectedRabType = null;
@@ -989,6 +959,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     ),
   );
 
+  // ── File Section ───────────────────────────────────────────────────────────
   Widget _buildFileSection() {
     final isRequired = _isFileRequired();
     return Column(
@@ -1125,11 +1096,9 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     );
   }
 
-  // ── (file preview widgets identical to original — paste from original) ─────
   Widget _buildExistingFilePreview() {
-    if (!_hasExistingFile || _existingFileName == null) {
+    if (!_hasExistingFile || _existingFileName == null)
       return const SizedBox.shrink();
-    }
     final ext = _existingFileName!.split('.').last.toLowerCase();
     IconData icon;
     Color iconColor;
@@ -1285,6 +1254,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
               icon: Icon(Icons.close, color: Colors.red[600], size: 18),
               onPressed: () => setState(() {
                 _selectedImage = null;
+                _selectedImageSize = 0;
                 if (_isEditMode && _hasExistingFile) _keepExistingFile = true;
               }),
               padding: EdgeInsets.zero,
@@ -1347,12 +1317,11 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     ),
   );
 
-  // ── Utility methods (preserved from original) ──────────────────────────────
+  // ── Utilities ──────────────────────────────────────────────────────────────
 
   int _calculateDays() {
-    if (_tanggalMulai != null && _tanggalSelesai != null) {
+    if (_tanggalMulai != null && _tanggalSelesai != null)
       return _tanggalSelesai!.difference(_tanggalMulai!).inDays + 1;
-    }
     return 0;
   }
 
@@ -1376,18 +1345,16 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
         child: child!,
       ),
     );
-    if (picked != null) {
+    if (picked != null)
       setState(() {
         if (isStartDate) {
           _tanggalMulai = picked;
-          if (_tanggalSelesai != null && _tanggalSelesai!.isBefore(picked)) {
+          if (_tanggalSelesai != null && _tanggalSelesai!.isBefore(picked))
             _tanggalSelesai = null;
-          }
         } else {
           _tanggalSelesai = picked;
         }
       });
-    }
   }
 
   Future<void> _downloadExistingFile() async {
@@ -1467,6 +1434,9 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
                 'Kamera',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
+              subtitle: Text(
+                kIsWeb ? 'Ambil foto (browser)' : 'Ambil foto dari kamera',
+              ),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickFromCamera();
@@ -1484,6 +1454,9 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
               title: const Text(
                 'Galeri',
                 style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                kIsWeb ? 'Pilih gambar (JPG, PNG)' : 'Pilih foto dari galeri',
               ),
               onTap: () {
                 Navigator.pop(ctx);
@@ -1503,6 +1476,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
                 'File Dokumen',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
+              subtitle: const Text('Pilih file PDF, JPG, atau PNG'),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickFromFiles();
@@ -1523,9 +1497,8 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
         allowMultiple: false,
         withData: true,
       );
-      if (r != null && r.files.isNotEmpty) {
+      if (r != null && r.files.isNotEmpty)
         await _validateAndSetFileFromPicker(r.files.first);
-      }
     } else {
       final img = await ImagePicker().pickImage(
         source: ImageSource.gallery,
@@ -1544,9 +1517,8 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
         allowMultiple: false,
         withData: true,
       );
-      if (r != null && r.files.isNotEmpty) {
+      if (r != null && r.files.isNotEmpty)
         await _validateAndSetFileFromPicker(r.files.first);
-      }
     } else {
       final img = await ImagePicker().pickImage(
         source: ImageSource.camera,
@@ -1567,9 +1539,9 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     );
     if (r != null && r.files.isNotEmpty) {
       final f = r.files.first;
-      if (kIsWeb) {
+      if (kIsWeb)
         await _validateAndSetFileFromPicker(f);
-      } else if (f.path != null)
+      else if (f.path != null)
         await _validateAndSetFile(XFile(f.path!));
       else if (f.bytes != null)
         await _validateAndSetFileFromPicker(f);
@@ -1642,7 +1614,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     }
   }
 
-  // ── Notifications (unchanged from original) ────────────────────────────────
+  // ── Notifications ──────────────────────────────────────────────────────────
 
   Future<void> _initializeNotifications() async {
     const init = InitializationSettings(
@@ -1741,7 +1713,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
       title,
       body,
       NotificationDetails(
-        android: AndroidNotificationDetails(
+        android: const AndroidNotificationDetails(
           'timeoff_channel',
           'Time Off Notifications',
           channelDescription: 'Notifikasi pengajuan izin',
@@ -1760,14 +1732,14 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
 
   Future<bool> _checkNotificationPermission() async {
     try {
-      if (Theme.of(context).platform == TargetPlatform.android) {
+      if (Theme.of(context).platform == TargetPlatform.android)
         return (await Permission.notification.status).isGranted;
-      }
     } catch (_) {}
     return false;
   }
 
   // ── SnackBars ──────────────────────────────────────────────────────────────
+
   void _showSnackBar(String msg, {required bool isError}) =>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1814,7 +1786,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
   }
 }
 
-// ── Helper class untuk baris reimbursement ────────────────────────────────────
+// ── Helper class ───────────────────────────────────────────────────────────────
 class _ReimburseRow {
   final TextEditingController namaCtrl;
   final TextEditingController nominalCtrl;
