@@ -1,7 +1,4 @@
-// screens/org_approval_screen.dart — FILE BARU
-// Screen untuk user approve/reject DL dari divisi yang sama
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
-
 import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -40,19 +37,22 @@ class PendingOrgItem {
     required this.daysWaiting,
   });
 
+  // ── FIX: pakai tryParse + fallback untuk semua DateTime ──────────────────
+  static DateTime _parseDate(dynamic v) {
+    if (v == null) return DateTime.now();
+    return DateTime.tryParse(v.toString()) ?? DateTime.now();
+  }
+
   factory PendingOrgItem.fromJson(Map<String, dynamic> j) => PendingOrgItem(
-    id: (j['id'] ?? j['Id']) as int,
+    id: (j['id'] ?? j['Id'] ?? 0) as int,
     userId: j['userId']?.toString() ?? j['userid']?.toString() ?? '',
     userName: j['userName']?.toString() ?? j['user_name']?.toString() ?? '',
     userJob: j['userJob']?.toString() ?? j['user_job']?.toString(),
     jenisTimeOff:
         j['jenisTimeOff']?.toString() ?? j['jenis_timeoff']?.toString() ?? '',
-    tanggalMulai: DateTime.parse(
-      (j['tanggalMulai'] ?? j['tanggal_mulai']).toString(),
-    ),
-    tanggalSelesai: DateTime.parse(
-      (j['tanggalSelesai'] ?? j['tanggal_selesai']).toString(),
-    ),
+    // ← FIX: tryParse bukan parse — tidak crash kalau null
+    tanggalMulai: _parseDate(j['tanggalMulai'] ?? j['tanggal_mulai']),
+    tanggalSelesai: _parseDate(j['tanggalSelesai'] ?? j['tanggal_selesai']),
     totalHari: (j['totalHari'] ?? j['total_hari'] ?? 0) as int,
     catatan: j['catatan']?.toString(),
     jenisPekerjaan:
@@ -66,9 +66,9 @@ class PendingOrgItem {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════════════
 // OrgApprovalScreen
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════════════
 class OrgApprovalScreen extends StatefulWidget {
   final String userId;
   const OrgApprovalScreen({super.key, required this.userId});
@@ -81,7 +81,6 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
   List<PendingOrgItem> _items = [];
   bool _isLoading = true;
   String _errorMsg = '';
-  // id yang sedang diproses
   int _processingId = -1;
 
   @override
@@ -89,8 +88,6 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     super.initState();
     _load();
   }
-
-  // ── Load data ─────────────────────────────────────────────────────────────
 
   Future<void> _load() async {
     setState(() {
@@ -100,18 +97,22 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     try {
       final res = await TimeOffService.getPendingOrgReview(widget.userId);
       if (res.success && res.data != null) {
-        setState(() => _items = res.data!);
+        // Parse setiap item dari raw data
+        final rawList = res.data as List<dynamic>? ?? [];
+        final items = rawList.map((e) {
+          if (e is PendingOrgItem) return e;
+          return PendingOrgItem.fromJson(e as Map<String, dynamic>);
+        }).toList();
+        setState(() => _items = items);
       } else {
         setState(() => _errorMsg = res.message);
       }
     } catch (e) {
-      setState(() => _errorMsg = 'Terjadi kesalahan: $e');
+      setState(() => _errorMsg = 'Koneksi bermasalah: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // ── Approve / Reject ──────────────────────────────────────────────────────
 
   Future<void> _approve(PendingOrgItem item) async {
     final confirm = await _showConfirmDialog(
@@ -161,40 +162,37 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     }
   }
 
-  // ── Dialogs ───────────────────────────────────────────────────────────────
-
   Future<bool> _showConfirmDialog({
     required String title,
     required String content,
     required String confirmLabel,
     required Color confirmColor,
-  }) async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(title),
-            content: Text(content),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Batal'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: confirmColor,
-                  foregroundColor: Colors.white,
-                ),
-                child: Text(confirmLabel),
-              ),
-            ],
+  }) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-        ) ??
-        false;
-  }
+          title: Text(title),
+          content: Text(content),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: confirmColor,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(confirmLabel),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
   Future<String?> _showRejectDialog(String name) async {
     final ctrl = TextEditingController();
@@ -246,8 +244,6 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     ctrl.dispose();
     return result;
   }
-
-  // ── BUILD ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -325,13 +321,8 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
       );
     }
 
-    if (_errorMsg.isNotEmpty) {
-      return _buildErrorState();
-    }
-
-    if (_items.isEmpty) {
-      return _buildEmptyState();
-    }
+    if (_errorMsg.isNotEmpty) return _buildErrorState();
+    if (_items.isEmpty) return _buildEmptyState();
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -440,11 +431,8 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     ),
   );
 
-  // ── Card ──────────────────────────────────────────────────────────────────
-
   Widget _buildCard(PendingOrgItem item) {
     final isProcessing = _processingId == item.id;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
@@ -464,10 +452,9 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header: user info ──────────────────────────────────────
+            // Header
             Row(
               children: [
-                // Avatar inisial
                 Container(
                   width: 44,
                   height: 44,
@@ -501,7 +488,7 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
                           color: Color(0xFF1F2937),
                         ),
                       ),
-                      if (item.userJob != null && item.userJob!.isNotEmpty)
+                      if (item.userJob?.isNotEmpty == true)
                         Text(
                           item.userJob!,
                           style: const TextStyle(
@@ -512,7 +499,6 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
                     ],
                   ),
                 ),
-                // Badge waiting days
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -544,10 +530,8 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
                 ),
               ],
             ),
-
             const SizedBox(height: 14),
-
-            // ── Detail izin ────────────────────────────────────────────
+            // Detail
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -583,16 +567,14 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
                           ? '💸 Reimbursement'
                           : '🏢 Uang Kantor',
                       item.nominalUangKantor != null
-                          ? 'Rp ${_formatNumber(item.nominalUangKantor!)}'
+                          ? 'Rp ${_fmt(item.nominalUangKantor!)}'
                           : null,
                     ),
                   ],
                 ],
               ),
             ),
-
-            // ── Catatan ────────────────────────────────────────────────
-            if (item.catatan != null && item.catatan!.isNotEmpty) ...[
+            if (item.catatan?.isNotEmpty == true) ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
@@ -625,10 +607,8 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
                 ),
               ),
             ],
-
             const SizedBox(height: 14),
-
-            // ── Action buttons ─────────────────────────────────────────
+            // Buttons
             if (isProcessing)
               const Center(
                 child: Padding(
@@ -643,7 +623,6 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
             else
               Row(
                 children: [
-                  // Tolak
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _reject(item),
@@ -663,7 +642,6 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // Setujui
                   Expanded(
                     flex: 2,
                     child: ElevatedButton.icon(
@@ -697,40 +675,36 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     String label,
     String? value, {
     bool bold = false,
-  }) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: const Color(0xFF0284C7)),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: bold ? FontWeight.w600 : FontWeight.w500,
-            color: const Color(0xFF0369A1),
+  }) => Row(
+    children: [
+      Icon(icon, size: 14, color: const Color(0xFF0284C7)),
+      const SizedBox(width: 6),
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: bold ? FontWeight.w600 : FontWeight.w500,
+          color: const Color(0xFF0369A1),
+        ),
+      ),
+      if (value != null) ...[
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF374151)),
           ),
         ),
-        if (value != null) ...[
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF374151)),
-            ),
-          ),
-        ],
       ],
-    );
-  }
+    ],
+  );
 
-  String _formatNumber(double val) {
-    return val
-        .toStringAsFixed(0)
-        .replaceAllMapped(
-          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-          (m) => '${m[1]}.',
-        );
-  }
+  String _fmt(double v) => v
+      .toStringAsFixed(0)
+      .replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (m) => '${m[1]}.',
+      );
 
   void _snack(
     String msg, {

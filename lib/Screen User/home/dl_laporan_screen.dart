@@ -1,4 +1,4 @@
-// screens/dl_laporan_screen.dart — FULL FINAL
+// screens/dl_laporan_screen.dart — FULL REPLACE
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
 import 'dart:io' show File;
@@ -12,11 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// DlLaporanScreen
-// Upload laporan hasil kerja + laporan anggaran setelah Dinas Luar selesai.
-// Status 'Menunggu Laporan' → submit → status 'Approved'
-// ═══════════════════════════════════════════════════════════════════════════════
 class DlLaporanScreen extends StatefulWidget {
   final TimeOffModel timeOff;
   final String userId;
@@ -49,7 +44,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
   }
 
   Future<_PickedFile?> _pickAnyFile(String label) async {
-    // Tampilkan pilihan sumber
     final source = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -79,6 +73,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
               ),
             ),
             const Divider(),
+            // Kamera hanya di mobile native
             if (!kIsWeb)
               ListTile(
                 leading: Container(
@@ -134,7 +129,8 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     if (source == null) return null;
 
     try {
-      if (source == 'camera') {
+      // ── Kamera (mobile only) ────────────────────────────────────────────
+      if (source == 'camera' && !kIsWeb) {
         final img = await ImagePicker().pickImage(
           source: ImageSource.camera,
           maxWidth: 1920,
@@ -142,74 +138,52 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
           imageQuality: 85,
         );
         if (img == null) return null;
-        final size = await File(img.path).length();
-        if (!_validateSize(img.name, size)) return null;
+        final bytes = await img.readAsBytes();
+        if (!_validateSize(img.name, bytes.length)) return null;
         return _PickedFile(
-          name: img.name.isEmpty ? img.path.split('/').last : img.name,
-          path: img.path,
-          size: size,
+          name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
+          bytes: bytes,
+          size: bytes.length,
         );
       }
 
+      // ── Galeri ──────────────────────────────────────────────────────────
       if (source == 'gallery') {
-        if (kIsWeb) {
-          final r = await FilePicker.platform.pickFiles(
-            type: FileType.custom,
-            allowedExtensions: ['jpg', 'jpeg', 'png'],
-            allowMultiple: false,
-            withData: true,
-          );
-          if (r == null || r.files.isEmpty) return null;
-          final f = r.files.first;
-          if (!_validateSize(f.name, f.bytes?.length ?? 0)) return null;
-          return _PickedFile(
-            name: f.name,
-            bytes: f.bytes,
-            size: f.bytes?.length ?? 0,
-          );
-        } else {
-          final img = await ImagePicker().pickImage(
-            source: ImageSource.gallery,
-            maxWidth: 1920,
-            maxHeight: 1080,
-            imageQuality: 85,
-          );
-          if (img == null) return null;
-          final size = await File(img.path).length();
-          if (!_validateSize(img.name, size)) return null;
-          return _PickedFile(
-            name: img.name.isEmpty ? img.path.split('/').last : img.name,
-            path: img.path,
-            size: size,
-          );
-        }
+        final img = await ImagePicker().pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1920,
+          maxHeight: 1080,
+          imageQuality: 85,
+        );
+        if (img == null) return null;
+        final bytes = await img
+            .readAsBytes(); // ← readAsBytes support semua platform
+        if (!_validateSize(img.name, bytes.length)) return null;
+        return _PickedFile(
+          name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
+          bytes: bytes,
+          size: bytes.length,
+        );
       }
 
-      // document
+      // ── Document (FilePicker) ────────────────────────────────────────────
       final r = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
         allowMultiple: false,
-        withData: kIsWeb,
+        withData: true, // ← selalu minta bytes agar support web & mobile
       );
       if (r == null || r.files.isEmpty) return null;
       final f = r.files.first;
-      if (kIsWeb) {
-        if (!_validateSize(f.name, f.bytes?.length ?? 0)) return null;
-        return _PickedFile(
-          name: f.name,
-          bytes: f.bytes,
-          size: f.bytes?.length ?? 0,
-        );
-      } else {
-        if (f.path == null) {
-          _snack('Tidak dapat mengakses file', err: true);
-          return null;
-        }
-        final size = await File(f.path!).length();
-        if (!_validateSize(f.name, size)) return null;
-        return _PickedFile(name: f.name, path: f.path, size: size);
+      final bytes =
+          f.bytes ??
+          (f.path != null ? await File(f.path!).readAsBytes() : null);
+      if (bytes == null) {
+        _snack('Tidak dapat membaca file', err: true);
+        return null;
       }
+      if (!_validateSize(f.name, bytes.length)) return null;
+      return _PickedFile(name: f.name, bytes: bytes, size: bytes.length);
     } catch (e) {
       _snack('Gagal memilih file: $e', err: true);
       return null;
@@ -229,7 +203,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     return true;
   }
 
-  // ── Submit ────────────────────────────────────────────────────────────────
+  // ── Submit — bekerja di semua platform ───────────────────────────────────
 
   Future<void> _submit() async {
     if (_laporanFile == null) {
@@ -241,30 +215,16 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
       return;
     }
 
-    if (kIsWeb) {
-      _snack(
-        'Upload laporan belum didukung di web. Gunakan aplikasi mobile.',
-        err: true,
-      );
-      return;
-    }
-
-    if (_laporanFile!.path == null) {
-      _snack('Path file laporan tidak tersedia', err: true);
-      return;
-    }
-    if (_anggaranFile!.path == null) {
-      _snack('Path file anggaran tidak tersedia', err: true);
-      return;
-    }
-
     setState(() => _isLoading = true);
     try {
+      // Kirim via bytes (support web & mobile)
       final req = DlLaporanRequest(
         timeOffId: widget.timeOff.id!,
         userId: widget.userId,
-        laporanFile: File(_laporanFile!.path!),
-        anggaranFile: File(_anggaranFile!.path!),
+        laporanBytes: _laporanFile!.bytes,
+        laporanFileName: _laporanFile!.name,
+        anggaranBytes: _anggaranFile!.bytes,
+        anggaranFileName: _anggaranFile!.name,
       );
       final res = await TimeOffService.submitDlLaporan(req);
       if (res.success) {
@@ -326,7 +286,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Info card ──────────────────────────────────────────────────
+            // Info card
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -366,7 +326,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _infoRow(Icons.work_outline, to.jenisPekerjaan ?? '-'),
                         const SizedBox(height: 6),
@@ -394,7 +353,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
             const SizedBox(height: 20),
 
-            // ── Step info ──────────────────────────────────────────────────
+            // Step info
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -422,7 +381,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Upload laporan kerja ───────────────────────────────────────
             _buildUploadCard(
               label: 'Laporan Hasil Kerja',
               description: 'Upload laporan / hasil pekerjaan selama Dinas Luar',
@@ -435,7 +393,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
             const SizedBox(height: 16),
 
-            // ── Upload laporan anggaran ────────────────────────────────────
             _buildUploadCard(
               label: 'Laporan Anggaran Biaya',
               description: 'Upload rincian biaya / bukti pengeluaran selama DL',
@@ -448,7 +405,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
             const SizedBox(height: 32),
 
-            // ── Submit button ──────────────────────────────────────────────
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -504,7 +460,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
               ),
             ),
 
-            // ── Keterangan ────────────────────────────────────────────────
             const SizedBox(height: 12),
             const Center(
               child: Text(
@@ -523,8 +478,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
       ),
     );
   }
-
-  // ── Upload card ───────────────────────────────────────────────────────────
 
   Widget _buildUploadCard({
     required String label,
@@ -558,7 +511,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
@@ -623,7 +575,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                     ],
                   ),
                 ),
-                // Status icon
                 if (file != null)
                   Container(
                     padding: const EdgeInsets.all(4),
@@ -636,8 +587,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
               ],
             ),
           ),
-
-          // Body
           Padding(
             padding: const EdgeInsets.all(14),
             child: file == null
@@ -681,89 +630,83 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                       ),
                     ),
                   )
-                : _buildFilePreviewRow(file, color, onTap, onRemove),
+                : _filePreview(file, color, onTap, onRemove),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFilePreviewRow(
+  Widget _filePreview(
     _PickedFile file,
     Color color,
     VoidCallback onTap,
     VoidCallback onRemove,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.04),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.15)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
+  ) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.04),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: color.withOpacity(0.15)),
+    ),
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(_extIcon(file.ext), color: color, size: 22),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                file.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                _sizeLabel(file.size),
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(8),
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(_extIcon(file.ext), color: color, size: 22),
+            child: Icon(Icons.refresh, color: color, size: 16),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  file.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  _sizeLabel(file.size),
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                ),
-              ],
+        ),
+        const SizedBox(width: 6),
+        GestureDetector(
+          onTap: onRemove,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.red[50],
+              borderRadius: BorderRadius.circular(6),
             ),
+            child: Icon(Icons.close, color: Colors.red[600], size: 16),
           ),
-          const SizedBox(width: 8),
-          // Ganti
-          GestureDetector(
-            onTap: onTap,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Icon(Icons.refresh, color: color, size: 16),
-            ),
-          ),
-          const SizedBox(width: 6),
-          // Hapus
-          GestureDetector(
-            onTap: onRemove,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.red[50],
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Icon(Icons.close, color: Colors.red[600], size: 16),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
+        ),
+      ],
+    ),
+  );
 
   Widget _infoRow(IconData icon, String text) => Row(
     children: [
@@ -831,19 +774,12 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
   );
 }
 
-// ── Helper data class ─────────────────────────────────────────────────────────
 class _PickedFile {
   final String name;
-  final String? path; // mobile
-  final Uint8List? bytes; // web
+  final Uint8List? bytes; // ← semua platform pakai bytes
   final int size;
 
-  const _PickedFile({
-    required this.name,
-    this.path,
-    this.bytes,
-    required this.size,
-  });
+  const _PickedFile({required this.name, this.bytes, required this.size});
 
   String get ext =>
       name.contains('.') ? name.split('.').last.toLowerCase() : '';

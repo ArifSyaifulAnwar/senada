@@ -1,3 +1,5 @@
+// ignore_for_file: curly_braces_in_flow_control_structures
+
 import 'package:excel/excel.dart' as ex;
 import 'package:intl/intl.dart';
 import '../../Screen admin/model/admin_attendance_model.dart';
@@ -6,6 +8,9 @@ class ExcelExportService {
   static List<int>? buildAbsensiExcel(
     List<AdminAttendanceData> data, {
     String? periodLabel,
+
+    /// Key: "yyyy-MM-dd_userid" (lowercase) → "ikut" | "tidak" | ""
+    Map<String, String>? doaMap,
   }) {
     final excel = ex.Excel.createExcel();
     const sheetName = 'Data Absensi';
@@ -14,7 +19,7 @@ class ExcelExportService {
     excel.delete('Sheet1');
     excel.setDefaultSheet(sheetName);
 
-    // ── Warna ─────────────────────────────────────────
+    // ── Warna ────────────────────────────────────────────────────────────
     const headerBg = '#1E3A5F';
     const subHeaderBg = '#2E86C1';
     const altRowBg = '#EBF5FB';
@@ -22,13 +27,12 @@ class ExcelExportService {
     const headerFg = '#FFFFFF';
     const borderHex = '#AED6F1';
 
-    // ── Helper border ─────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────
     ex.Border thinBorder() => ex.Border(
       borderStyle: ex.BorderStyle.Thin,
       borderColorHex: ex.ExcelColor.fromHexString(borderHex),
     );
 
-    // ── Helper CellStyle ──────────────────────────────
     ex.CellStyle makeStyle({
       String bgColor = whiteBg,
       String fontColor = '#000000',
@@ -57,7 +61,8 @@ class ExcelExportService {
       );
     }
 
-    // ── BARIS 1: Judul ────────────────────────────────
+    // ── Row 1: Judul ─────────────────────────────────────────────────────
+    // Sekarang ada 8 kolom: No|Nama|Dept|Tanggal|Jam Masuk|Jam Keluar|Status|doa
     sheet.cell(ex.CellIndex.indexByString('A1')).value = ex.TextCellValue(
       'LAPORAN DATA ABSENSI KARYAWAN',
     );
@@ -71,10 +76,10 @@ class ExcelExportService {
     );
     sheet.merge(
       ex.CellIndex.indexByString('A1'),
-      ex.CellIndex.indexByString('G1'),
+      ex.CellIndex.indexByString('H1'),
     );
 
-    // ── BARIS 2: Periode + tanggal cetak ─────────────
+    // ── Row 2: Periode + Dicetak ─────────────────────────────────────────
     final now = DateTime.now();
     final period =
         periodLabel ?? 'Per ${DateFormat('dd MMMM yyyy', 'id_ID').format(now)}';
@@ -89,7 +94,6 @@ class ExcelExportService {
       hAlign: ex.HorizontalAlign.Center,
       hasBorder: false,
     );
-
     sheet.cell(ex.CellIndex.indexByString('A2')).value = ex.TextCellValue(
       'Periode: $period',
     );
@@ -105,13 +109,13 @@ class ExcelExportService {
     sheet.cell(ex.CellIndex.indexByString('E2')).cellStyle = subInfoStyle;
     sheet.merge(
       ex.CellIndex.indexByString('E2'),
-      ex.CellIndex.indexByString('G2'),
+      ex.CellIndex.indexByString('H2'),
     );
 
-    // ── BARIS 3: Spacer ───────────────────────────────
+    // ── Row 3: Spacer ────────────────────────────────────────────────────
     sheet.cell(ex.CellIndex.indexByString('A3')).value = ex.TextCellValue('');
 
-    // ── BARIS 4: Header kolom ─────────────────────────
+    // ── Row 4: Header kolom (sekarang 8 kolom + kolom doa) ──────────────
     const headers = [
       'No',
       'Nama Karyawan',
@@ -120,8 +124,8 @@ class ExcelExportService {
       'Jam Masuk',
       'Jam Keluar',
       'Status',
+      'doa',
     ];
-
     final headerStyle = makeStyle(
       bgColor: subHeaderBg,
       fontColor: headerFg,
@@ -129,7 +133,6 @@ class ExcelExportService {
       fontSize: 10,
       hAlign: ex.HorizontalAlign.Center,
     );
-
     for (int col = 0; col < headers.length; col++) {
       final cell = sheet.cell(
         ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 3),
@@ -138,173 +141,432 @@ class ExcelExportService {
       cell.cellStyle = headerStyle;
     }
 
-    // ── BARIS 5+: Data ────────────────────────────────
-    for (int i = 0; i < data.length; i++) {
-      final d = data[i];
-      final rowBg = i % 2 == 0 ? whiteBg : altRowBg;
-      final rowIndex = i + 4;
-
-      final baseStyle = makeStyle(bgColor: rowBg);
-      final centerStyle = makeStyle(
-        bgColor: rowBg,
-        hAlign: ex.HorizontalAlign.Center,
-      );
-      final statusStyle = _statusCellStyle(d.displayStatus, rowBg, borderHex);
-
-      void setCell(int col, ex.CellValue value, ex.CellStyle style) {
-        final cell = sheet.cell(
-          ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIndex),
-        );
-        cell.value = value;
-        cell.cellStyle = style;
-      }
-
-      setCell(0, ex.IntCellValue(i + 1), centerStyle);
-      setCell(1, ex.TextCellValue(d.userName), baseStyle);
-      setCell(2, ex.TextCellValue(d.department ?? '-'), baseStyle);
-      setCell(3, ex.TextCellValue(_formatDate(d.attendanceDate)), centerStyle);
-      setCell(4, ex.TextCellValue(d.formattedCheckIn), centerStyle);
-      setCell(5, ex.TextCellValue(d.formattedCheckOut), centerStyle);
-      setCell(6, ex.TextCellValue(d.displayStatus), statusStyle);
-    }
-
-    // ── FOOTER: Summary ───────────────────────────────
-    final spacerRow = data.length + 5;
-    final summaryRow = spacerRow + 1;
-
-    sheet
-        .cell(
-          ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: spacerRow),
-        )
-        .value = ex.TextCellValue(
-      '',
-    );
-
-    final summaryLabelStyle = makeStyle(
-      bgColor: headerBg,
-      fontColor: headerFg,
-      bold: true,
-      fontSize: 9,
-      hAlign: ex.HorizontalAlign.Center,
-    );
-    final summaryValStyle = makeStyle(
-      bgColor: altRowBg,
-      bold: true,
-      fontSize: 9,
-      hAlign: ex.HorizontalAlign.Center,
-    );
-
-    final tepatWaktu = data
-        .where((d) => d.displayStatus.toLowerCase().contains('tepat'))
-        .length;
-    final terlambat = data
-        .where((d) => d.displayStatus.toLowerCase().contains('terlambat'))
-        .length;
-    final cuti = data
-        .where((d) => d.displayStatus.toLowerCase().contains('cuti'))
-        .length;
-    final tidakHadir = data
-        .where(
-          (d) =>
-              d.displayStatus.toLowerCase().contains('tidak hadir') ||
-              d.displayStatus.toLowerCase().contains('absent'),
-        )
-        .length;
-
-    final summaryLabels = [
-      'Total Data',
-      'Tepat Waktu',
-      'Terlambat',
-      'Cuti',
-      'Tidak Hadir',
-    ];
-    final summaryValues = [
-      data.length.toString(),
-      tepatWaktu.toString(),
-      terlambat.toString(),
-      cuti.toString(),
-      tidakHadir.toString(),
-    ];
-
-    for (int col = 0; col < summaryLabels.length; col++) {
-      sheet
-          .cell(
-            ex.CellIndex.indexByColumnRow(
-              columnIndex: col + 1,
-              rowIndex: summaryRow,
-            ),
-          )
-          .value = ex.TextCellValue(
-        summaryLabels[col],
-      );
-      sheet
-              .cell(
-                ex.CellIndex.indexByColumnRow(
-                  columnIndex: col + 1,
-                  rowIndex: summaryRow,
-                ),
-              )
-              .cellStyle =
-          summaryLabelStyle;
-
-      sheet
-          .cell(
-            ex.CellIndex.indexByColumnRow(
-              columnIndex: col + 1,
-              rowIndex: summaryRow + 1,
-            ),
-          )
-          .value = ex.TextCellValue(
-        summaryValues[col],
-      );
-      sheet
-              .cell(
-                ex.CellIndex.indexByColumnRow(
-                  columnIndex: col + 1,
-                  rowIndex: summaryRow + 1,
-                ),
-              )
-              .cellStyle =
-          summaryValStyle;
-    }
-
-    // ── Lebar kolom ───────────────────────────────────
+    // ── Lebar kolom ──────────────────────────────────────────────────────
     sheet.setColumnWidth(0, 6);
     sheet.setColumnWidth(1, 28);
     sheet.setColumnWidth(2, 18);
     sheet.setColumnWidth(3, 16);
     sheet.setColumnWidth(4, 12);
     sheet.setColumnWidth(5, 12);
-    sheet.setColumnWidth(6, 18);
+    sheet.setColumnWidth(6, 22);
+    sheet.setColumnWidth(7, 10); // doa
 
-    // ── Tinggi baris ──────────────────────────────────
+    // ── Tinggi baris header ──────────────────────────────────────────────
     sheet.setRowHeight(0, 28);
     sheet.setRowHeight(1, 18);
     sheet.setRowHeight(3, 22);
 
+    // ── Kelompokkan per karyawan ─────────────────────────────────────────
+    // Pertahankan urutan asli dari data
+    final grouped = <String, List<AdminAttendanceData>>{};
+    for (final d in data) {
+      grouped.putIfAbsent(d.userId, () => []).add(d);
+    }
+
+    // Deteksi mode: per-hari (semua karyawan 1 record) vs multi-hari
+    // Kalau max record per karyawan == 1 → mode per-hari → tidak perlu summary per karyawan
+    final maxPerKaryawan = grouped.values
+        .map((v) => v.length)
+        .fold(0, (a, b) => a > b ? a : b);
+    final isMultiHari = maxPerKaryawan > 1;
+
+    // ── Tulis data row ───────────────────────────────────────────────────
+    int rowIndex = 4; // 0-based, row ke-5 di Excel
+    int no = 1;
+
+    // Grand total accumulator
+    int grandTotal = 0,
+        grandTepat = 0,
+        grandTerlambat = 0,
+        grandCuti = 0,
+        grandTidakHadir = 0;
+
+    for (final entry in grouped.entries) {
+      final rows = entry.value;
+
+      for (int i = 0; i < rows.length; i++) {
+        final d = rows[i];
+        final rowBg = no % 2 == 1 ? whiteBg : altRowBg;
+
+        final baseStyle = makeStyle(bgColor: rowBg);
+        final centerStyle = makeStyle(
+          bgColor: rowBg,
+          hAlign: ex.HorizontalAlign.Center,
+        );
+        final statusStyle = _statusCellStyle(d.displayStatus, rowBg, borderHex);
+
+        // Kolom doa
+        final tanggalKey =
+            '${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}_${d.userId.toLowerCase()}';
+        final doaVal = doaMap?[tanggalKey] ?? '';
+        final doaStyle = _doaCellStyle(doaVal, rowBg, borderHex);
+
+        void setCell(int col, ex.CellValue value, ex.CellStyle style) {
+          final cell = sheet.cell(
+            ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIndex),
+          );
+          cell.value = value;
+          cell.cellStyle = style;
+        }
+
+        setCell(0, ex.IntCellValue(no), centerStyle);
+        setCell(1, ex.TextCellValue(d.userName), baseStyle);
+        setCell(2, ex.TextCellValue(d.department ?? '-'), baseStyle);
+        setCell(
+          3,
+          ex.TextCellValue(_formatDate(d.attendanceDate)),
+          centerStyle,
+        );
+        setCell(4, ex.TextCellValue(d.formattedCheckIn), centerStyle);
+        setCell(5, ex.TextCellValue(d.formattedCheckOut), centerStyle);
+        setCell(6, ex.TextCellValue(d.displayStatus), statusStyle);
+        setCell(7, ex.TextCellValue(doaVal), doaStyle);
+
+        rowIndex++;
+        no++;
+      }
+
+      // Akumulasi grand total
+      final counts = _countStatus(rows);
+      grandTotal += counts['total']!;
+      grandTepat += counts['tepat']!;
+      grandTerlambat += counts['terlambat']!;
+      grandCuti += counts['cuti']!;
+      grandTidakHadir += counts['tidakHadir']!;
+
+      // Summary per karyawan HANYA jika multi-hari
+      if (isMultiHari) {
+        // Baris kosong
+        rowIndex++;
+
+        final summaryLabelStyle = makeStyle(
+          bgColor: headerBg,
+          fontColor: headerFg,
+          bold: true,
+          fontSize: 9,
+          hAlign: ex.HorizontalAlign.Center,
+        );
+        final summaryLabels = [
+          'Total Data',
+          'Tepat Waktu',
+          'Terlambat',
+          'Cuti',
+          'Tidak Hadir',
+        ];
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: 0,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            summaryLabelStyle;
+        sheet
+            .cell(
+              ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
+            )
+            .value = ex.TextCellValue(
+          '',
+        );
+        for (int col = 0; col < summaryLabels.length; col++) {
+          final cell = sheet.cell(
+            ex.CellIndex.indexByColumnRow(
+              columnIndex: col + 1,
+              rowIndex: rowIndex,
+            ),
+          );
+          cell.value = ex.TextCellValue(summaryLabels[col]);
+          cell.cellStyle = summaryLabelStyle;
+        }
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: 6,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            summaryLabelStyle;
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: 7,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            summaryLabelStyle;
+        sheet.setRowHeight(rowIndex, 18);
+        rowIndex++;
+
+        final summaryValColors = [
+          '#EBF5FB',
+          '#D5F5E3',
+          '#FDEBD0',
+          '#D6EAF8',
+          '#FADBD8',
+        ];
+        final summaryFontColors = [
+          '#1E3A5F',
+          '#1E8449',
+          '#784212',
+          '#154360',
+          '#7B241C',
+        ];
+        final summaryValues = [
+          counts['total']!,
+          counts['tepat']!,
+          counts['terlambat']!,
+          counts['cuti']!,
+          counts['tidakHadir']!,
+        ];
+
+        final namaStyle = makeStyle(
+          bgColor: '#F2F3F4',
+          bold: true,
+          fontSize: 9,
+          hAlign: ex.HorizontalAlign.Center,
+        );
+        sheet
+            .cell(
+              ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
+            )
+            .value = ex.TextCellValue(
+          rows[0].userName,
+        );
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: 0,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            namaStyle;
+
+        for (int col = 0; col < summaryValues.length; col++) {
+          final cell = sheet.cell(
+            ex.CellIndex.indexByColumnRow(
+              columnIndex: col + 1,
+              rowIndex: rowIndex,
+            ),
+          );
+          cell.value = ex.IntCellValue(summaryValues[col]);
+          cell.cellStyle = makeStyle(
+            bgColor: summaryValColors[col],
+            fontColor: summaryFontColors[col],
+            bold: true,
+            fontSize: 11,
+            hAlign: ex.HorizontalAlign.Center,
+          );
+        }
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: 6,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            namaStyle;
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: 7,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            namaStyle;
+        sheet.setRowHeight(rowIndex, 22);
+        rowIndex++;
+        rowIndex++; // extra blank row antar karyawan
+      }
+    }
+
+    // ── Grand Total / Summary — selalu tampil di bawah ─────────────────
+    // Kalau per-hari: 1 baris summary saja (tidak perlu cek grouped.length)
+    {
+      rowIndex++;
+
+      // Label grand total
+      final grandLabelStyle = makeStyle(
+        bgColor: '#1A252F',
+        fontColor: headerFg,
+        bold: true,
+        fontSize: 10,
+        hAlign: ex.HorizontalAlign.Center,
+      );
+      final grandTotalLabel = isMultiHari ? 'GRAND TOTAL' : 'TOTAL';
+      sheet
+          .cell(
+            ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
+          )
+          .value = ex.TextCellValue(
+        grandTotalLabel,
+      );
+      sheet
+              .cell(
+                ex.CellIndex.indexByColumnRow(
+                  columnIndex: 0,
+                  rowIndex: rowIndex,
+                ),
+              )
+              .cellStyle =
+          grandLabelStyle;
+
+      final grandLabels = [
+        'Total Data',
+        'Tepat Waktu',
+        'Terlambat',
+        'Cuti',
+        'Tidak Hadir',
+      ];
+      for (int col = 0; col < grandLabels.length; col++) {
+        final cell = sheet.cell(
+          ex.CellIndex.indexByColumnRow(
+            columnIndex: col + 1,
+            rowIndex: rowIndex,
+          ),
+        );
+        cell.value = ex.TextCellValue(grandLabels[col]);
+        cell.cellStyle = grandLabelStyle;
+      }
+      for (int col = 6; col <= 7; col++) {
+        sheet
+                .cell(
+                  ex.CellIndex.indexByColumnRow(
+                    columnIndex: col,
+                    rowIndex: rowIndex,
+                  ),
+                )
+                .cellStyle =
+            grandLabelStyle;
+      }
+      sheet.setRowHeight(rowIndex, 18);
+      rowIndex++;
+
+      // Nilai grand total
+      final grandValues = [
+        grandTotal,
+        grandTepat,
+        grandTerlambat,
+        grandCuti,
+        grandTidakHadir,
+      ];
+      final grandColors = [
+        '#D6DBDF',
+        '#D5F5E3',
+        '#FDEBD0',
+        '#D6EAF8',
+        '#FADBD8',
+      ];
+      final grandFonts = [
+        '#1A252F',
+        '#1E8449',
+        '#784212',
+        '#154360',
+        '#7B241C',
+      ];
+
+      sheet
+          .cell(
+            ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
+          )
+          .cellStyle = makeStyle(
+        bgColor: '#D6DBDF',
+        bold: true,
+        fontSize: 9,
+        hAlign: ex.HorizontalAlign.Center,
+      );
+
+      for (int col = 0; col < grandValues.length; col++) {
+        final cell = sheet.cell(
+          ex.CellIndex.indexByColumnRow(
+            columnIndex: col + 1,
+            rowIndex: rowIndex,
+          ),
+        );
+        cell.value = ex.IntCellValue(grandValues[col]);
+        cell.cellStyle = makeStyle(
+          bgColor: grandColors[col],
+          fontColor: grandFonts[col],
+          bold: true,
+          fontSize: 13,
+          hAlign: ex.HorizontalAlign.Center,
+        );
+      }
+      for (int col = 6; col <= 7; col++) {
+        sheet
+            .cell(
+              ex.CellIndex.indexByColumnRow(
+                columnIndex: col,
+                rowIndex: rowIndex,
+              ),
+            )
+            .cellStyle = makeStyle(
+          bgColor: '#D6DBDF',
+        );
+      }
+      sheet.setRowHeight(rowIndex, 26);
+    }
+
     return excel.encode();
   }
 
-  // ── Warna cell status ─────────────────────────────────
+  // ── Hitung status per grup karyawan ──────────────────────────────────
+  static Map<String, int> _countStatus(List<AdminAttendanceData> rows) {
+    int tepat = 0, terlambat = 0, cuti = 0, tidakHadir = 0;
+    for (final d in rows) {
+      final s = d.displayStatus.toLowerCase();
+      if (s.contains('tepat')) {
+        tepat++;
+      } else if (s.contains('terlambat'))
+        terlambat++;
+      else if (s.contains('cuti') || s.contains('dinas luar'))
+        cuti++;
+      else if (s.contains('tidak hadir') ||
+          s.contains('absent') ||
+          s.contains('tidak absen'))
+        tidakHadir++;
+    }
+    return {
+      'total': rows.length,
+      'tepat': tepat,
+      'terlambat': terlambat,
+      'cuti': cuti,
+      'tidakHadir': tidakHadir,
+    };
+  }
+
+  // ── Style cell status ─────────────────────────────────────────────────
   static ex.CellStyle _statusCellStyle(
     String status,
     String rowBg,
     String borderHex,
   ) {
-    String fontColor;
-    String bgColor;
-
     final s = status.toLowerCase();
+    String fontColor, bgColor;
+
     if (s.contains('tepat')) {
       fontColor = '#1E8449';
       bgColor = '#D5F5E3';
+    } else if (s.contains('sangat terlambat')) {
+      fontColor = '#6E2C00';
+      bgColor = '#FDEBD0';
     } else if (s.contains('terlambat')) {
       fontColor = '#784212';
-      bgColor = '#FDEBD0';
+      bgColor = '#FEF9E7';
+    } else if (s.contains('dinas luar')) {
+      fontColor = '#4A235A';
+      bgColor = '#E8DAEF';
     } else if (s.contains('cuti')) {
       fontColor = '#154360';
       bgColor = '#D6EAF8';
-    } else if (s.contains('tidak hadir') || s.contains('absent')) {
+    } else if (s.contains('tidak hadir') ||
+        s.contains('absent') ||
+        s.contains('tidak absen')) {
       fontColor = '#7B241C';
       bgColor = '#FADBD8';
     } else {
@@ -316,11 +578,45 @@ class ExcelExportService {
       borderStyle: ex.BorderStyle.Thin,
       borderColorHex: ex.ExcelColor.fromHexString(borderHex),
     );
-
     return ex.CellStyle(
       backgroundColorHex: ex.ExcelColor.fromHexString(bgColor),
       fontColorHex: ex.ExcelColor.fromHexString(fontColor),
       bold: true,
+      fontSize: 10,
+      horizontalAlign: ex.HorizontalAlign.Center,
+      verticalAlign: ex.VerticalAlign.Center,
+      leftBorder: b,
+      rightBorder: b,
+      topBorder: b,
+      bottomBorder: b,
+    );
+  }
+
+  // ── Style cell doa ────────────────────────────────────────────────────
+  static ex.CellStyle _doaCellStyle(
+    String doa,
+    String rowBg,
+    String borderHex,
+  ) {
+    String fontColor, bgColor;
+    if (doa == 'ikut') {
+      fontColor = '#1E8449';
+      bgColor = '#D5F5E3';
+    } else if (doa == 'tidak') {
+      fontColor = '#7B241C';
+      bgColor = '#FADBD8';
+    } else {
+      fontColor = '#424949';
+      bgColor = rowBg;
+    }
+    final b = ex.Border(
+      borderStyle: ex.BorderStyle.Thin,
+      borderColorHex: ex.ExcelColor.fromHexString(borderHex),
+    );
+    return ex.CellStyle(
+      backgroundColorHex: ex.ExcelColor.fromHexString(bgColor),
+      fontColorHex: ex.ExcelColor.fromHexString(fontColor),
+      bold: doa.isNotEmpty,
       fontSize: 10,
       horizontalAlign: ex.HorizontalAlign.Center,
       verticalAlign: ex.VerticalAlign.Center,

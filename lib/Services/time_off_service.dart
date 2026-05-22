@@ -180,6 +180,7 @@ class TimeOffService {
   }
 
   // ── DL SUBMIT LAPORAN ──────────────────────────────────────────────────────
+  // Support semua platform: mobile (File), web (bytes)
   static Future<ApiResponse<void>> submitDlLaporan(
     DlLaporanRequest request,
   ) async {
@@ -190,31 +191,98 @@ class TimeOffService {
 
       mr.fields['timeOffId'] = request.timeOffId.toString();
       mr.fields['userId'] = request.userId;
-      mr.files.add(
-        await http.MultipartFile.fromPath(
-          'laporanFile',
-          request.laporanFile.path,
-          filename: path.basename(request.laporanFile.path),
-          contentType: _mediaType(request.laporanFile.path),
-        ),
-      );
-      mr.files.add(
-        await http.MultipartFile.fromPath(
-          'anggaranFile',
-          request.anggaranFile.path,
-          filename: path.basename(request.anggaranFile.path),
-          contentType: _mediaType(request.anggaranFile.path),
-        ),
-      );
+
+      // ── Laporan file ──────────────────────────────────────────────────────
+      if (request.laporanBytes != null) {
+        // Web / bytes path
+        mr.files.add(
+          http.MultipartFile.fromBytes(
+            'laporanFile',
+            request.laporanBytes!,
+            filename: request.laporanFileName ?? 'laporan.pdf',
+            contentType: _mediaTypeFromName(request.laporanFileName ?? ''),
+          ),
+        );
+      } else if (request.laporanFile != null) {
+        // Mobile / File path
+        final lFile = request.laporanFile!;
+        mr.files.add(
+          await http.MultipartFile.fromPath(
+            'laporanFile',
+            lFile.path,
+            filename: path.basename(lFile.path),
+            contentType: _mediaType(lFile.path),
+          ),
+        );
+      } else {
+        return ApiResponse(
+          success: false,
+          message: 'File laporan tidak tersedia',
+        );
+      }
+
+      // ── Anggaran file ─────────────────────────────────────────────────────
+      if (request.anggaranBytes != null) {
+        mr.files.add(
+          http.MultipartFile.fromBytes(
+            'anggaranFile',
+            request.anggaranBytes!,
+            filename: request.anggaranFileName ?? 'anggaran.pdf',
+            contentType: _mediaTypeFromName(request.anggaranFileName ?? ''),
+          ),
+        );
+      } else if (request.anggaranFile != null) {
+        final aFile = request.anggaranFile!;
+        mr.files.add(
+          await http.MultipartFile.fromPath(
+            'anggaranFile',
+            aFile.path,
+            filename: path.basename(aFile.path),
+            contentType: _mediaType(aFile.path),
+          ),
+        );
+      } else {
+        return ApiResponse(
+          success: false,
+          message: 'File anggaran tidak tersedia',
+        );
+      }
 
       final res = await http.Response.fromStream(await mr.send());
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      return ApiResponse(
-        success: _get(body, 'success') == true,
-        message: (_get(body, 'message') ?? '') as String,
-      );
+
+      // Handle berbagai format response:
+      // { success: true, message: '...' }  → standar
+      // { Message: '...' } dengan status 200/400 → legacy .NET
+      final successField = _get(body, 'success');
+      final msgField =
+          (_get(body, 'message') ?? _get(body, 'Message') ?? '') as String;
+
+      // Jika ada field success → pakai itu
+      if (successField != null) {
+        return ApiResponse(success: successField == true, message: msgField);
+      }
+      // Jika tidak ada field success → pakai HTTP status code
+      // 200-299 = sukses, lainnya = gagal
+      final httpOk = res.statusCode >= 200 && res.statusCode < 300;
+      return ApiResponse(success: httpOk, message: msgField);
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static MediaType _mediaTypeFromName(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    switch (ext) {
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      default:
+        return MediaType('application', 'octet-stream');
     }
   }
 
@@ -236,6 +304,28 @@ class TimeOffService {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode == 200 && _get(body, 'success') == true) {
         final rawData = _get(body, 'data');
+
+        // DEBUG — lihat di console Flutter keys apa yang ada
+        try {
+          final rawMap = rawData as Map<String, dynamic>;
+          final list = rawMap['Data'] ?? rawMap['data'];
+          if (list != null && (list as List).isNotEmpty) {
+            final first = list[0] as Map;
+            // ignore: avoid_print
+            print('[DEBUG my-timeoff] keys: ${first.keys.toList()}');
+            // ignore: avoid_print
+            print(
+              '[DEBUG] tanggal_mulai=${first["tanggal_mulai"]} TanggalMulai=${first["TanggalMulai"]}',
+            );
+            // ignore: avoid_print
+            print(
+              '[DEBUG] total_hari=${first["total_hari"]} TotalHari=${first["TotalHari"]}',
+            );
+            // ignore: avoid_print
+            print('[DEBUG] status=${first["status"] ?? first["Status"]}');
+          }
+        } catch (_) {}
+
         return ApiResponse(
           success: true,
           message: '',

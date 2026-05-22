@@ -1,7 +1,7 @@
 // Services/time_off_model.dart — FULL REPLACE
 // ignore_for_file: prefer_const_constructors
 import 'dart:io';
-import 'dart:convert';
+import 'dart:typed_data';
 
 class TimeOffModel {
   final int? id;
@@ -35,7 +35,7 @@ class TimeOffModel {
   final String? laporanFileName;
   final String? anggaranFileName;
   final List<ReimbursementItem>? reimbursementItems;
-  final List<TimeOffFileItem>? files;
+  final List<TimeOffFileItem>? files; // multi-file
 
   const TimeOffModel({
     this.id,
@@ -70,223 +70,107 @@ class TimeOffModel {
     this.files,
   });
 
-  factory TimeOffModel.fromJson(Map<String, dynamic> json) {
-    final reimbursementList = _parseJsonList(
-      json['reimbursementItems'] ?? json['reimbursement_items'],
-    );
-
-    final fileList = _parseJsonList(json['files']);
-
-    return TimeOffModel(
-      id: _toInt(json['id'] ?? json['Id']),
-
-      userId:
-          json['userId']?.toString() ??
-          json['UserId']?.toString() ??
-          json['userid']?.toString() ??
-          '',
-
-      jenisTimeOff:
-          json['jenisTimeOff']?.toString() ??
-          json['JenisTimeOff']?.toString() ??
-          json['jenis_timeoff']?.toString() ??
-          '',
-
-      tanggalMulai: _parseRequiredDate(
-        json['tanggalMulai'] ?? json['TanggalMulai'] ?? json['tanggal_mulai'],
-      ),
-
-      tanggalSelesai: _parseRequiredDate(
-        json['tanggalSelesai'] ??
-            json['TanggalSelesai'] ??
-            json['tanggal_selesai'],
-      ),
-
-      totalHari:
-          _toInt(
-            json['totalHari'] ?? json['TotalHari'] ?? json['total_hari'],
-          ) ??
-          0,
-
-      catatan: json['catatan']?.toString() ?? json['Catatan']?.toString(),
-
-      status:
-          json['status']?.toString() ?? json['Status']?.toString() ?? 'Pending',
-
-      createdAt: _parseDate(
-        json['createdAt'] ?? json['CreatedAt'] ?? json['created_at'],
-      ),
-
-      approvedBy:
-          json['approvedBy']?.toString() ??
-          json['ApprovedBy']?.toString() ??
-          json['approved_by']?.toString(),
-
-      approverName:
-          json['approverName']?.toString() ??
-          json['ApproverName']?.toString() ??
-          json['approver_name']?.toString(),
-
-      approvedAt: _parseDate(
-        json['approvedAt'] ?? json['ApprovedAt'] ?? json['approved_at'],
-      ),
-
-      rejectionReason:
-          json['rejectionReason']?.toString() ??
-          json['RejectionReason']?.toString() ??
-          json['rejection_reason']?.toString(),
-
-      fileName:
-          json['fileName']?.toString() ??
-          json['FileName']?.toString() ??
-          json['file_name']?.toString(),
-
-      filePath:
-          json['filePath']?.toString() ??
-          json['FilePath']?.toString() ??
-          json['file_path']?.toString(),
-
-      fileSize: _toInt(
-        json['fileSize'] ?? json['FileSize'] ?? json['file_size'],
-      ),
-
-      fileType:
-          json['fileType']?.toString() ??
-          json['FileType']?.toString() ??
-          json['file_type']?.toString(),
-
-      jenisPekerjaan:
-          json['jenisPekerjaan']?.toString() ??
-          json['JenisPekerjaan']?.toString() ??
-          json['jenis_pekerjaan']?.toString(),
-
-      rabType:
-          json['rabType']?.toString() ??
-          json['RabType']?.toString() ??
-          json['rab_type']?.toString(),
-
-      nominalUangKantor: _toDouble(
-        json['nominalUangKantor'] ??
-            json['NominalUangKantor'] ??
-            json['nominal_uang_kantor'],
-      ),
-
-      managerUserId:
-          json['managerUserId']?.toString() ??
-          json['ManagerUserId']?.toString() ??
-          json['manager_userid']?.toString(),
-
-      managerApprovalStatus:
-          json['managerApprovalStatus']?.toString() ??
-          json['ManagerApprovalStatus']?.toString() ??
-          json['manager_approval_status']?.toString(),
-
-      managerApprovedAt: _parseDate(
-        json['managerApprovedAt'] ??
-            json['ManagerApprovedAt'] ??
-            json['manager_approved_at'],
-      ),
-
-      managerRejectionReason:
-          json['managerRejectionReason']?.toString() ??
-          json['ManagerRejectionReason']?.toString() ??
-          json['manager_rejection_reason']?.toString(),
-
-      laporanStatus:
-          json['laporanStatus']?.toString() ??
-          json['LaporanStatus']?.toString() ??
-          json['laporan_status']?.toString(),
-
-      laporanSubmittedAt: _parseDate(
-        json['laporanSubmittedAt'] ??
-            json['LaporanSubmittedAt'] ??
-            json['laporan_submitted_at'],
-      ),
-
-      laporanFileName:
-          json['laporanFileName']?.toString() ??
-          json['LaporanFileName']?.toString() ??
-          json['laporan_file_name']?.toString(),
-
-      anggaranFileName:
-          json['anggaranFileName']?.toString() ??
-          json['AnggaranFileName']?.toString() ??
-          json['anggaran_file_name']?.toString(),
-
-      reimbursementItems: reimbursementList
-          ?.map(
-            (e) =>
-                ReimbursementItem.fromJson(Map<String, dynamic>.from(e as Map)),
-          )
-          .toList(),
-
-      files: fileList
-          ?.map(
-            (e) =>
-                TimeOffFileItem.fromJson(Map<String, dynamic>.from(e as Map)),
-          )
-          .toList(),
-    );
+  // Helper: cek camelCase, PascalCase, dan snake_case sekaligus
+  static dynamic _f(Map<String, dynamic> j, String camel, String snake) {
+    // camel = 'tanggalMulai', snake = 'tanggal_mulai'
+    // Juga cek PascalCase: 'TanggalMulai'
+    final pascal = camel[0].toUpperCase() + camel.substring(1);
+    return j[camel] ?? j[pascal] ?? j[snake];
   }
 
-  static List<dynamic>? _parseJsonList(dynamic value) {
-    if (value == null) return null;
+  factory TimeOffModel.fromJson(Map<String, dynamic> json) => TimeOffModel(
+    id: (json['id'] ?? json['Id']) as int?,
+    userId: _f(json, 'userId', 'userid')?.toString() ?? '',
+    jenisTimeOff: _f(json, 'jenisTimeOff', 'jenis_timeoff')?.toString() ?? '',
+    tanggalMulai: _parseDateRequired(_f(json, 'tanggalMulai', 'tanggal_mulai')),
+    tanggalSelesai: _parseDateRequired(
+      _f(json, 'tanggalSelesai', 'tanggal_selesai'),
+    ),
+    totalHari: (_f(json, 'totalHari', 'total_hari') as num?)?.toInt() ?? 0,
+    catatan: json['catatan']?.toString() ?? json['Catatan']?.toString(),
+    status: (json['status'] ?? json['Status'])?.toString() ?? 'Pending',
+    createdAt: _parseDate(_f(json, 'createdAt', 'created_at')),
+    approvedBy: _f(json, 'approvedBy', 'approved_by')?.toString(),
+    approverName: _f(json, 'approverName', 'approver_name')?.toString(),
+    approvedAt: _parseDate(_f(json, 'approvedAt', 'approved_at')),
+    rejectionReason: _f(
+      json,
+      'rejectionReason',
+      'rejection_reason',
+    )?.toString(),
+    fileName: _f(json, 'fileName', 'file_name')?.toString(),
+    filePath: _f(json, 'filePath', 'file_path')?.toString(),
+    fileSize: (_f(json, 'fileSize', 'file_size') as num?)?.toInt(),
+    fileType: _f(json, 'fileType', 'file_type')?.toString(),
+    // DL
+    jenisPekerjaan: _f(json, 'jenisPekerjaan', 'jenis_pekerjaan')?.toString(),
+    rabType: _f(json, 'rabType', 'rab_type')?.toString(),
+    nominalUangKantor:
+        (_f(json, 'nominalUangKantor', 'nominal_uang_kantor') as num?)
+            ?.toDouble(),
+    managerUserId: _f(json, 'managerUserId', 'manager_userid')?.toString(),
+    managerApprovalStatus: _f(
+      json,
+      'managerApprovalStatus',
+      'manager_approval_status',
+    )?.toString(),
+    managerApprovedAt: _parseDate(
+      _f(json, 'managerApprovedAt', 'manager_approved_at'),
+    ),
+    managerRejectionReason: _f(
+      json,
+      'managerRejectionReason',
+      'manager_rejection_reason',
+    )?.toString(),
+    laporanStatus: _f(json, 'laporanStatus', 'laporan_status')?.toString(),
+    laporanSubmittedAt: _parseDate(
+      _f(json, 'laporanSubmittedAt', 'laporan_submitted_at'),
+    ),
+    laporanFileName: _f(
+      json,
+      'laporanFileName',
+      'laporan_file_name',
+    )?.toString(),
+    anggaranFileName: _f(
+      json,
+      'anggaranFileName',
+      'anggaran_file_name',
+    )?.toString(),
+    reimbursementItems: json['reimbursementItems'] != null
+        ? (json['reimbursementItems'] as List)
+              .map((e) => ReimbursementItem.fromJson(e as Map<String, dynamic>))
+              .toList()
+        : null,
+    // multi-file: baca dari kolom 'files' (JSON array dari SP)
+    files: json['files'] != null
+        ? (json['files'] as List)
+              .map((e) => TimeOffFileItem.fromJson(e as Map<String, dynamic>))
+              .toList()
+        : null,
+  );
 
-    if (value is List) return value;
-
-    if (value is String && value.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is List) return decoded;
-      } catch (_) {
-        return null;
-      }
-    }
-
-    return null;
+  static DateTime? _parseDate(dynamic val) {
+    if (val == null) return null;
+    return DateTime.tryParse(val.toString());
   }
 
-  static DateTime _parseRequiredDate(dynamic value) {
-    if (value == null || value.toString().isEmpty) {
-      return DateTime.now();
-    }
-
-    return DateTime.tryParse(value.toString()) ?? DateTime.now();
-  }
-
-  static DateTime? _parseDate(dynamic value) {
-    if (value == null || value.toString().isEmpty) return null;
-    return DateTime.tryParse(value.toString());
-  }
-
-  static int? _toInt(dynamic value) {
-    if (value == null) return null;
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return int.tryParse(value.toString());
-  }
-
-  static double? _toDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is double) return value;
-    if (value is num) return value.toDouble();
-    return double.tryParse(value.toString());
+  // Non-nullable versi — untuk field wajib ada tanggalnya
+  static DateTime _parseDateRequired(dynamic val) {
+    if (val == null) return DateTime.now();
+    return DateTime.tryParse(val.toString()) ?? DateTime.now();
   }
 
   bool get isDinasLuar => jenisTimeOff == 'Dinas Luar';
-
   bool get needsLaporan =>
       isDinasLuar && status == 'Approved' && laporanStatus == null;
-
   bool get isMenungguManager => status == 'Menunggu Manager';
 
+  /// Semua file: gabungan files tabel baru + file lama (backward compat)
   List<TimeOffFileItem> get allFiles {
     final list = <TimeOffFileItem>[];
-
-    if (files != null && files!.isNotEmpty) {
-      list.addAll(files!);
-    }
-
+    // file dari tabel baru
+    if (files != null) list.addAll(files!);
+    // file lama (kolom file_name di udt_timeoff) — hanya tampilkan jika belum ada di list baru
     if (fileName != null && fileName!.isNotEmpty && list.isEmpty) {
       list.add(
         TimeOffFileItem(
@@ -299,7 +183,6 @@ class TimeOffModel {
         ),
       );
     }
-
     return list;
   }
 
@@ -309,6 +192,10 @@ class TimeOffModel {
         return 'Menunggu Persetujuan';
       case 'Menunggu Manager':
         return 'Menunggu Manager';
+      case 'Menunggu Org':
+        return 'Menunggu Divisi';
+      case 'Menunggu Laporan':
+        return 'Menunggu Laporan';
       case 'Approved':
         return 'Disetujui';
       case 'Rejected':
@@ -320,6 +207,7 @@ class TimeOffModel {
     }
   }
 }
+
 // ── Reimbursement item ────────────────────────────────────────────────────────
 
 class ReimbursementItem {
@@ -370,66 +258,44 @@ class TimeOffFileItem {
     required this.urutan,
   });
 
-  factory TimeOffFileItem.fromJson(Map<String, dynamic> json) {
-    return TimeOffFileItem(
-      id: _toInt(json['id'] ?? json['Id']) ?? 0,
-      timeOffId:
-          _toInt(
-            json['timeOffId'] ??
-                json['TimeOffId'] ??
-                json['timeoff_id'] ??
-                json['timeoffId'],
-          ) ??
-          0,
-      fileName:
-          (json['fileName'] ?? json['FileName'] ?? json['file_name'] ?? '')
-              .toString(),
-      fileSize: _toInt(
-        json['fileSize'] ?? json['FileSize'] ?? json['file_size'],
-      ),
-      fileType: (json['fileType'] ?? json['FileType'] ?? json['file_type'])
-          ?.toString(),
-      urutan: _toInt(json['urutan'] ?? json['Urutan']) ?? 1,
-    );
-  }
-
-  static int? _toInt(dynamic value) {
-    if (value == null) return null;
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    return int.tryParse(value.toString());
-  }
+  factory TimeOffFileItem.fromJson(Map<String, dynamic> json) =>
+      TimeOffFileItem(
+        id: (json['id'] ?? json['Id'] ?? 0) as int,
+        timeOffId:
+            (json['timeOffId'] ?? json['TimeOffId'] ?? json['timeoff_id'] ?? 0)
+                as int,
+        fileName:
+            (json['fileName'] ?? json['FileName'] ?? json['file_name'] ?? '')
+                as String,
+        fileSize:
+            (json['fileSize'] ?? json['FileSize'] ?? json['file_size']) as int?,
+        fileType: (json['fileType'] ?? json['FileType'] ?? json['file_type'])
+            ?.toString(),
+        urutan: (json['urutan'] ?? json['Urutan'] ?? 1) as int,
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
-    'timeOffId': timeOffId,
     'fileName': fileName,
     'fileSize': fileSize,
     'fileType': fileType,
     'urutan': urutan,
   };
 
-  String get ext {
-    if (!fileName.contains('.')) return '';
-    return fileName.split('.').last.toLowerCase();
-  }
-
+  String get ext =>
+      fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
   bool get isImage => ['jpg', 'jpeg', 'png'].contains(ext);
-
   bool get isPdf => ext == 'pdf';
 
   String get sizeLabel {
-    if (fileSize == null || fileSize == 0) return '';
-
+    if (fileSize == null) return '';
     final mb = fileSize! / (1024 * 1024);
-
-    if (mb >= 1) {
-      return '${mb.toStringAsFixed(1)} MB';
-    }
-
-    return '${(fileSize! / 1024).toStringAsFixed(0)} KB';
+    return mb >= 1
+        ? '${mb.toStringAsFixed(1)} MB'
+        : '${(fileSize! / 1024).toStringAsFixed(0)} KB';
   }
 }
+
 // ── Request classes ───────────────────────────────────────────────────────────
 
 class TimeOffRequest {
@@ -491,14 +357,26 @@ class UpdateTimeOffRequest {
 class DlLaporanRequest {
   final int timeOffId;
   final String userId;
-  final File laporanFile;
-  final File anggaranFile;
+
+  // Mobile: File path
+  final File? laporanFile;
+  final File? anggaranFile;
+
+  // Web / all platform: bytes
+  final Uint8List? laporanBytes;
+  final Uint8List? anggaranBytes;
+  final String? laporanFileName;
+  final String? anggaranFileName;
 
   const DlLaporanRequest({
     required this.timeOffId,
     required this.userId,
-    required this.laporanFile,
-    required this.anggaranFile,
+    this.laporanFile,
+    this.anggaranFile,
+    this.laporanBytes,
+    this.anggaranBytes,
+    this.laporanFileName,
+    this.anggaranFileName,
   });
 }
 
@@ -554,13 +432,14 @@ class TimeOffListResponse {
   });
 
   factory TimeOffListResponse.fromJson(Map<String, dynamic> json) {
-    // API return PascalCase (Data, TotalCount) atau camelCase (data, totalCount)
+    // Handle PascalCase, camelCase — .NET biasanya return PascalCase
     final rawList = (json['Data'] ?? json['data']) as List? ?? [];
     return TimeOffListResponse(
       data: rawList
           .map((e) => TimeOffModel.fromJson(e as Map<String, dynamic>))
           .toList(),
-      totalCount: (json['TotalCount'] ?? json['totalCount'] ?? 0) as int,
+      totalCount: ((json['TotalCount'] ?? json['totalCount'] ?? 0) as num)
+          .toInt(),
       page: (json['Page'] ?? json['page'] ?? 1) as int,
       pageSize: (json['PageSize'] ?? json['pageSize'] ?? 10) as int,
       totalPages: (json['TotalPages'] ?? json['totalPages'] ?? 0) as int,

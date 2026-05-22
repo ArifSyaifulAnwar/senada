@@ -1,4 +1,4 @@
-// screens/halaman_hrd_absensi.dart
+// screens/halaman_hrd_absensi.dart — FULL REPLACE
 // ignore_for_file: curly_braces_in_flow_control_structures, library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -13,7 +13,9 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../Screen admin/model/admin_attendance_model.dart';
 import '../../Screen admin/service/admin_attendance_service.dart';
 import '../../Screen admin/service/hrd_attendance_service.dart';
+import '../doa_karyawan_screen.dart';
 import '../hrd_absensi_edit.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // ← TAMBAH
 
 bool _isWeb(BuildContext context) => MediaQuery.of(context).size.width >= 768;
 
@@ -49,20 +51,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   int totalPages = 1;
   bool hasMoreData = false;
   bool isExporting = false;
-
   Map<String, int> departmentStats = {};
   Map<String, double> attendanceRateByDepartment = {};
   List<Employee> problematicEmployees = [];
-
   int _webTabIndex = 0;
-
+  String? _currentUserId;
+  Map<String, String> _doaMap = {};
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (mounted) setState(() => _webTabIndex = _tabController.index);
     });
+    _loadCurrentUser(); // ← TAMBAH
     _loadInitialData();
   }
 
@@ -72,6 +74,18 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     _tabController.dispose();
     super.dispose();
   }
+
+  // ── TAMBAH: load user ID dari SharedPreferences ──────────────────────
+  Future<void> _loadCurrentUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted)
+        setState(() {
+          _currentUserId = prefs.getString('UserID');
+        });
+    } catch (_) {}
+  }
+  // ────────────────────────────────────────────────────────────────────
 
   // ─────────────────────────────────────────────────────────────────
   // DATA LOADING
@@ -185,11 +199,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         problematicEmployees = problematic;
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Gagal meload data HRD.')));
-      }
     }
   }
 
@@ -226,17 +239,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       );
       if (r.success) {
         setState(() {
-          if (refresh) {
+          if (refresh)
             attendanceData = r.data?.data ?? [];
-          } else {
+          else
             attendanceData.addAll(r.data?.data ?? []);
-          }
           totalPages = r.data?.totalPages ?? 1;
           hasMoreData = currentPage < totalPages;
           isLoading = false;
           errorMessage = '';
         });
-        if (refresh) await _loadHRDAnalytics();
+        if (refresh) {
+          await _loadHRDAnalytics();
+          await _loadDoaMap(); // ← TAMBAH: load doa otomatis setelah absensi
+        }
       } else {
         setState(() {
           isLoading = false;
@@ -259,8 +274,146 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Future<void> _refreshData() async => _loadInitialData();
 
+  // ── TAMBAH: Load doa map otomatis ────────────────────────────────────
+  Future<void> _loadDoaMap() async {
+    if (_currentUserId == null || attendanceData.isEmpty) return;
+
+    final uniqueDates =
+        attendanceData.map((d) => d.attendanceDate).toSet().toList()..sort();
+
+    final newMap = <String, String>{};
+
+    for (final tanggal in uniqueDates) {
+      try {
+        final records = await DoaService.getDoaByTanggal(
+          _currentUserId!,
+          tanggal,
+        );
+        for (final rec in records) {
+          final tStr = DateFormat('yyyy-MM-dd').format(rec.tanggal);
+          // Pemimpin & peserta = ikut
+          newMap['${tStr}_${rec.pemimpinDoaId.toLowerCase()}'] = 'ikut';
+          for (final uid in rec.pesertaIds) {
+            newMap['${tStr}_${uid.toLowerCase()}'] = 'ikut';
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Karyawan yang hadir tapi tidak di doaMap pada hari yang ada sesi doa → 'tidak'
+    final hariAdaDoa = newMap.keys.map((k) => k.split('_').first).toSet();
+    for (final d in attendanceData) {
+      final tStr = DateFormat('yyyy-MM-dd').format(d.attendanceDate);
+      final key = '${tStr}_${d.userId.toLowerCase()}';
+      if (hariAdaDoa.contains(tStr) && !newMap.containsKey(key)) {
+        newMap[key] = 'tidak';
+      }
+    }
+
+    if (mounted) setState(() => _doaMap = newMap);
+  }
+  // ────────────────────────────────────────────────────────────────────
+
+  // ── TAMBAH: Inject baris "Tidak Hadir" untuk export multi-hari ───────
+  List<AdminAttendanceData> _buildDataWithTidakHadir(
+    List<AdminAttendanceData> rawData,
+  ) {
+    if (rawData.isEmpty) return rawData;
+
+    final sortedDates = rawData.map((d) => d.attendanceDate).toList()..sort();
+    final startDate = DateTime(
+      sortedDates.first.year,
+      sortedDates.first.month,
+      sortedDates.first.day,
+    );
+    final endDate = DateTime(
+      sortedDates.last.year,
+      sortedDates.last.month,
+      sortedDates.last.day,
+    );
+
+    // Hanya inject kalau rentang > 1 hari
+    if (!endDate.isAfter(startDate)) return rawData;
+
+    // Key yang sudah ada: "userid_yyyy-MM-dd"
+    final existingKeys = rawData
+        .map(
+          (d) =>
+              '${d.userId}_${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}',
+        )
+        .toSet();
+
+    // Sample 1 record per user (untuk copy nama, dept, dll)
+    final userSample = <String, AdminAttendanceData>{};
+    for (final d in rawData) {
+      userSample.putIfAbsent(d.userId, () => d);
+    }
+
+    final result = List<AdminAttendanceData>.from(rawData);
+
+    var current = startDate;
+    while (!current.isAfter(endDate)) {
+      // Skip Sabtu (6) dan Minggu (7)
+      if (current.weekday != DateTime.saturday &&
+          current.weekday != DateTime.sunday) {
+        for (final entry in userSample.entries) {
+          final uid = entry.key;
+          final sample = entry.value;
+          final key = '${uid}_${DateFormat('yyyy-MM-dd').format(current)}';
+
+          if (!existingKeys.contains(key)) {
+            result.add(
+              AdminAttendanceData(
+                id: -1,
+                userId: uid,
+                userName: sample.userName,
+                employeeId: sample.employeeId,
+                department: sample.department,
+                attendanceDate: current,
+                checkInTime: null,
+                checkOutTime: null,
+                checkInLatitude: null,
+                checkInLongitude: null,
+                checkOutLatitude: null,
+                checkOutLongitude: null,
+                checkInOfficeId: null,
+                checkOutOfficeId: null,
+                checkInOfficeName: null,
+                checkOutOfficeName: null,
+                checkInStatus: 'Tidak Hadir / Tidak Absen',
+                checkOutStatus: '',
+                checkInFaceConfidence: null,
+                checkOutFaceConfidence: null,
+                workingHoursMinutes: null,
+                overtimeMinutes: null,
+                notes: '',
+                createdAt: current,
+                updatedAt: current,
+                displayStatus: 'Tidak Hadir / Tidak Absen',
+                formattedCheckIn: '-',
+                formattedCheckOut: '-',
+              ),
+            );
+            existingKeys.add(key);
+          }
+        }
+      }
+      current = current.add(const Duration(days: 1));
+    }
+
+    // Sort: per userName, lalu tanggal descending
+    result.sort((a, b) {
+      final u = a.userName.compareTo(b.userName);
+      if (u != 0) return u;
+      return b.attendanceDate.compareTo(a.attendanceDate);
+    });
+
+    return result;
+  }
+  // ────────────────────────────────────────────────────────────────────
+
   // ─────────────────────────────────────────────────────────────────
-  // UPDATE ITEM LANGSUNG (tanpa reload dari server)
+  // UPDATE ITEM LANGSUNG
   // ─────────────────────────────────────────────────────────────────
 
   void _updateAttendanceItem(
@@ -276,7 +429,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (idx == -1) return;
       final old = attendanceData[idx];
 
-      // Hitung ulang working_hours_minutes
       int? newWorking;
       final ciDt = newCheckInTime != null
           ? DateTime.tryParse(newCheckInTime)
@@ -284,17 +436,15 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       final coDt = newCheckOutTime != null
           ? DateTime.tryParse(newCheckOutTime)
           : old.checkOutTime;
-      if (ciDt != null && coDt != null) {
+      if (ciDt != null && coDt != null)
         newWorking = coDt.difference(ciDt).inMinutes;
-      }
 
-      // Resolve displayStatus baru
       final statusRaw = newCheckInStatus ?? old.checkInStatus;
       String newDisplay = old.displayStatus;
       final s = statusRaw.toLowerCase();
-      if (s.contains('tepat')) {
+      if (s.contains('tepat'))
         newDisplay = 'Tepat Waktu';
-      } else if (s.contains('terlambat'))
+      else if (s.contains('terlambat'))
         newDisplay = 'Terlambat';
       else if (s.contains('cuti'))
         newDisplay = 'Cuti';
@@ -322,6 +472,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         checkOutLongitude: old.checkOutLongitude,
         checkInOfficeId: old.checkInOfficeId,
         checkOutOfficeId: old.checkOutOfficeId,
+        checkInOfficeName: old.checkInOfficeName,
+        checkOutOfficeName: old.checkOutOfficeName,
         checkInStatus: newCheckInStatus ?? old.checkInStatus,
         checkOutStatus: newCheckOutStatus ?? old.checkOutStatus,
         checkInFaceConfidence: old.checkInFaceConfidence,
@@ -345,12 +497,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   String _fmtTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
-  // ─────────────────────────────────────────────────────────────────
-  // BUKA EDIT SHEET INLINE
-  // ─────────────────────────────────────────────────────────────────
-
   void _openEditSheet(AdminAttendanceData data) {
-    // Konversi AdminAttendanceData → HrdAttendanceData
     final hrdData = HrdAttendanceData(
       id: data.id,
       userId: data.userId,
@@ -394,7 +541,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // EXPORT
+  // EXPORT — DIUPDATE dengan doa + tidak hadir
   // ─────────────────────────────────────────────────────────────────
 
   Future<void> _exportData() async {
@@ -408,10 +555,21 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       } else if (selectedTimeRange != 'Semua Data') {
         periodLabel = selectedTimeRange;
       }
+
+      // ── INJECT "Tidak Hadir" untuk export multi-hari ────────────
+      final isHariIni =
+          selectedTimeRange == 'Hari Ini' || selectedTimeRange == '1 Hari';
+      final exportData = isHariIni
+          ? attendanceData
+          : _buildDataWithTidakHadir(attendanceData);
+      // ────────────────────────────────────────────────────────────
+
       final bytes = ExcelExportService.buildAbsensiExcel(
-        attendanceData,
+        exportData,
         periodLabel: periodLabel,
+        doaMap: _doaMap, // ← pass doa map
       );
+
       if (bytes == null) throw Exception('Gagal encode excel');
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final fileName = 'Absensi_$timestamp.xlsx';
@@ -453,9 +611,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             ? Permission.photos
             : Permission.storage;
         var status = await permission.status;
-        if (status.isDenied || status.isPermanentlyDenied) {
+        if (status.isDenied || status.isPermanentlyDenied)
           status = await permission.request();
-        }
         if (!status.isGranted) {
           _showErrorSnackBar('Izin penyimpanan diperlukan untuk export');
           setState(() => isExporting = false);
@@ -565,7 +722,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       elevation: 0,
       centerTitle: isWebLayout ? false : true,
       actions: [
-        // ── Tombol buka halaman Edit Absensi ──
         Container(
           margin: const EdgeInsets.only(right: 4),
           child: IconButton(
@@ -587,12 +743,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 context,
                 MaterialPageRoute(builder: (_) => const HrdAbsensiEditPage()),
               );
-              // Refresh setelah kembali (sync log & perubahan dari halaman edit)
               _refreshData();
             },
           ),
         ),
-        // ── Tombol refresh ──
         Container(
           margin: const EdgeInsets.only(right: 16),
           child: IconButton(
@@ -624,14 +778,14 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 Tab(icon: Icon(Icons.dashboard, size: 18), text: 'Dashboard'),
                 Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Absensi'),
                 Tab(icon: Icon(Icons.analytics, size: 18), text: 'Analitik'),
+                Tab(
+                  icon: Icon(Icons.volunteer_activism, size: 18),
+                  text: 'Input Doa',
+                ),
               ],
             ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────
-  // MOBILE / WEB LAYOUT
-  // ─────────────────────────────────────────────────────────────────
 
   Widget _buildMobileBody() => TabBarView(
     controller: _tabController,
@@ -639,6 +793,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _buildDashboardTab(),
       _buildAttendanceTab(),
       _buildAnalyticsTab(),
+      _buildKaryawanDoa(),
     ],
   );
 
@@ -653,6 +808,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             _buildDashboardTab(),
             _buildAttendanceTab(),
             _buildAnalyticsTab(),
+            _buildKaryawanDoa(),
           ],
         ),
       ),
@@ -664,6 +820,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _WebNavItem(Icons.dashboard, 'Dashboard', 0),
       _WebNavItem(Icons.list_alt, 'Absensi', 1),
       _WebNavItem(Icons.analytics, 'Analitik', 2),
+      _WebNavItem(Icons.volunteer_activism, 'Input Doa', 3),
     ];
     return Container(
       width: 180,
@@ -726,10 +883,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // DASHBOARD TAB
-  // ─────────────────────────────────────────────────────────────────
-
+  // ── TABS (sama persis dengan aslinya) ─────────────────────────────
   Widget _buildDashboardTab() {
     return RefreshIndicator(
       onRefresh: _refreshData,
@@ -752,7 +906,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             const SizedBox(height: 20),
             LayoutBuilder(
               builder: (ctx, c) {
-                if (c.maxWidth >= 600) {
+                if (c.maxWidth >= 600)
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -761,7 +915,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                       Expanded(child: _buildProblematicEmployees()),
                     ],
                   );
-                }
                 return Column(
                   children: [
                     _buildDepartmentAnalytics(),
@@ -777,10 +930,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────
-  // ABSENSI TAB
-  // ─────────────────────────────────────────────────────────────────
 
   Widget _buildAttendanceTab() {
     return RefreshIndicator(
@@ -839,7 +988,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   _buildAttendanceList(),
               ],
             );
-            if (isWide) {
+            if (isWide)
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -848,7 +997,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   Expanded(child: listW),
                 ],
               );
-            }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [filterW, const SizedBox(height: 20), listW],
@@ -859,9 +1007,16 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // ANALITIK TAB
-  // ─────────────────────────────────────────────────────────────────
+  // ── Tab Input Doa — pakai DoaKaryawanScreen ───────────────────────
+  Widget _buildKaryawanDoa() {
+    return DoaKaryawanScreen(
+      initialHrdUserId: _currentUserId,
+      onDoaSaved: () async {
+        // Refresh doa map otomatis setelah doa disimpan
+        await _loadDoaMap();
+      },
+    );
+  }
 
   Widget _buildAnalyticsTab() {
     return RefreshIndicator(
@@ -907,7 +1062,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             const SizedBox(height: 20),
             LayoutBuilder(
               builder: (ctx, c) {
-                if (c.maxWidth >= 600) {
+                if (c.maxWidth >= 600)
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -916,7 +1071,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                       Expanded(child: _buildProblematicEmployees()),
                     ],
                   );
-                }
                 return Column(
                   children: [
                     _buildDepartmentAnalytics(),
@@ -933,9 +1087,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // STATS GRID
-  // ─────────────────────────────────────────────────────────────────
+  // ── Semua widget lainnya sama persis dengan aslinya ───────────────
 
   Widget _buildHRDStatsGrid() {
     final s = stats ?? AdminAttendanceStats();
@@ -1129,10 +1281,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────
-  // FILTER SECTION
-  // ─────────────────────────────────────────────────────────────────
 
   Widget _buildFilterSection() {
     return Container(
@@ -1370,18 +1518,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // ATTENDANCE LIST & CARD
-  // ─────────────────────────────────────────────────────────────────
-
   Widget _buildAttendanceList() {
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (!isLoading &&
             hasMoreData &&
-            n.metrics.pixels == n.metrics.maxScrollExtent) {
+            n.metrics.pixels == n.metrics.maxScrollExtent)
           _loadMoreData();
-        }
         return false;
       },
       child: ListView.builder(
@@ -1389,14 +1532,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         physics: const NeverScrollableScrollPhysics(),
         itemCount: attendanceData.length + (hasMoreData ? 1 : 0),
         itemBuilder: (ctx, i) {
-          if (i >= attendanceData.length) {
+          if (i >= attendanceData.length)
             return const Center(
               child: Padding(
                 padding: EdgeInsets.all(16),
                 child: CircularProgressIndicator(),
               ),
             );
-          }
           return _buildAttendanceCard(attendanceData[i]);
         },
       ),
@@ -1405,6 +1547,11 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Widget _buildAttendanceCard(AdminAttendanceData data) {
     final color = _statusColor(data.displayStatus);
+    // Cek status doa untuk hari ini
+    final tanggalKey =
+        '${DateFormat('yyyy-MM-dd').format(data.attendanceDate)}_${data.userId.toLowerCase()}';
+    final doaVal = _doaMap[tanggalKey] ?? '';
+
     return GestureDetector(
       onTap: () => _showDetailBottomSheet(data),
       child: Container(
@@ -1425,7 +1572,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Status icon
               Container(
                 width: 44,
                 height: 44,
@@ -1440,7 +1586,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 ),
               ),
               const SizedBox(width: 12),
-              // Info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1474,6 +1619,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                           ),
                         ),
                         const SizedBox(width: 6),
+                        // Badge status
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -1492,6 +1638,32 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                             ),
                           ),
                         ),
+                        // Badge doa (TAMBAH)
+                        if (doaVal.isNotEmpty) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: doaVal == 'ikut'
+                                  ? const Color(0xFF10B981).withOpacity(0.1)
+                                  : Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '🙏 $doaVal',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: doaVal == 'ikut'
+                                    ? const Color(0xFF10B981)
+                                    : Colors.red[700],
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -1548,7 +1720,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   ],
                 ),
               ),
-              // ── Tombol edit langsung di card ──
               GestureDetector(
                 onTap: () => _openEditSheet(data),
                 child: Container(
@@ -1571,10 +1742,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────
-  // ANALYTICS WIDGETS
-  // ─────────────────────────────────────────────────────────────────
 
   Widget _buildDepartmentAnalytics() {
     if (departmentStats.isEmpty) return const SizedBox.shrink();
@@ -1775,10 +1942,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // DETAIL BOTTOM SHEET
-  // ─────────────────────────────────────────────────────────────────
-
   void _showDetailBottomSheet(AdminAttendanceData data) {
     showModalBottomSheet(
       context: context,
@@ -1808,7 +1971,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1875,7 +2037,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                         ],
                       ),
                       const SizedBox(height: 20),
-                      // Action buttons
                       Row(
                         children: [
                           Expanded(
@@ -1910,7 +2071,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                         ],
                       ),
                       const SizedBox(height: 20),
-                      // Detail items
                       ..._buildDetailItems(data),
                     ],
                   ),
@@ -1952,25 +2112,22 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     IconData icon,
     Color color,
     VoidCallback onTap,
-  ) {
-    return ElevatedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 14),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-      ),
-    );
-  }
+  ) => ElevatedButton.icon(
+    onPressed: onTap,
+    icon: Icon(icon, size: 14),
+    label: Text(label, style: const TextStyle(fontSize: 12)),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: color,
+      foregroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+    ),
+  );
 
   List<Widget> _buildDetailItems(AdminAttendanceData data) {
     final items = <Widget>[];
     void add(String label, String value, IconData icon, Color color) =>
         items.add(_detailItem(label, value, icon, color));
-
     add(
       'ID Absensi',
       '#${data.id.toString().padLeft(4, '0')}',
@@ -1978,12 +2135,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       Colors.blue,
     );
     add('Nama Karyawan', data.userName, Icons.person, Colors.purple);
-    if (data.employeeId != null) {
+    if (data.employeeId != null)
       add('ID Karyawan', data.employeeId!, Icons.badge_outlined, Colors.indigo);
-    }
-    if (data.department != null) {
+    if (data.department != null)
       add('Departemen', data.department!, Icons.business, Colors.teal);
-    }
     if (data.displayStatus != 'Cuti') {
       add('Jam Masuk', data.formattedCheckIn, Icons.login, Colors.green);
       add('Jam Keluar', data.formattedCheckOut, Icons.logout, Colors.orange);
@@ -1994,103 +2149,93 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _statusIcon(data.checkInStatus),
       _statusColor(data.checkInStatus),
     );
-    if (data.checkOutStatus.isNotEmpty) {
+    if (data.checkOutStatus.isNotEmpty)
       add(
         'Status Check Out',
         data.checkOutStatus,
         _statusIcon(data.checkOutStatus),
         _statusColor(data.checkOutStatus),
       );
-    }
-    if (data.checkInOfficeName != null) {
+    if (data.checkInOfficeName != null)
       add('Kantor', data.checkInOfficeName!, Icons.location_city, Colors.red);
-    }
     add(
       'Keterangan',
       data.notes.isNotEmpty ? data.notes : 'Tidak ada keterangan',
       Icons.info,
       Colors.purple,
     );
-    if (data.workingHoursMinutes != null) {
+    if (data.workingHoursMinutes != null)
       add(
         'Jam Kerja',
         '${(data.workingHoursMinutes! / 60).toStringAsFixed(1)} jam',
         Icons.schedule,
         Colors.indigo,
       );
-    }
-    if (data.overtimeMinutes != null && data.overtimeMinutes! > 0) {
+    if (data.overtimeMinutes != null && data.overtimeMinutes! > 0)
       add(
         'Lembur',
         '${(data.overtimeMinutes! / 60).toStringAsFixed(1)} jam',
         Icons.access_time_filled,
         Colors.amber,
       );
-    }
-    if (data.checkInFaceConfidence != null) {
+    if (data.checkInFaceConfidence != null)
       add(
         'Confidence Check In',
         '${(data.checkInFaceConfidence! * 100).toStringAsFixed(1)}%',
         Icons.face,
         Colors.blue,
       );
-    }
     return items;
   }
 
-  Widget _detailItem(String label, String value, IconData icon, Color color) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
+  Widget _detailItem(String label, String value, IconData icon, Color color) =>
+      Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 18),
             ),
-            child: Icon(icon, color: color, size: 18),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF64748B),
-                    fontWeight: FontWeight.w500,
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF64748B),
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF1E293B),
-                    fontWeight: FontWeight.w600,
+                  const SizedBox(height: 3),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF1E293B),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────────────────────────
+          ],
+        ),
+      );
 
   Widget _buildLoadingWidget() => const Center(
     child: Padding(
@@ -2173,9 +2318,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   Color _statusColor(String s) {
     final l = s.toLowerCase();
     if (l.contains('tepat') || l == 'on_time') return Colors.green;
-    if (l.contains('terlambat') || l == 'late' || l == 'very_late') {
+    if (l.contains('terlambat') || l == 'late' || l == 'very_late')
       return Colors.orange;
-    }
     if (l.contains('cuti') || l == 'leave') return Colors.blue;
     if (l.contains('absent') || l.contains('tidak hadir')) return Colors.red;
     return Colors.grey;
@@ -2184,9 +2328,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   IconData _statusIcon(String s) {
     final l = s.toLowerCase();
     if (l.contains('tepat') || l == 'on_time') return Icons.check_circle;
-    if (l.contains('terlambat') || l == 'late' || l == 'very_late') {
+    if (l.contains('terlambat') || l == 'late' || l == 'very_late')
       return Icons.access_time;
-    }
     if (l.contains('cuti') || l == 'leave') return Icons.event_busy;
     if (l.contains('absent') || l.contains('tidak hadir')) return Icons.cancel;
     return Icons.help;
@@ -2243,8 +2386,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       ],
     ),
   );
-
-  // ── Filter Sheets ──────────────────────────────────────────────────────────
 
   void _showDateFilterSheet() {
     showModalBottomSheet(

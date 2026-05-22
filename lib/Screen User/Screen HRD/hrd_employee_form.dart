@@ -53,6 +53,7 @@ class _CropDialogState extends State<_CropDialog> {
     _top = _top.clamp(0.0, 1.0 - _size);
   }
 
+  // Ganti seluruh method _crop() dengan ini:
   Future<Uint8List?> _crop() async {
     if (_uiImage == null) return null;
     setState(() => _isProcessing = true);
@@ -60,11 +61,52 @@ class _CropDialogState extends State<_CropDialog> {
     final iw = _uiImage!.width.toDouble();
     final ih = _uiImage!.height.toDouble();
 
-    // Kotak crop dalam piksel gambar asli
-    final srcX = (_left * iw).round();
-    final srcY = (_top * ih).round();
-    final srcW = (_size * iw).round();
-    final srcH = (_size * ih).round();
+    // Ambil ukuran render box dari key
+    final box = _imgKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) {
+      setState(() => _isProcessing = false);
+      return null;
+    }
+    final boxW = box.size.width;
+    final boxH = box.size.height;
+
+    // Hitung imageRect setelah BoxFit.contain (letterbox)
+    final imageAspect = iw / ih;
+    final boxAspect = boxW / boxH;
+
+    double renderedW, renderedH, offsetX, offsetY;
+    if (imageAspect > boxAspect) {
+      // Pillar box (bar di atas & bawah)
+      renderedW = boxW;
+      renderedH = boxW / imageAspect;
+      offsetX = 0;
+      offsetY = (boxH - renderedH) / 2;
+    } else {
+      // Letter box (bar di kiri & kanan)
+      renderedH = boxH;
+      renderedW = boxH * imageAspect;
+      offsetX = (boxW - renderedW) / 2;
+      offsetY = 0;
+    }
+
+    // Konversi normalized crop box ke koordinat dalam rendered image
+    // _left/_top/_size dinormalisasi terhadap boxW/boxH
+    final cropXInBox = _left * boxW;
+    final cropYInBox = _top * boxH;
+    final cropWInBox = _size * boxW;
+    final cropHInBox = _size * boxH;
+
+    // Konversi ke koordinat dalam rendered image (hilangkan letterbox offset)
+    final cropXInImg = (cropXInBox - offsetX) / renderedW;
+    final cropYInImg = (cropYInBox - offsetY) / renderedH;
+    final cropWInImg = cropWInBox / renderedW;
+    final cropHInImg = cropHInBox / renderedH;
+
+    // Clamp agar tidak keluar gambar
+    final srcX = (cropXInImg * iw).clamp(0.0, iw).round();
+    final srcY = (cropYInImg * ih).clamp(0.0, ih).round();
+    final srcW = (cropWInImg * iw).clamp(1.0, iw - srcX).round();
+    final srcH = (cropHInImg * ih).clamp(1.0, ih - srcY).round();
 
     // Render ke offscreen canvas 400×400
     const out = 400.0;
@@ -79,11 +121,12 @@ class _CropDialogState extends State<_CropDialog> {
         srcH.toDouble(),
       ),
       Rect.fromLTWH(0, 0, out, out),
-      Paint(),
+      Paint()..filterQuality = FilterQuality.high,
     );
     final pic = recorder.endRecording();
     final img = await pic.toImage(out.toInt(), out.toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    setState(() => _isProcessing = false);
     return data?.buffer.asUint8List();
   }
 
