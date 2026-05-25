@@ -16,7 +16,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../Services/dlservice.dart';
 
-// ── helper ──────────────────────────────────────────────────────────
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
@@ -71,6 +70,13 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
+  // ── Company Calendar ──────────────────────────────────────────────
+  bool _isWeekend = false;
+  bool _isHariLibur = false;
+  bool _isWfh = false;
+  String _keteranganHari = '';
+  bool _isLoadingCalendar = true;
+
   @override
   void initState() {
     super.initState();
@@ -85,8 +91,77 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       end: 1.0,
     ).animate(_pulseController);
 
+    _checkHariIni();
     _initializeApp();
     _detectUserMode();
+  }
+
+  // ── Cek hari ini dari company calendar ───────────────────────────
+  Future<void> _checkHariIni() async {
+    try {
+      final today = DateTime.now();
+
+      // Weekend check lokal dulu
+      if (today.weekday == DateTime.saturday ||
+          today.weekday == DateTime.sunday) {
+        if (mounted) {
+          setState(() {
+            _isWeekend = true;
+            _isHariLibur = true;
+            _keteranganHari = today.weekday == DateTime.saturday
+                ? 'Hari Sabtu'
+                : 'Hari Minggu';
+            _isLoadingCalendar = false;
+          });
+        }
+        return;
+      }
+
+      // Cek via API
+      final tokenResp = await http
+          .post(
+            Uri.parse('$baseURL/api/auth/token'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (tokenResp.statusCode != 200) {
+        if (mounted) setState(() => _isLoadingCalendar = false);
+        return;
+      }
+
+      final token = json.decode(tokenResp.body)['access_token'];
+      final tanggal =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}'
+          '-${today.day.toString().padLeft(2, '0')}';
+
+      final resp = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/check'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode({'tanggal': tanggal}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200 && mounted) {
+        final body = json.decode(resp.body);
+        setState(() {
+          _isWeekend = body['IsWeekend'] ?? body['is_weekend'] ?? false;
+          _isHariLibur = body['IsHariLibur'] ?? body['is_hari_libur'] ?? false;
+          _isWfh = body['IsWfh'] ?? body['is_wfh'] ?? false;
+          _keteranganHari = body['Keterangan'] ?? body['keterangan'] ?? '';
+          _isLoadingCalendar = false;
+        });
+      } else {
+        if (mounted) setState(() => _isLoadingCalendar = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingCalendar = false);
+    }
   }
 
   Future<void> _detectUserMode() async {
@@ -139,7 +214,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
-
       await _cameraController!.initialize();
 
       if (_cameraController!.value.isInitialized) {
@@ -148,7 +222,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           await _cameraController!.setFocusMode(FocusMode.auto);
         } catch (_) {}
       }
-
       if (mounted) setState(() => _isCameraInitialized = true);
     } catch (e) {
       if (mounted) setState(() => _isCameraInitialized = false);
@@ -175,7 +248,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       if (!mounted) return;
 
       final Uint8List imageBytes = await imageFile.readAsBytes();
-
       setState(() {
         _capturedImageBytes = imageBytes;
         if (!kIsWeb) _capturedImage = File(imageFile.path);
@@ -266,9 +338,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           setState(() => _isFaceRegistered = result['isRegistered'] ?? false);
         }
       }
-    } catch (e) {
-      // abaikan
-    }
+    } catch (_) {}
   }
 
   Future<bool> isCompanyUser(String userId, String email) async {
@@ -297,7 +367,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           .timeout(const Duration(seconds: 10));
 
       return resp.statusCode == 200 && json.decode(resp.body) != null;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -365,15 +435,15 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   void _scheduleAutoRetry(String failReason) {
     if (!mounted) return;
-
     if (_autoRetryCount < _maxAutoRetry) {
       _autoRetryCount++;
       _retryCountdown = 2;
-
       setState(() {
         _isAutoRetrying = true;
         _faceVerificationMessage =
-            "⚠️ $failReason\n🔄 Coba ulang $_autoRetryCount/$_maxAutoRetry dalam $_retryCountdown detik...";
+            "⚠️ $failReason\n🔄 Coba ulang "
+            "$_autoRetryCount/$_maxAutoRetry "
+            "dalam $_retryCountdown detik...";
         _capturedImage = null;
         _capturedImageBytes = null;
       });
@@ -387,7 +457,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         setState(() {
           _retryCountdown--;
           _faceVerificationMessage =
-              "⚠️ $failReason\n🔄 Coba ulang $_autoRetryCount/$_maxAutoRetry dalam $_retryCountdown detik...";
+              "⚠️ $failReason\n🔄 Coba ulang "
+              "$_autoRetryCount/$_maxAutoRetry "
+              "dalam $_retryCountdown detik...";
         });
         if (_retryCountdown <= 0) {
           t.cancel();
@@ -400,7 +472,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         _isProcessingFace = false;
         _isAutoRetrying = false;
         _faceVerificationMessage =
-            "❌ $failReason\n\nCoba perbaiki: posisi wajah di tengah, pastikan cahaya cukup, hapus kacamata jika ada.";
+            "❌ $failReason\n\nCoba perbaiki: posisi wajah di tengah, "
+            "pastikan cahaya cukup, hapus kacamata jika ada.";
       });
     }
   }
@@ -536,7 +609,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
 
     if (!mounted) return;
-
     setState(() {
       _isProcessingFace = false;
       _isAttendanceSubmitted = result['success'] ?? false;
@@ -610,33 +682,31 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  Widget _stepInfo(String num, String text, Color color) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Text(
-              num,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: color,
-              ),
+  Widget _stepInfo(String num, String text, Color color) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Text(
+            num,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
-      ],
-    );
-  }
+      ),
+      const SizedBox(width: 8),
+      Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
+    ],
+  );
 
   void _showSuccessDialog(Map<String, dynamic> result) {
     if (!mounted) return;
@@ -738,7 +808,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         setState(() {
           _locationInfo = distance <= allowedRadius
               ? "✅ Dalam radius ${_nearestOfficeLocation!['office_name']}"
-              : "❌ Di luar radius ${_nearestOfficeLocation!['office_name']} (${distance.toStringAsFixed(0)}m dari batas ${allowedRadius.toStringAsFixed(0)}m)";
+              : "❌ Di luar radius ${_nearestOfficeLocation!['office_name']} "
+                    "(${distance.toStringAsFixed(0)}m dari batas "
+                    "${allowedRadius.toStringAsFixed(0)}m)";
           _isLoadingLocation = false;
         });
       } else {
@@ -789,10 +861,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       if (!locationStatus.isGranted) {
         locationStatus = await Permission.location.request();
       }
+
       var cameraStatus = await Permission.camera.status;
       if (!cameraStatus.isGranted) {
         cameraStatus = await Permission.camera.request();
       }
+
       if (locationStatus.isGranted && cameraStatus.isGranted) {
         await _getCurrentLocation();
       } else {
@@ -843,9 +917,84 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   }
 
   void _goBackToHome({bool? attendanceSuccess}) {
-    if (widget.showBackButton) {
-      Navigator.pop(context, attendanceSuccess);
+    if (widget.showBackButton) Navigator.pop(context, attendanceSuccess);
+  }
+
+  // ── Banner hari libur / WFH ───────────────────────────────────────
+  Widget _buildHariBanner() {
+    if (_isLoadingCalendar) return const SizedBox.shrink();
+    if (!_isHariLibur && !_isWfh) return const SizedBox.shrink();
+
+    Color bgColor, borderColor, textColor;
+    IconData icon;
+    String title, subtitle;
+
+    if (_isWeekend) {
+      bgColor = Colors.red[50]!;
+      borderColor = Colors.red[300]!;
+      textColor = Colors.red[800]!;
+      icon = Icons.weekend_rounded;
+      title = _keteranganHari;
+      subtitle =
+          'Tombol absensi dinonaktifkan. '
+          'Jika lembur, ajukan melalui fitur Lembur.';
+    } else if (_isHariLibur) {
+      bgColor = Colors.orange[50]!;
+      borderColor = Colors.orange[300]!;
+      textColor = Colors.orange[800]!;
+      icon = Icons.beach_access_rounded;
+      title = 'Hari Libur: $_keteranganHari';
+      subtitle = 'Hari ini libur. Absensi tetap bisa dilakukan jika lembur.';
+    } else {
+      bgColor = const Color(0xFFE8F8F2);
+      borderColor = const Color(0xFF10B981);
+      textColor = const Color(0xFF065F46);
+      icon = Icons.home_work_rounded;
+      title = 'Work From Home (WFH)';
+      subtitle = _keteranganHari.isNotEmpty
+          ? _keteranganHari
+          : 'Hari ini jadwal WFH. Absensi tetap dilakukan dari rumah.';
     }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor, width: 1.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: textColor, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: textColor.withOpacity(0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -854,7 +1003,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   @override
   Widget build(BuildContext context) {
     final isWeb = _isWideScreen(context);
-
     return Scaffold(
       appBar: _buildAppBar(),
       body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
@@ -898,13 +1046,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // MOBILE LAYOUT (layout asli — scroll vertikal)
-  // ─────────────────────────────────────────────────────────────────
+  // ── Mobile Layout ─────────────────────────────────────────────────
   Widget _buildMobileLayout() {
     return SingleChildScrollView(
       child: Column(
         children: [
+          _buildHariBanner(), // ← banner libur/WFH
           _buildLocationInfo(),
           _buildCameraPreview(),
           _buildRetryIndicator(),
@@ -915,33 +1062,26 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // WEB LAYOUT (2 kolom: kamera kiri | info + tombol kanan)
-  // ─────────────────────────────────────────────────────────────────
+  // ── Web Layout ────────────────────────────────────────────────────
   Widget _buildWebLayout() {
     final accentColor = _isCheckOut ? Colors.red[600]! : Colors.blue[700]!;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Kolom kiri: Kamera ─────────────────────────────
         Expanded(
           flex: 5,
           child: Container(
             color: Colors.black,
             child: Column(
               children: [
-                // Kamera — isi penuh kolom kiri
                 Expanded(child: _buildWebCameraArea()),
-                // Retry indicator
                 if (_autoRetryCount > 0 || _isAutoRetrying)
                   _buildRetryIndicatorWeb(accentColor),
               ],
             ),
           ),
         ),
-
-        // ── Kolom kanan: Info + Tombol ─────────────────────
         SizedBox(
           width: 320,
           child: Container(
@@ -952,6 +1092,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _buildHariBanner(), // ← banner di web
+                  if (_isHariLibur || _isWfh) const SizedBox(height: 12),
                   // Header mode
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -980,22 +1122,14 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                     ),
                   ),
                   const SizedBox(height: 16),
-
-                  // Lokasi
                   _buildLocationInfoWeb(),
                   const SizedBox(height: 16),
-
-                  // Status verifikasi
                   if (_faceVerificationMessage.isNotEmpty) ...[
                     _buildVerificationStatusWeb(),
                     const SizedBox(height: 16),
                   ],
-
-                  // Tombol aksi
                   _buildActionButtonWeb(accentColor),
                   const SizedBox(height: 16),
-
-                  // Tips
                   if (!_isAttendanceSubmitted && !_isProcessingFace)
                     _buildTipsWeb(),
                 ],
@@ -1007,12 +1141,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ── Kamera area untuk web (full height kolom kiri) ────
-  Widget _buildWebCameraArea() {
-    return (_capturedImage != null || _capturedImageBytes != null)
-        ? _buildWebCapturedView()
-        : _buildWebLiveCameraView();
-  }
+  Widget _buildWebCameraArea() =>
+      (_capturedImage != null || _capturedImageBytes != null)
+      ? _buildWebCapturedView()
+      : _buildWebLiveCameraView();
 
   Widget _buildWebCapturedView() {
     return Stack(
@@ -1096,7 +1228,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ── Lokasi web ────────────────────────────────────────
   Widget _buildLocationInfoWeb() {
     final isInside =
         _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
@@ -1104,7 +1235,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         _locationInfo.contains("Error") ||
         _locationInfo.contains("Timeout") ||
         _locationInfo.contains("❌");
-
     final color = isInside
         ? Colors.green
         : isError
@@ -1173,7 +1303,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ── Status verifikasi web ─────────────────────────────
   Widget _buildVerificationStatusWeb() {
     final color = _isProcessingFace
         ? Colors.blue
@@ -1206,7 +1335,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           Expanded(
             child: Text(
               _faceVerificationMessage,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 12,
                 color: Colors.black87,
                 height: 1.5,
@@ -1218,33 +1347,44 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ── Tombol aksi web ───────────────────────────────────
   Widget _buildActionButtonWeb(Color accentColor) {
     final bool isInside =
         _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
     final bool canTakePhoto =
-        !_isProcessingFace && !_isAutoRetrying && isInside;
+        !_isProcessingFace && !_isAutoRetrying && isInside && !_isWeekend;
 
     final String label = _isProcessingFace
         ? "Memproses..."
         : _isAutoRetrying
         ? "Mencoba ulang..."
         : (_capturedImage == null && _capturedImageBytes == null)
-        ? "Ambil Foto"
+        ? _isHariLibur && !_isWeekend
+              ? "Absen (Lembur)"
+              : _isWfh
+              ? "Absen WFH"
+              : "Ambil Foto"
         : _isAttendanceSubmitted
         ? "Foto Ulang"
         : "Coba Lagi";
 
-    final IconData icon = _isProcessingFace
-        ? Icons.hourglass_empty
-        : Icons.camera_alt;
+    final Color btnColor = !canTakePhoto
+        ? Colors.grey
+        : _isWfh
+        ? const Color(0xFF10B981)
+        : _isHariLibur
+        ? Colors.orange[700]!
+        : accentColor;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ElevatedButton.icon(
           onPressed: !canTakePhoto ? null : () => _captureImageFromCamera(),
-          icon: Icon(icon, color: Colors.white, size: 18),
+          icon: Icon(
+            _isProcessingFace ? Icons.hourglass_empty : Icons.camera_alt,
+            color: Colors.white,
+            size: 18,
+          ),
           label: Text(
             label,
             style: const TextStyle(
@@ -1254,7 +1394,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             ),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: !canTakePhoto ? Colors.grey : accentColor,
+            backgroundColor: btnColor,
             disabledBackgroundColor: Colors.grey[400],
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(
@@ -1284,7 +1424,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ── Tips web ──────────────────────────────────────────
   Widget _buildTipsWeb() {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1324,7 +1463,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ── Retry indicator web ───────────────────────────────
   Widget _buildRetryIndicatorWeb(Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1356,9 +1494,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // SHARED WIDGETS (mobile)
-  // ─────────────────────────────────────────────────────────────────
+  // ── Mobile shared widgets ─────────────────────────────────────────
   Widget _buildLocationInfo() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isInside =
@@ -1580,7 +1716,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1618,14 +1754,36 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     final bool isInside =
         _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
     final bool canTakePhoto =
-        !_isProcessingFace && !_isAutoRetrying && isInside;
+        !_isProcessingFace && !_isAutoRetrying && isInside && !_isWeekend;
+
+    final String label = _isProcessingFace
+        ? "Memproses..."
+        : _isAutoRetrying
+        ? "Mencoba ulang..."
+        : (_capturedImage == null && _capturedImageBytes == null)
+        ? _isHariLibur && !_isWeekend
+              ? "Absen (Lembur)"
+              : _isWfh
+              ? "Absen WFH"
+              : "Ambil Foto"
+        : _isAttendanceSubmitted
+        ? "Foto Ulang"
+        : "Coba Lagi";
+
+    final Color btnColor = !canTakePhoto
+        ? Colors.grey
+        : _isWfh
+        ? const Color(0xFF10B981)
+        : _isHariLibur
+        ? Colors.orange[700]!
+        : (_isCheckOut ? Colors.red[500]! : Colors.blue[600]!);
 
     return Container(
       width: double.infinity,
       margin: EdgeInsets.all(screenWidth * 0.04),
       child: Row(
         children: [
-          if (widget.showBackButton)
+          if (widget.showBackButton) ...[
             Expanded(
               flex: 1,
               child: ElevatedButton(
@@ -1650,7 +1808,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                 ),
               ),
             ),
-          if (widget.showBackButton) const SizedBox(width: 12),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             flex: widget.showBackButton ? 2 : 1,
             child: ElevatedButton.icon(
@@ -1671,15 +1830,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                 color: Colors.white,
               ),
               label: Text(
-                _isProcessingFace
-                    ? "Memproses..."
-                    : _isAutoRetrying
-                    ? "Mencoba ulang..."
-                    : (_capturedImage == null && _capturedImageBytes == null)
-                    ? "Ambil Foto"
-                    : _isAttendanceSubmitted
-                    ? "Foto Ulang"
-                    : "Coba Lagi",
+                label,
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
@@ -1690,9 +1841,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
-                backgroundColor: !canTakePhoto
-                    ? Colors.grey
-                    : (_isCheckOut ? Colors.red[500] : Colors.blue[600]),
+                backgroundColor: btnColor,
                 disabledBackgroundColor: Colors.grey[400],
               ),
             ),
@@ -1765,7 +1914,6 @@ class RealtimeFaceGuide extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isWeb = size.width >= 768;
-    // Di web, guide lebih kecil karena kamera mengisi kolom kiri
     final guideWidth = isWeb ? size.width * 0.25 : size.width * 0.6;
     final guideHeight = guideWidth * 1.2;
     final accentColor = isCheckOut ? Colors.red[300]! : Colors.blue[300]!;
@@ -1813,7 +1961,8 @@ class RealtimeFaceGuide extends StatelessWidget {
             child: Text(
               isProcessing
                   ? "⏳ Sedang memverifikasi..."
-                  : "📷 Posisikan wajah dalam oval\nPastikan wajah terang & terlihat jelas",
+                  : "📷 Posisikan wajah dalam oval\n"
+                        "Pastikan wajah terang & terlihat jelas",
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 14,
@@ -1896,32 +2045,30 @@ class RealtimeFaceGuide extends StatelessWidget {
     bool b = false,
     bool l = false,
     bool r = false,
-  }) {
-    return Positioned(
-      top: top,
-      bottom: bottom,
-      left: left,
-      right: right,
-      child: Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          border: Border(
-            top: t
-                ? const BorderSide(color: Colors.white, width: 4)
-                : BorderSide.none,
-            bottom: b
-                ? const BorderSide(color: Colors.white, width: 4)
-                : BorderSide.none,
-            left: l
-                ? const BorderSide(color: Colors.white, width: 4)
-                : BorderSide.none,
-            right: r
-                ? const BorderSide(color: Colors.white, width: 4)
-                : BorderSide.none,
-          ),
+  }) => Positioned(
+    top: top,
+    bottom: bottom,
+    left: left,
+    right: right,
+    child: Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        border: Border(
+          top: t
+              ? const BorderSide(color: Colors.white, width: 4)
+              : BorderSide.none,
+          bottom: b
+              ? const BorderSide(color: Colors.white, width: 4)
+              : BorderSide.none,
+          left: l
+              ? const BorderSide(color: Colors.white, width: 4)
+              : BorderSide.none,
+          right: r
+              ? const BorderSide(color: Colors.white, width: 4)
+              : BorderSide.none,
         ),
       ),
-    );
-  }
+    ),
+  );
 }

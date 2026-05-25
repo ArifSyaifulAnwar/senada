@@ -7,6 +7,8 @@ class CalendarEvent {
   final bool isHoliday;
   final String? displayDate;
   final bool isCutiBersama;
+  final bool isWfh;
+  final String source;
 
   CalendarEvent({
     required this.title,
@@ -15,6 +17,8 @@ class CalendarEvent {
     this.isHoliday = false,
     this.displayDate,
     this.isCutiBersama = false,
+    this.isWfh = false,
+    this.source = 'unknown',
   });
 
   // ─────────────────────────────────────────────────────────────────
@@ -45,15 +49,13 @@ class CalendarEvent {
   //  "types":["Public"],"global":true}
   // ─────────────────────────────────────────────────────────────────
   factory CalendarEvent.fromNagerJson(Map<String, dynamic> json) {
-    final title = json['localName'] as String? ??
-        json['name'] as String? ??
-        'Hari Libur';
+    final title =
+        json['localName'] as String? ?? json['name'] as String? ?? 'Hari Libur';
 
     // Nager.Date tidak punya field is_cuti, semua adalah hari libur nasional
     // Tapi ada tipe "Optional" yang bisa dianggap sebagai hari biasa
-    final types = (json['types'] as List<dynamic>?)
-            ?.map((e) => e.toString())
-            .toList() ??
+    final types =
+        (json['types'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
         ['Public'];
 
     // Anggap semua Public holiday sebagai isHoliday = true
@@ -81,9 +83,21 @@ class CalendarEvent {
   // ─────────────────────────────────────────────────────────────────
   static bool _isNationalHoliday(String title) {
     const keywords = [
-      'tahun baru', 'kemerdekaan', 'natal', 'idul fitri', 'idul adha',
-      'nyepi', 'waisak', 'paskah', 'kenaikan', 'imlek', 'maulid', 'isra',
-      'muharram', 'pancasila', 'buruh',
+      'tahun baru',
+      'kemerdekaan',
+      'natal',
+      'idul fitri',
+      'idul adha',
+      'nyepi',
+      'waisak',
+      'paskah',
+      'kenaikan',
+      'imlek',
+      'maulid',
+      'isra',
+      'muharram',
+      'pancasila',
+      'buruh',
     ];
     final lower = title.toLowerCase();
     return keywords.any((k) => lower.contains(k));

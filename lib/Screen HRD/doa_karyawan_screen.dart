@@ -61,24 +61,36 @@ class DoaRecord {
   });
 
   factory DoaRecord.fromJson(Map<String, dynamic> j) {
-    dynamic f(String a, String b) => j[a] ?? j[b];
+    // Debug sementara — hapus setelah fix confirmed
+
     return DoaRecord(
-      id: j['id'] as int?,
+      id: (j['id'] ?? j['Id']) as int?,
       tanggal:
-          DateTime.tryParse(f('tanggal', 'tanggal')?.toString() ?? '') ??
+          DateTime.tryParse((j['tanggal'] ?? j['Tanggal'])?.toString() ?? '') ??
           DateTime.now(),
-      pemimpinDoaId: f('pemimpinDoaId', 'pemimpin_doa_id')?.toString() ?? '',
+      pemimpinDoaId:
+          (j['pemimpinDoaId'] ?? j['PemimpinDoaId'] ?? j['pemimpin_doa_id'])
+              ?.toString() ??
+          '',
       pemimpinDoaName:
-          f('pemimpinDoaName', 'pemimpin_doa_name')?.toString() ?? '',
-      pesertaIds: ((j['pesertaIds'] ?? j['peserta_ids'] ?? []) as List)
-          .map((e) => e.toString())
-          .toList(),
-      pesertaNames: ((j['pesertaNames'] ?? j['peserta_names'] ?? []) as List)
-          .map((e) => e.toString())
-          .toList(),
-      catatan: f('catatan', 'catatan')?.toString(),
+          (j['pemimpinDoaName'] ??
+                  j['PemimpinDoaName'] ??
+                  j['pemimpin_doa_name'])
+              ?.toString() ??
+          '',
+      pesertaIds:
+          ((j['pesertaIds'] ?? j['PesertaIds'] ?? j['peserta_ids'] ?? [])
+                  as List)
+              .map((e) => e.toString())
+              .toList(),
+      pesertaNames:
+          ((j['pesertaNames'] ?? j['PesertaNames'] ?? j['peserta_names'] ?? [])
+                  as List)
+              .map((e) => e.toString())
+              .toList(),
+      catatan: (j['catatan'] ?? j['Catatan'])?.toString(),
       createdAt: DateTime.tryParse(
-        f('createdAt', 'created_at')?.toString() ?? '',
+        (j['createdAt'] ?? j['CreatedAt'] ?? j['created_at'])?.toString() ?? '',
       ),
     );
   }

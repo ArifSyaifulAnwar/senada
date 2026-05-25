@@ -1,5 +1,5 @@
 // Screen User/home/home_screen.dart — FULL REPLACE
-// ignore_for_file: unused_local_variable, unused_element, unused_field, deprecated_member_use, use_build_context_synchronously
+// ignore_for_file: unnecessary_brace_in_string_interps, unused_local_variable, unused_element, unused_field, deprecated_member_use, use_build_context_synchronously
 import 'dart:convert';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/liveattendance.dart';
@@ -36,7 +36,10 @@ class _HomePageState extends State<HomeScreen> {
   String? _accessToken;
   bool _isLoading = true;
   String? _errorMessage;
-
+  bool _isWeekendHome = false;
+  bool _isHariLiburHome = false;
+  bool _isWfhHome = false;
+  String _keteranganHariHome = '';
   bool _hasCheckedIn = false;
   bool _hasCheckedOut = false;
   bool _isLoadingAttendance = false;
@@ -62,12 +65,143 @@ class _HomePageState extends State<HomeScreen> {
     _initializeUserInfo();
     _checkTodayAttendanceStatus();
     _loadUnreadNotificationCount();
+    _checkHariIniHome();
   }
 
   Future<String?> loadUserId() async {
     final prefs = await SharedPreferences.getInstance();
     userID = prefs.getString('UserID');
     return userID;
+  }
+
+  Future<void> _checkHariIniHome() async {
+    try {
+      final today = DateTime.now();
+      if (today.weekday == DateTime.saturday ||
+          today.weekday == DateTime.sunday) {
+        if (mounted) {
+          setState(() {
+            _isWeekendHome = true;
+            _isHariLiburHome = true;
+            _keteranganHariHome = today.weekday == DateTime.saturday
+                ? 'Hari Sabtu'
+                : 'Hari Minggu';
+          });
+        }
+        return;
+      }
+
+      final tokenResp = await http
+          .post(
+            Uri.parse('$baseURL/api/auth/token'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (tokenResp.statusCode != 200) return;
+      final token = json.decode(tokenResp.body)['access_token'];
+
+      final tanggal =
+          '${today.year}-'
+          '${today.month.toString().padLeft(2, '0')}-'
+          '${today.day.toString().padLeft(2, '0')}';
+
+      final resp = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/check'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode({'tanggal': tanggal}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200 && mounted) {
+        final body = json.decode(resp.body);
+        setState(() {
+          _isWeekendHome = body['IsWeekend'] ?? body['is_weekend'] ?? false;
+          _isHariLiburHome =
+              body['IsHariLibur'] ?? body['is_hari_libur'] ?? false;
+          _isWfhHome = body['IsWfh'] ?? body['is_wfh'] ?? false;
+          _keteranganHariHome = body['Keterangan'] ?? body['keterangan'] ?? '';
+        });
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildHomeBanner() {
+    if (!_isHariLiburHome && !_isWfhHome) return const SizedBox.shrink();
+
+    Color bgColor, borderColor, textColor;
+    IconData icon;
+    String title, subtitle;
+
+    if (_isWeekendHome) {
+      bgColor = Colors.red[50]!;
+      borderColor = Colors.red[200]!;
+      textColor = Colors.red[800]!;
+      icon = Icons.weekend_rounded;
+      title = _keteranganHariHome;
+      subtitle = 'Geser absen dinonaktifkan. Ajukan lembur via fitur Lembur.';
+    } else if (_isHariLiburHome) {
+      bgColor = Colors.orange[50]!;
+      borderColor = Colors.orange[200]!;
+      textColor = Colors.orange[800]!;
+      icon = Icons.beach_access_rounded;
+      title = 'Hari Libur: $_keteranganHariHome';
+      subtitle = 'Hari ini libur. Masuk kantor? Ajukan lembur.';
+    } else {
+      bgColor = const Color(0xFFE8F8F2);
+      borderColor = const Color(0xFF10B981);
+      textColor = const Color(0xFF065F46);
+      icon = Icons.home_work_rounded;
+      title = 'Work From Home Hari Ini';
+      subtitle = _keteranganHariHome.isNotEmpty
+          ? _keteranganHariHome
+          : 'Absensi tetap dilakukan dari rumah.';
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: textColor, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: textColor.withOpacity(0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Load pending org count ───────────────────────────────────────────────
@@ -575,6 +709,9 @@ class _HomePageState extends State<HomeScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // ← TAMBAH banner di sini
+          _buildHomeBanner(),
+
           if (_attendanceStatusMessage.isNotEmpty)
             Padding(
               padding: EdgeInsets.only(bottom: 8 * scale),
@@ -590,7 +727,9 @@ class _HomePageState extends State<HomeScreen> {
             ),
           SlideAction(
             key: _slideActionKey,
-            onSubmit: (_hasCheckedOut || _isSlideActionProcessing)
+            // ← disable juga kalau weekend
+            onSubmit:
+                (_hasCheckedOut || _isSlideActionProcessing || _isWeekendHome)
                 ? null
                 : () async {
                     if (_isSlideActionProcessing) return null;
@@ -609,12 +748,15 @@ class _HomePageState extends State<HomeScreen> {
                     return null;
                   },
             sliderButtonIcon: Icon(_getSliderIcon(), color: Colors.white),
-            innerColor: _getSliderColor(),
-            outerColor: _getSliderColor().withOpacity(0.2),
-            elevation: _hasCheckedOut ? 1 : 4,
-            text: _getSliderText(),
+            innerColor: _isWeekendHome ? Colors.grey : _getSliderColor(),
+            outerColor: (_isWeekendHome ? Colors.grey : _getSliderColor())
+                .withOpacity(0.2),
+            elevation: (_hasCheckedOut || _isWeekendHome) ? 1 : 4,
+            text: _isWeekendHome
+                ? 'Hari ${_keteranganHariHome} — Tidak Bisa Absen'
+                : _getSliderText(),
             textStyle: TextStyle(
-              color: _hasCheckedOut
+              color: (_hasCheckedOut || _isWeekendHome)
                   ? Colors.grey[600]
                   : (_hasCheckedIn ? Colors.white : _getSliderColor()),
               fontWeight: FontWeight.bold,
@@ -625,7 +767,8 @@ class _HomePageState extends State<HomeScreen> {
             enabled:
                 !_hasCheckedOut &&
                 !_isLoadingAttendance &&
-                !_isSlideActionProcessing,
+                !_isSlideActionProcessing &&
+                !_isWeekendHome, // ← disable weekend
           ),
         ],
       ),

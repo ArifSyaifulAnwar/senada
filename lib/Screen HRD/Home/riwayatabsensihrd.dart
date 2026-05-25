@@ -64,8 +64,12 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     _tabController.addListener(() {
       if (mounted) setState(() => _webTabIndex = _tabController.index);
     });
-    _loadCurrentUser(); // ← TAMBAH
-    _loadInitialData();
+    _initAll(); // ← ganti jadi 1 fungsi yang sequential
+  }
+
+  Future<void> _initAll() async {
+    await _loadCurrentUser(); // ← tunggu dulu sampai userId ada
+    await _loadInitialData(); // ← baru load data
   }
 
   @override
@@ -279,7 +283,17 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     if (_currentUserId == null || attendanceData.isEmpty) return;
 
     final uniqueDates =
-        attendanceData.map((d) => d.attendanceDate).toSet().toList()..sort();
+        attendanceData
+            .map(
+              (d) => DateTime(
+                d.attendanceDate.year,
+                d.attendanceDate.month,
+                d.attendanceDate.day,
+              ),
+            )
+            .toSet()
+            .toList()
+          ..sort();
 
     final newMap = <String, String>{};
 
@@ -290,8 +304,9 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           tanggal,
         );
         for (final rec in records) {
-          final tStr = DateFormat('yyyy-MM-dd').format(rec.tanggal);
-          // Pemimpin & peserta = ikut
+          final tStr = DateFormat('yyyy-MM-dd').format(
+            DateTime(rec.tanggal.year, rec.tanggal.month, rec.tanggal.day),
+          );
           newMap['${tStr}_${rec.pemimpinDoaId.toLowerCase()}'] = 'ikut';
           for (final uid in rec.pesertaIds) {
             newMap['${tStr}_${uid.toLowerCase()}'] = 'ikut';
@@ -300,10 +315,23 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       } catch (_) {}
     }
 
-    // Karyawan yang hadir tapi tidak di doaMap pada hari yang ada sesi doa → 'tidak'
+    // Karyawan yang HADIR tapi tidak ikut doa → 'tidak'
     final hariAdaDoa = newMap.keys.map((k) => k.split('_').first).toSet();
     for (final d in attendanceData) {
-      final tStr = DateFormat('yyyy-MM-dd').format(d.attendanceDate);
+      // Skip yang tidak hadir — tidak dihitung doa
+      final status = d.displayStatus.toLowerCase();
+      if (status.contains('tidak hadir') ||
+          status.contains('tidak absen') ||
+          status.contains('absent'))
+        continue;
+
+      final tStr = DateFormat('yyyy-MM-dd').format(
+        DateTime(
+          d.attendanceDate.year,
+          d.attendanceDate.month,
+          d.attendanceDate.day,
+        ),
+      );
       final key = '${tStr}_${d.userId.toLowerCase()}';
       if (hariAdaDoa.contains(tStr) && !newMap.containsKey(key)) {
         newMap[key] = 'tidak';

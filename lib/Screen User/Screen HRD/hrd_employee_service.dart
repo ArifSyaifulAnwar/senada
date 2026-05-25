@@ -331,7 +331,7 @@ class HrdEmployeeService {
       final uid = await _userId();
       final r = await http
           .post(
-            Uri.parse('$_base/manager-list'),
+            Uri.parse('$baseURL/api/employee/list-karyawan'),
             headers: await _headers(),
             body: jsonEncode({
               'HrdUserId': uid,

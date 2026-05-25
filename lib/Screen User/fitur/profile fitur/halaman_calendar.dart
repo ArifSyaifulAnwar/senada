@@ -2,9 +2,9 @@
 
 import 'package:flutter/material.dart';
 import '../../../Services/calendar_event_service.dart';
+import '../../../Services/company_calendar_service.dart';
 import '../../../models/calendermodel.dart';
 
-// ── helper ──────────────────────────────────────────────────────────
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
@@ -52,19 +52,29 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     _loadEvents();
   }
 
+  // ── Load events: libur nasional + company calendar ────────────────
   Future<void> _loadEvents() async {
     setState(() => _isLoadingEvents = true);
-    // Service sudah handle semua error secara internal dan
-    // selalu return map (bisa kosong atau fallback), tidak pernah throw.
-    final events = await CalendarEventService.getDayoffEvents(
-      _focusedDate.year,
-    );
-    if (mounted) {
-      setState(() {
-        _events = events;
-        _isLoadingEvents = false;
-      });
+    try {
+      // 1. Libur nasional
+      var events = await CalendarEventService.getDayoffEvents(
+        _focusedDate.year,
+      );
+      // 2. Merge dengan company calendar (HRD custom)
+      events = await CalendarEventService.mergeWithCompanyCalendar(
+        events,
+        _focusedDate.year,
+      );
+      if (mounted) setState(() => _events = events);
+    } finally {
+      if (mounted) setState(() => _isLoadingEvents = false);
     }
+  }
+
+  Future<void> _loadEventsForYear(int year) async {
+    var events = await CalendarEventService.getDayoffEvents(year);
+    events = await CalendarEventService.mergeWithCompanyCalendar(events, year);
+    if (mounted) setState(() => _events.addAll(events));
   }
 
   List<CalendarEvent> _getEventsForDay(DateTime day) {
@@ -72,7 +82,9 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     return _events[dateKey] ?? [];
   }
 
-  bool _isSunday(DateTime date) => date.weekday == 7;
+  bool _isSaturday(DateTime date) => date.weekday == DateTime.saturday;
+  bool _isSunday(DateTime date) => date.weekday == DateTime.sunday;
+  bool _isWeekend(DateTime date) => _isSaturday(date) || _isSunday(date);
 
   bool _isToday(DateTime date) {
     final today = DateTime.now();
@@ -81,42 +93,52 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         date.day == today.day;
   }
 
-  bool _hasHolidayOrCuti(DateTime date) {
+  // Merah: weekend + libur nasional + libur company
+  bool _isHariMerah(DateTime date) {
+    if (_isWeekend(date)) return true;
     final events = _getEventsForDay(date);
     return events.any((e) => e.isHoliday || e.isCutiBersama);
+  }
+
+  // WFH: dari company calendar
+  bool _isWfh(DateTime date) {
+    final events = _getEventsForDay(date);
+    return events.any((e) => e.isWfh);
+  }
+
+  // Label keterangan hari
+  String? _getDayLabel(DateTime date) {
+    if (_isSunday(date)) return 'Minggu';
+    if (_isSaturday(date)) return 'Sabtu';
+    final events = _getEventsForDay(date);
+    final libur = events.where((e) => e.isHoliday || e.isCutiBersama).toList();
+    if (libur.isNotEmpty) return libur.first.title;
+    final wfh = events.where((e) => e.isWfh).toList();
+    if (wfh.isNotEmpty) return 'WFH';
+    return null;
   }
 
   void _previousMonth() {
     final newDate = DateTime(_focusedDate.year, _focusedDate.month - 1);
     setState(() => _focusedDate = newDate);
-    if (newDate.year != _selectedDate.year) _loadEventsForYear(newDate.year);
+    if (newDate.year != _focusedDate.year) _loadEventsForYear(newDate.year);
   }
 
   void _nextMonth() {
     final newDate = DateTime(_focusedDate.year, _focusedDate.month + 1);
     setState(() => _focusedDate = newDate);
-    if (newDate.year != _selectedDate.year) _loadEventsForYear(newDate.year);
+    if (newDate.year != _focusedDate.year) _loadEventsForYear(newDate.year);
   }
 
-  Future<void> _loadEventsForYear(int year) async {
-    final events = await CalendarEventService.getDayoffEvents(year);
-    if (mounted) setState(() => _events.addAll(events));
-  }
+  void _goToToday() => setState(() {
+    _focusedDate = DateTime.now();
+    _selectedDate = DateTime.now();
+  });
 
-  void _goToToday() {
-    setState(() {
-      _focusedDate = DateTime.now();
-      _selectedDate = DateTime.now();
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────
-  // BUILD UTAMA
   // ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isWeb = _isWideScreen(context);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: _buildAppBar(),
@@ -172,9 +194,10 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
             icon: const Icon(Icons.refresh, color: Colors.black87, size: 18),
             onPressed: () async {
               await CalendarEventService.refreshEvents(_focusedDate.year);
+              CompanyCalendarService.clearCache();
               _loadEvents();
             },
-            tooltip: 'Refresh Events',
+            tooltip: 'Refresh',
           ),
         ),
         Container(
@@ -186,16 +209,13 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
           child: IconButton(
             icon: const Icon(Icons.today, color: Colors.black87, size: 18),
             onPressed: _goToToday,
-            tooltip: 'Go to Today',
+            tooltip: 'Hari Ini',
           ),
         ),
       ],
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // MOBILE LAYOUT (layout asli, scroll vertikal)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildMobileLayout() {
     return RefreshIndicator(
       onRefresh: _loadEvents,
@@ -205,7 +225,9 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildCalendarHeader(),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            _buildLegend(),
+            const SizedBox(height: 16),
             _buildCalendarGrid(),
             const SizedBox(height: 24),
             _buildEventsSection(),
@@ -215,14 +237,10 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // WEB LAYOUT (2 kolom: kalender kiri | event list kanan)
-  // ─────────────────────────────────────────────────────────────────
   Widget _buildWebLayout() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ── Kolom kiri: Header + Grid kalender ─────────────
         Container(
           width: 420,
           height: double.infinity,
@@ -235,16 +253,14 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
             child: Column(
               children: [
                 _buildCalendarHeader(),
-                const SizedBox(height: 20),
-                _buildCalendarGrid(),
                 const SizedBox(height: 16),
-                _buildWebLegend(),
+                _buildLegend(),
+                const SizedBox(height: 16),
+                _buildCalendarGrid(),
               ],
             ),
           ),
         ),
-
-        // ── Kolom kanan: Event list ─────────────────────────
         Expanded(
           child: RefreshIndicator(
             onRefresh: _loadEvents,
@@ -258,43 +274,47 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     );
   }
 
-  // ── Legend kecil di bawah kalender (web only) ─────────
-  Widget _buildWebLegend() {
+  // ── Legend ────────────────────────────────────────────────────────
+  Widget _buildLegend() {
     final items = [
       {'color': const Color(0xFF3B82F6), 'label': 'Hari ini'},
-      {'color': Colors.red, 'label': 'Minggu / Libur'},
+      {'color': Colors.red, 'label': 'Libur / Merah'},
       {'color': Colors.orange, 'label': 'Cuti Bersama'},
+      {'color': const Color(0xFF10B981), 'label': 'WFH'},
+      {'color': Colors.grey[300]!, 'label': 'Sabtu'},
     ];
-
     return Wrap(
-      spacing: 16,
-      runSpacing: 8,
-      children: items.map((item) {
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: item['color'] as Color,
-                shape: BoxShape.circle,
-              ),
+      spacing: 12,
+      runSpacing: 6,
+      children: items
+          .map(
+            (item) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: item['color'] as Color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  item['label'] as String,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(
-              item['label'] as String,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-            ),
-          ],
-        );
-      }).toList(),
+          )
+          .toList(),
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // SHARED WIDGETS
-  // ─────────────────────────────────────────────────────────────────
+  // ── Calendar Header ───────────────────────────────────────────────
   Widget _buildCalendarHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
@@ -354,6 +374,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     );
   }
 
+  // ── Calendar Grid ─────────────────────────────────────────────────
   Widget _buildCalendarGrid() {
     return Container(
       decoration: BoxDecoration(
@@ -372,8 +393,11 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Header hari
             Row(
               children: _dayNames.map((dayName) {
+                final isMin = dayName == 'Min';
+                final isSab = dayName == 'Sab';
                 return Expanded(
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10),
@@ -383,8 +407,10 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: dayName == 'Min'
+                        color: isMin
                             ? Colors.red
+                            : isSab
+                            ? Colors.red[300]
                             : const Color(0xFF6B7280),
                       ),
                     ),
@@ -421,13 +447,42 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     for (int day = 1; day <= lastDayOfMonth.day; day++) {
       final date = DateTime(_focusedDate.year, _focusedDate.month, day);
       final events = _getEventsForDay(date);
-      final isSunday = _isSunday(date);
       final isToday = _isToday(date);
-      final hasHolidayOrCuti = _hasHolidayOrCuti(date);
+      final isHariMerah = _isHariMerah(date);
+      final isWfh = _isWfh(date);
+      final isSaturday = date.weekday == DateTime.saturday;
       final isSelected =
           _selectedDate.day == day &&
           _selectedDate.month == _focusedDate.month &&
           _selectedDate.year == _focusedDate.year;
+
+      // Warna teks tanggal
+      Color dateColor;
+      if (isToday) {
+        dateColor = Colors.white;
+      } else if (isHariMerah) {
+        dateColor = Colors.red;
+      } else if (isSaturday) {
+        dateColor = Colors.red[300]!;
+      } else if (isWfh) {
+        dateColor = const Color(0xFF059669);
+      } else {
+        dateColor = const Color(0xFF1F2937);
+      }
+
+      // Warna background tanggal
+      Color? bgColor;
+      if (isToday) {
+        bgColor = const Color(0xFF3B82F6);
+      } else if (isWfh && !isHariMerah) {
+        bgColor = const Color(0xFF10B981).withOpacity(0.12);
+      } else if (isSaturday && !isHariMerah) {
+        bgColor = Colors.grey[100];
+      } else if (isSelected) {
+        bgColor = const Color(0xFF3B82F6).withOpacity(0.1);
+      } else {
+        bgColor = Colors.transparent;
+      }
 
       days.add(
         Expanded(
@@ -440,14 +495,15 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
               height: 56,
               margin: const EdgeInsets.all(2),
               decoration: BoxDecoration(
-                color: isToday
-                    ? const Color(0xFF3B82F6)
-                    : isSelected
-                    ? const Color(0xFF3B82F6).withOpacity(0.1)
-                    : Colors.transparent,
+                color: bgColor,
                 borderRadius: BorderRadius.circular(8),
                 border: isToday
                     ? Border.all(color: const Color(0xFF3B82F6), width: 2)
+                    : isWfh && !isHariMerah
+                    ? Border.all(
+                        color: const Color(0xFF10B981).withOpacity(0.4),
+                        width: 1,
+                      )
                     : null,
               ),
               child: Column(
@@ -458,11 +514,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
-                      color: isToday
-                          ? Colors.white
-                          : (isSunday || hasHolidayOrCuti)
-                          ? Colors.red
-                          : const Color(0xFF1F2937),
+                      color: dateColor,
                     ),
                   ),
                   if (events.isNotEmpty) ...[
@@ -502,7 +554,6 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
       );
 
       if ((firstWeekday + day) % 7 == 0 || day == lastDayOfMonth.day) {
-        // Padding sisa akhir minggu
         if (day == lastDayOfMonth.day) {
           final remaining = 7 - days.length;
           for (int i = 0; i < remaining; i++) {
@@ -517,16 +568,15 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     return weeks;
   }
 
+  // ── Events Section ────────────────────────────────────────────────
   Widget _buildEventsSection() {
     final today = DateTime.now();
-    // "Hari Ini" hanya ditampilkan kalau sedang melihat bulan yang sama
     final isCurrentMonth =
         _focusedDate.year == today.year && _focusedDate.month == today.month;
     final todayEvents = isCurrentMonth
         ? _getEventsForDay(today)
         : <CalendarEvent>[];
 
-    // Filter event untuk bulan yang sedang dilihat
     final thisMonthEvents = <DateTime, List<CalendarEvent>>{};
     for (final entry in _events.entries) {
       final date = entry.key;
@@ -535,14 +585,12 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
       }
     }
 
-    // Sort by tanggal
     final sortedEntries = thisMonthEvents.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section header
         Row(
           children: [
             Container(
@@ -576,13 +624,11 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         ),
         const SizedBox(height: 16),
 
-        // Hari ini
         if (todayEvents.isNotEmpty) ...[
           _buildTodayEventsCard(todayEvents),
           const SizedBox(height: 16),
         ],
 
-        // Event bulan ini
         if (sortedEntries.isNotEmpty)
           ...sortedEntries.map(
             (entry) => _buildEventCard(entry.key, entry.value),
@@ -640,6 +686,23 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
   }
 
   Widget _buildEventCard(DateTime date, List<CalendarEvent> events) {
+    // Prioritas tampilan badge: libur company > cuti bersama > libur nasional > WFH
+    final hasCompanyLibur = events.any((e) => e.type == 'company_libur');
+    final hasCuti = events.any((e) => e.isCutiBersama);
+    final hasLibur = events.any((e) => e.isHoliday);
+    final hasWfh = events.any((e) => e.isWfh);
+
+    Widget? badge;
+    if (hasCompanyLibur) {
+      badge = _badge('Libur', Colors.red[700]!);
+    } else if (hasCuti) {
+      badge = _badge('Cuti', Colors.red);
+    } else if (hasLibur) {
+      badge = _badge('Libur', Colors.orange);
+    } else if (hasWfh) {
+      badge = _badge('WFH', const Color(0xFF10B981));
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -727,86 +790,46 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
                 ],
               ),
             ),
-            if (_isSunday(date) ||
-                events.any((e) => e.isHoliday || e.isCutiBersama))
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: events.any((e) => e.isCutiBersama)
-                      ? Colors.red.withOpacity(0.1)
-                      : Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  events.any((e) => e.isCutiBersama) ? 'Cuti' : 'Libur',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: events.any((e) => e.isCutiBersama)
-                        ? Colors.red
-                        : Colors.orange,
-                  ),
-                ),
-              ),
+            if (badge != null) badge,
           ],
         ),
       ),
     );
   }
 
-  Widget _buildEmptyEvents() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      child: const Center(
-        child: Column(
-          children: [
-            Icon(Icons.event_busy, size: 60, color: Color(0xFF9CA3AF)),
-            SizedBox(height: 16),
-            Text(
-              'Tidak ada event bulan ini',
-              style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
-            ),
-          ],
-        ),
+  Widget _badge(String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
+    ),
+  );
+
+  Widget _buildEmptyEvents() => Container(
+    padding: const EdgeInsets.all(32),
+    child: const Center(
+      child: Column(
+        children: [
+          Icon(Icons.event_busy, size: 60, color: Color(0xFF9CA3AF)),
+          SizedBox(height: 16),
+          Text(
+            'Tidak ada event bulan ini',
+            style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 
   Widget _buildEventBadge(CalendarEvent event) {
-    if (event.isCutiBersama) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.red.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: const Text(
-          'Cuti',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: Colors.red,
-          ),
-        ),
-      );
-    }
-    if (event.isHoliday) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.orange.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: const Text(
-          'Libur',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: Colors.orange,
-          ),
-        ),
-      );
-    }
+    if (event.type == 'company_libur') return _badge('Libur', Colors.red[700]!);
+    if (event.isCutiBersama) return _badge('Cuti', Colors.red);
+    if (event.isHoliday) return _badge('Libur', Colors.orange);
+    if (event.isWfh) return _badge('WFH', const Color(0xFF10B981));
     return const SizedBox.shrink();
   }
 
@@ -822,10 +845,27 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
               '${date.day} ${_monthNames[date.month - 1]} ${date.year}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
-            if (events.isNotEmpty && events.first.displayDate != null)
-              Text(
-                events.first.displayDate!,
-                style: const TextStyle(fontSize: 14, color: Colors.grey),
+            // Label hari (Minggu / Sabtu / nama libur / WFH)
+            if (_getDayLabel(date) != null)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _isHariMerah(date)
+                      ? Colors.red.withOpacity(0.1)
+                      : const Color(0xFF10B981).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _getDayLabel(date)!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _isHariMerah(date)
+                        ? Colors.red
+                        : const Color(0xFF10B981),
+                  ),
+                ),
               ),
           ],
         ),

@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import '../models/calendermodel.dart';
+import 'company_calendar_service.dart';
 
 /// CalendarEventService
 ///
@@ -100,6 +103,75 @@ class CalendarEventService {
       return eventMap;
     } catch (_) {
       return {};
+    }
+  }
+
+  // Merge company calendar events ke dalam map event
+  // Merge company calendar events ke dalam map event
+  static Future<Map<DateTime, List<CalendarEvent>>> mergeWithCompanyCalendar(
+    Map<DateTime, List<CalendarEvent>> existing,
+    int tahun,
+  ) async {
+    try {
+      final companyEvents = await CompanyCalendarService.getByYear(tahun);
+      if (companyEvents.isEmpty) return existing;
+
+      final merged = Map<DateTime, List<CalendarEvent>>.from(existing);
+
+      for (final ce in companyEvents) {
+        final key = DateTime(ce.tanggal.year, ce.tanggal.month, ce.tanggal.day);
+
+        late CalendarEvent calEvent;
+
+        if (ce.isLibur) {
+          // Hari libur custom HRD → tampil merah seperti hari libur nasional
+          calEvent = CalendarEvent(
+            title: ce.keterangan,
+            color: Colors.red[700]!,
+            type: 'company_libur',
+            isHoliday: true,
+            isCutiBersama: false,
+            isWfh: false,
+            source: 'company',
+            displayDate: DateFormat('yyyy-MM-dd').format(key),
+          );
+        } else if (ce.isWfh) {
+          // WFH → tampil hijau
+          calEvent = CalendarEvent(
+            title: ce.keterangan,
+            color: const Color(0xFF10B981),
+            type: 'company_wfh',
+            isHoliday: false,
+            isCutiBersama: false,
+            isWfh: true,
+            source: 'company',
+            displayDate: DateFormat('yyyy-MM-dd').format(key),
+          );
+        } else {
+          // LEMBUR → tampil amber
+          calEvent = CalendarEvent(
+            title: ce.keterangan,
+            color: Colors.amber[700]!,
+            type: 'company_lembur',
+            isHoliday: false,
+            isCutiBersama: false,
+            isWfh: false,
+            source: 'company',
+            displayDate: DateFormat('yyyy-MM-dd').format(key),
+          );
+        }
+
+        // Cek duplikat — jangan tambah kalau keterangan sama sudah ada
+        final existingEvents = merged[key] ?? [];
+        final isDuplicate = existingEvents.any((e) => e.title == ce.keterangan);
+        if (!isDuplicate) {
+          merged.putIfAbsent(key, () => []).add(calEvent);
+        }
+      }
+
+      return merged;
+    } catch (_) {
+      return existing;
     }
   }
 

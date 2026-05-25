@@ -6,7 +6,7 @@ import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/timeoffhrd.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
-import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/halaman_calendar.dart';
+
 import 'package:absensikaryawan/Screen%20admin/Home/liveattendanceadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
@@ -21,6 +21,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
+import '../../Screen User/Screen HRD/hrd_calendar_screen.dart';
 import '../../Screen User/fitur/org_approval_screen.dart';
 
 bool _isWideScreen(BuildContext context) =>
@@ -971,7 +972,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         const Color(0xFF007AFF),
         onTap: () => Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const HalamanCalendar()),
+          MaterialPageRoute(builder: (_) => const HrdCalendarScreen()),
         ),
       ),
       _buildServiceIconData(

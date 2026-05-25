@@ -8,13 +8,10 @@ class ExcelExportService {
   static List<int>? buildAbsensiExcel(
     List<AdminAttendanceData> data, {
     String? periodLabel,
-
-    /// Key: "yyyy-MM-dd_userid" (lowercase) → "ikut" | "tidak" | ""
     Map<String, String>? doaMap,
   }) {
     final excel = ex.Excel.createExcel();
     const sheetName = 'Data Absensi';
-
     ex.Sheet sheet = excel[sheetName];
     excel.delete('Sheet1');
     excel.setDefaultSheet(sheetName);
@@ -61,8 +58,7 @@ class ExcelExportService {
       );
     }
 
-    // ── Row 1: Judul ─────────────────────────────────────────────────────
-    // Sekarang ada 8 kolom: No|Nama|Dept|Tanggal|Jam Masuk|Jam Keluar|Status|doa
+    // ── Row 1: Judul — sekarang 10 kolom (A–J) ──────────────────────────
     sheet.cell(ex.CellIndex.indexByString('A1')).value = ex.TextCellValue(
       'LAPORAN DATA ABSENSI KARYAWAN',
     );
@@ -100,22 +96,22 @@ class ExcelExportService {
     sheet.cell(ex.CellIndex.indexByString('A2')).cellStyle = subInfoStyle;
     sheet.merge(
       ex.CellIndex.indexByString('A2'),
-      ex.CellIndex.indexByString('D2'),
+      ex.CellIndex.indexByString('E2'),
     );
 
-    sheet.cell(ex.CellIndex.indexByString('E2')).value = ex.TextCellValue(
+    sheet.cell(ex.CellIndex.indexByString('F2')).value = ex.TextCellValue(
       printDate,
     );
-    sheet.cell(ex.CellIndex.indexByString('E2')).cellStyle = subInfoStyle;
+    sheet.cell(ex.CellIndex.indexByString('F2')).cellStyle = subInfoStyle;
     sheet.merge(
-      ex.CellIndex.indexByString('E2'),
+      ex.CellIndex.indexByString('F2'),
       ex.CellIndex.indexByString('H2'),
     );
 
     // ── Row 3: Spacer ────────────────────────────────────────────────────
     sheet.cell(ex.CellIndex.indexByString('A3')).value = ex.TextCellValue('');
 
-    // ── Row 4: Header kolom (sekarang 8 kolom + kolom doa) ──────────────
+    // ── Row 4: Header kolom — 10 kolom ───────────────────────────────────
     const headers = [
       'No',
       'Nama Karyawan',
@@ -124,7 +120,7 @@ class ExcelExportService {
       'Jam Masuk',
       'Jam Keluar',
       'Status',
-      'doa',
+      'Doa',
     ];
     final headerStyle = makeStyle(
       bgColor: subHeaderBg,
@@ -142,44 +138,43 @@ class ExcelExportService {
     }
 
     // ── Lebar kolom ──────────────────────────────────────────────────────
-    sheet.setColumnWidth(0, 6);
-    sheet.setColumnWidth(1, 28);
-    sheet.setColumnWidth(2, 18);
-    sheet.setColumnWidth(3, 16);
-    sheet.setColumnWidth(4, 12);
-    sheet.setColumnWidth(5, 12);
-    sheet.setColumnWidth(6, 22);
-    sheet.setColumnWidth(7, 10); // doa
+    sheet.setColumnWidth(0, 6); // No
+    sheet.setColumnWidth(1, 28); // Nama
+    sheet.setColumnWidth(2, 18); // Dept
+    sheet.setColumnWidth(3, 16); // Tanggal
+    sheet.setColumnWidth(4, 12); // Jam Masuk
+    sheet.setColumnWidth(5, 12); // Jam Keluar
+    sheet.setColumnWidth(6, 22); // Status
+    sheet.setColumnWidth(7, 10); // Doa
+    sheet.setColumnWidth(8, 10); // Ikut Doa
+    sheet.setColumnWidth(9, 10); // Tidak Doa
 
-    // ── Tinggi baris header ──────────────────────────────────────────────
     sheet.setRowHeight(0, 28);
     sheet.setRowHeight(1, 18);
     sheet.setRowHeight(3, 22);
 
     // ── Kelompokkan per karyawan ─────────────────────────────────────────
-    // Pertahankan urutan asli dari data
     final grouped = <String, List<AdminAttendanceData>>{};
     for (final d in data) {
       grouped.putIfAbsent(d.userId, () => []).add(d);
     }
 
-    // Deteksi mode: per-hari (semua karyawan 1 record) vs multi-hari
-    // Kalau max record per karyawan == 1 → mode per-hari → tidak perlu summary per karyawan
     final maxPerKaryawan = grouped.values
         .map((v) => v.length)
         .fold(0, (a, b) => a > b ? a : b);
     final isMultiHari = maxPerKaryawan > 1;
 
     // ── Tulis data row ───────────────────────────────────────────────────
-    int rowIndex = 4; // 0-based, row ke-5 di Excel
+    int rowIndex = 4;
     int no = 1;
 
-    // Grand total accumulator
     int grandTotal = 0,
         grandTepat = 0,
         grandTerlambat = 0,
         grandCuti = 0,
-        grandTidakHadir = 0;
+        grandTidakHadir = 0,
+        grandIkutDoa = 0,
+        grandTidakDoa = 0;
 
     for (final entry in grouped.entries) {
       final rows = entry.value;
@@ -195,7 +190,6 @@ class ExcelExportService {
         );
         final statusStyle = _statusCellStyle(d.displayStatus, rowBg, borderHex);
 
-        // Kolom doa
         final tanggalKey =
             '${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}_${d.userId.toLowerCase()}';
         final doaVal = doaMap?[tanggalKey] ?? '';
@@ -221,24 +215,28 @@ class ExcelExportService {
         setCell(5, ex.TextCellValue(d.formattedCheckOut), centerStyle);
         setCell(6, ex.TextCellValue(d.displayStatus), statusStyle);
         setCell(7, ex.TextCellValue(doaVal), doaStyle);
+        // Kolom 8 & 9 kosong per-row (diisi di summary saja)
 
         rowIndex++;
         no++;
       }
 
-      // Akumulasi grand total
-      final counts = _countStatus(rows);
+      // Hitung summary termasuk doa
+      final counts = _countStatus(rows, doaMap);
       grandTotal += counts['total']!;
       grandTepat += counts['tepat']!;
       grandTerlambat += counts['terlambat']!;
       grandCuti += counts['cuti']!;
       grandTidakHadir += counts['tidakHadir']!;
+      grandIkutDoa += counts['ikutDoa']!;
+      grandTidakDoa += counts['tidakDoa']!;
 
-      // Summary per karyawan HANYA jika multi-hari
+      // Summary per karyawan (hanya multi-hari)
+      // ── Summary per karyawan (hanya multi-hari) ──────────────────
       if (isMultiHari) {
-        // Baris kosong
-        rowIndex++;
+        rowIndex++; // blank row
 
+        // Label row — tetap 8 kolom (A-H)
         final summaryLabelStyle = makeStyle(
           bgColor: headerBg,
           fontColor: headerFg,
@@ -246,13 +244,8 @@ class ExcelExportService {
           fontSize: 9,
           hAlign: ex.HorizontalAlign.Center,
         );
-        final summaryLabels = [
-          'Total Data',
-          'Tepat Waktu',
-          'Terlambat',
-          'Cuti',
-          'Tidak Hadir',
-        ];
+
+        // Col 0: kosong
         sheet
                 .cell(
                   ex.CellIndex.indexByColumnRow(
@@ -269,6 +262,17 @@ class ExcelExportService {
             .value = ex.TextCellValue(
           '',
         );
+
+        // Labels di col 1–7 (B–H)
+        final summaryLabels = [
+          'Total Data',
+          'Tepat Waktu',
+          'Terlambat',
+          'Cuti',
+          'Tidak Hadir',
+          'Ikut Doa',
+          'Tidak Doa',
+        ];
         for (int col = 0; col < summaryLabels.length; col++) {
           final cell = sheet.cell(
             ex.CellIndex.indexByColumnRow(
@@ -279,32 +283,17 @@ class ExcelExportService {
           cell.value = ex.TextCellValue(summaryLabels[col]);
           cell.cellStyle = summaryLabelStyle;
         }
-        sheet
-                .cell(
-                  ex.CellIndex.indexByColumnRow(
-                    columnIndex: 6,
-                    rowIndex: rowIndex,
-                  ),
-                )
-                .cellStyle =
-            summaryLabelStyle;
-        sheet
-                .cell(
-                  ex.CellIndex.indexByColumnRow(
-                    columnIndex: 7,
-                    rowIndex: rowIndex,
-                  ),
-                )
-                .cellStyle =
-            summaryLabelStyle;
         sheet.setRowHeight(rowIndex, 18);
         rowIndex++;
 
+        // Value row
         final summaryValColors = [
           '#EBF5FB',
           '#D5F5E3',
           '#FDEBD0',
           '#D6EAF8',
+          '#FADBD8',
+          '#D5F5E3',
           '#FADBD8',
         ];
         final summaryFontColors = [
@@ -313,6 +302,8 @@ class ExcelExportService {
           '#784212',
           '#154360',
           '#7B241C',
+          '#1E8449',
+          '#7B241C',
         ];
         final summaryValues = [
           counts['total']!,
@@ -320,6 +311,8 @@ class ExcelExportService {
           counts['terlambat']!,
           counts['cuti']!,
           counts['tidakHadir']!,
+          counts['ikutDoa']!,
+          counts['tidakDoa']!,
         ];
 
         final namaStyle = makeStyle(
@@ -361,36 +354,15 @@ class ExcelExportService {
             hAlign: ex.HorizontalAlign.Center,
           );
         }
-        sheet
-                .cell(
-                  ex.CellIndex.indexByColumnRow(
-                    columnIndex: 6,
-                    rowIndex: rowIndex,
-                  ),
-                )
-                .cellStyle =
-            namaStyle;
-        sheet
-                .cell(
-                  ex.CellIndex.indexByColumnRow(
-                    columnIndex: 7,
-                    rowIndex: rowIndex,
-                  ),
-                )
-                .cellStyle =
-            namaStyle;
         sheet.setRowHeight(rowIndex, 22);
         rowIndex++;
-        rowIndex++; // extra blank row antar karyawan
+        rowIndex++; // extra blank
       }
     }
 
-    // ── Grand Total / Summary — selalu tampil di bawah ─────────────────
-    // Kalau per-hari: 1 baris summary saja (tidak perlu cek grouped.length)
+    // ── Grand Total ──────────────────────────────────────────────────────
     {
       rowIndex++;
-
-      // Label grand total
       final grandLabelStyle = makeStyle(
         bgColor: '#1A252F',
         fontColor: headerFg,
@@ -422,6 +394,8 @@ class ExcelExportService {
         'Terlambat',
         'Cuti',
         'Tidak Hadir',
+        'Ikut Doa',
+        'Tidak Doa',
       ];
       for (int col = 0; col < grandLabels.length; col++) {
         final cell = sheet.cell(
@@ -433,27 +407,18 @@ class ExcelExportService {
         cell.value = ex.TextCellValue(grandLabels[col]);
         cell.cellStyle = grandLabelStyle;
       }
-      for (int col = 6; col <= 7; col++) {
-        sheet
-                .cell(
-                  ex.CellIndex.indexByColumnRow(
-                    columnIndex: col,
-                    rowIndex: rowIndex,
-                  ),
-                )
-                .cellStyle =
-            grandLabelStyle;
-      }
+      // Col 8 & 9 sudah di grandLabels ✓ — col 0 sudah diset
       sheet.setRowHeight(rowIndex, 18);
       rowIndex++;
 
-      // Nilai grand total
       final grandValues = [
         grandTotal,
         grandTepat,
         grandTerlambat,
         grandCuti,
         grandTidakHadir,
+        grandIkutDoa,
+        grandTidakDoa,
       ];
       final grandColors = [
         '#D6DBDF',
@@ -461,12 +426,16 @@ class ExcelExportService {
         '#FDEBD0',
         '#D6EAF8',
         '#FADBD8',
+        '#D5F5E3',
+        '#FADBD8',
       ];
       final grandFonts = [
         '#1A252F',
         '#1E8449',
         '#784212',
         '#154360',
+        '#7B241C',
+        '#1E8449',
         '#7B241C',
       ];
 
@@ -497,32 +466,25 @@ class ExcelExportService {
           hAlign: ex.HorizontalAlign.Center,
         );
       }
-      for (int col = 6; col <= 7; col++) {
-        sheet
-            .cell(
-              ex.CellIndex.indexByColumnRow(
-                columnIndex: col,
-                rowIndex: rowIndex,
-              ),
-            )
-            .cellStyle = makeStyle(
-          bgColor: '#D6DBDF',
-        );
-      }
       sheet.setRowHeight(rowIndex, 26);
     }
 
     return excel.encode();
   }
 
-  // ── Hitung status per grup karyawan ──────────────────────────────────
-  static Map<String, int> _countStatus(List<AdminAttendanceData> rows) {
+  // ── Hitung status + doa per grup karyawan ────────────────────────────
+  static Map<String, int> _countStatus(
+    List<AdminAttendanceData> rows,
+    Map<String, String>? doaMap,
+  ) {
     int tepat = 0, terlambat = 0, cuti = 0, tidakHadir = 0;
+    int ikutDoa = 0, tidakDoa = 0;
+
     for (final d in rows) {
       final s = d.displayStatus.toLowerCase();
-      if (s.contains('tepat')) {
+      if (s.contains('tepat'))
         tepat++;
-      } else if (s.contains('terlambat'))
+      else if (s.contains('terlambat'))
         terlambat++;
       else if (s.contains('cuti') || s.contains('dinas luar'))
         cuti++;
@@ -530,17 +492,30 @@ class ExcelExportService {
           s.contains('absent') ||
           s.contains('tidak absen'))
         tidakHadir++;
+
+      // Hitung doa
+      if (doaMap != null) {
+        final tanggalKey =
+            '${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}_${d.userId.toLowerCase()}';
+        final doaVal = doaMap[tanggalKey] ?? '';
+        if (doaVal == 'ikut')
+          ikutDoa++;
+        else if (doaVal == 'tidak')
+          tidakDoa++;
+      }
     }
+
     return {
       'total': rows.length,
       'tepat': tepat,
       'terlambat': terlambat,
       'cuti': cuti,
       'tidakHadir': tidakHadir,
+      'ikutDoa': ikutDoa,
+      'tidakDoa': tidakDoa,
     };
   }
 
-  // ── Style cell status ─────────────────────────────────────────────────
   static ex.CellStyle _statusCellStyle(
     String status,
     String rowBg,
@@ -548,7 +523,6 @@ class ExcelExportService {
   ) {
     final s = status.toLowerCase();
     String fontColor, bgColor;
-
     if (s.contains('tepat')) {
       fontColor = '#1E8449';
       bgColor = '#D5F5E3';
@@ -592,7 +566,6 @@ class ExcelExportService {
     );
   }
 
-  // ── Style cell doa ────────────────────────────────────────────────────
   static ex.CellStyle _doaCellStyle(
     String doa,
     String rowBg,
@@ -609,6 +582,7 @@ class ExcelExportService {
       fontColor = '#424949';
       bgColor = rowBg;
     }
+
     final b = ex.Border(
       borderStyle: ex.BorderStyle.Thin,
       borderColorHex: ex.ExcelColor.fromHexString(borderHex),
