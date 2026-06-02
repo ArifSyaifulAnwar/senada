@@ -534,34 +534,41 @@ class _BroadcastNotifScreenState extends State<BroadcastNotifScreen> {
               // ── Tandai Penting ──────────────────────────────────
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: const Color(0xFFE5E7EB)),
                 ),
-                child: SwitchListTile(
-                  title: const Text(
-                    'Tandai Penting',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: const Text(
-                    'Notifikasi akan muncul lebih menonjol',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                  ),
-                  value: _isImportant,
-                  onChanged: (v) => setState(() => _isImportant = v),
-                  activeColor: const Color(0xFFEF4444),
-                  secondary: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _isImportant
-                          ? Colors.red.withOpacity(0.1)
-                          : Colors.grey.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  clipBehavior: Clip.antiAlias,
+                  child: SwitchListTile(
+                    title: const Text(
+                      'Tandai Penting',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.priority_high_rounded,
-                      color: _isImportant ? Colors.red : Colors.grey,
-                      size: 20,
+                    subtitle: const Text(
+                      'Notifikasi akan muncul lebih menonjol',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                    ),
+                    value: _isImportant,
+                    onChanged: (v) => setState(() => _isImportant = v),
+                    activeColor: const Color(0xFFEF4444),
+                    secondary: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: _isImportant
+                            ? Colors.red.withOpacity(0.1)
+                            : Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.priority_high_rounded,
+                        color: _isImportant ? Colors.red : Colors.grey,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ),

@@ -23,6 +23,7 @@ import 'package:slide_to_act/slide_to_act.dart';
 
 import '../../Screen User/Screen HRD/hrd_calendar_screen.dart';
 import '../../Screen User/fitur/org_approval_screen.dart';
+import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Services/notification_service.dart';
 import '../notifikasi_broadcast_screen.dart';
 
@@ -970,6 +971,12 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         Icons.folder_open,
         'File Saya',
         const Color(0xFFFFCC02),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const InfoProfileScreen(initialTabIndex: 2),
+          ),
+        ),
       ),
       _buildServiceIconData(
         Icons.campaign_rounded,

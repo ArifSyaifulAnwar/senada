@@ -1,10 +1,21 @@
 // screens/overtime_hrd_screen.dart
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:absensikaryawan/Screen%20admin/Home/overtimeadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/model/overtimemodeladmin.dart';
 import 'package:absensikaryawan/Screen%20admin/service/overtimeadminservice.dart';
+import 'package:absensikaryawan/Services/web_download.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ── helper ──────────────────────────────────────────────────────────
@@ -24,7 +35,8 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   List<AdminOvertimeData> _filteredOvertimes = [];
   List<UserWithOvertimes> _users = [];
   OvertimeAdminStatistics? _statistics;
-
+  int _selectedYear = DateTime.now().year;
+  int? _selectedMonth = DateTime.now().month;
   bool _isLoading = true;
   String? _currentUserId;
   String? _currentUserName;
@@ -32,7 +44,12 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   String? _selectedUserId;
   bool _isSelectionMode = false;
   Set<int> _selectedItems = {};
-
+  double _policyMaxDailyHours = 4;
+  double _policyMaxMonthlyHours = 40;
+  double _policyAutoApproveUnderHours = 1;
+  double _policyRequireApprovalAboveHours = 2;
+  bool _policyAllowWeekend = false;
+  bool _policyRequireNote = true;
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
 
@@ -69,6 +86,9 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       final prefs = await SharedPreferences.getInstance();
       _currentUserId = prefs.getString('UserID');
       _currentUserName = prefs.getString('Name');
+
+      await _loadPolicySettings();
+
       if (_currentUserId != null && _currentUserName != null) {
         await _loadAllData();
       } else {
@@ -90,16 +110,25 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       try {
         final futures =
             await Future.wait([
-              OvertimeAdminService.getAllOvertimes(adminId: _currentUserId!),
+              OvertimeAdminService.getAllOvertimes(
+                adminId: _currentUserId!,
+                yearFilter: _selectedYear,
+                monthFilter: _selectedMonth,
+              ),
               OvertimeAdminService.getUsersWithOvertimes(
                 adminId: _currentUserId!,
+                year: _selectedYear,
+                month: _selectedMonth,
               ),
-              OvertimeAdminService.getAdminStatistics(),
+              OvertimeAdminService.getAdminStatistics(
+                adminId: _currentUserId!,
+                year: _selectedYear,
+                month: _selectedMonth,
+              ),
             ]).timeout(
               const Duration(seconds: 30),
               onTimeout: () => throw Exception('Request timeout.'),
             );
-
         final overtimes =
             (futures[0] as ApiResponse<List<AdminOvertimeData>>).data ?? [];
         final users =
@@ -129,6 +158,86 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     }
   }
 
+  Widget _buildMonthYearFilter() {
+    final currentYear = DateTime.now().year;
+    final years = List<int>.generate(6, (index) => currentYear - index);
+
+    final months = <DropdownMenuItem<int?>>[
+      const DropdownMenuItem<int?>(value: null, child: Text('Semua Bulan')),
+      const DropdownMenuItem<int?>(value: 1, child: Text('Januari')),
+      const DropdownMenuItem<int?>(value: 2, child: Text('Februari')),
+      const DropdownMenuItem<int?>(value: 3, child: Text('Maret')),
+      const DropdownMenuItem<int?>(value: 4, child: Text('April')),
+      const DropdownMenuItem<int?>(value: 5, child: Text('Mei')),
+      const DropdownMenuItem<int?>(value: 6, child: Text('Juni')),
+      const DropdownMenuItem<int?>(value: 7, child: Text('Juli')),
+      const DropdownMenuItem<int?>(value: 8, child: Text('Agustus')),
+      const DropdownMenuItem<int?>(value: 9, child: Text('September')),
+      const DropdownMenuItem<int?>(value: 10, child: Text('Oktober')),
+      const DropdownMenuItem<int?>(value: 11, child: Text('November')),
+      const DropdownMenuItem<int?>(value: 12, child: Text('Desember')),
+    ];
+
+    return Row(
+      children: [
+        Expanded(
+          child: DropdownButtonFormField<int?>(
+            value: _selectedMonth,
+            decoration: InputDecoration(
+              labelText: 'Bulan',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              isDense: true,
+            ),
+            items: months,
+            onChanged: (value) async {
+              setState(() {
+                _selectedMonth = value;
+              });
+              await _loadAllData();
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: DropdownButtonFormField<int>(
+            value: _selectedYear,
+            decoration: InputDecoration(
+              labelText: 'Tahun',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              isDense: true,
+            ),
+            items: years.map((year) {
+              return DropdownMenuItem<int>(
+                value: year,
+                child: Text(year.toString()),
+              );
+            }).toList(),
+            onChanged: (value) async {
+              if (value == null) return;
+
+              setState(() {
+                _selectedYear = value;
+              });
+              await _loadAllData();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _loadDataIndividually() async {
     List<AdminOvertimeData> overtimes = [];
     List<UserWithOvertimes> users = [];
@@ -138,20 +247,32 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       overtimes =
           (await OvertimeAdminService.getAllOvertimes(
             adminId: _currentUserId!,
+            yearFilter: _selectedYear,
+            monthFilter: _selectedMonth,
           )).data ??
           [];
     } catch (e) {
       _showErrorSnackBar('Gagal memuat data overtime: $e');
     }
+
     try {
       users =
           (await OvertimeAdminService.getUsersWithOvertimes(
             adminId: _currentUserId!,
+            year: _selectedYear,
+            month: _selectedMonth,
           )).data ??
           [];
-    } catch (_) {}
+    } catch (e) {
+      _showErrorSnackBar('Gagal memuat data user overtime: $e');
+    }
+
     try {
-      statistics = (await OvertimeAdminService.getAdminStatistics()).data;
+      statistics = (await OvertimeAdminService.getAdminStatistics(
+        adminId: _currentUserId!,
+        year: _selectedYear,
+        month: _selectedMonth,
+      )).data;
     } catch (_) {}
 
     setState(() {
@@ -857,6 +978,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       onRefresh: _refreshData,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
+        physics: const AlwaysScrollableScrollPhysics(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -892,6 +1014,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
+                        const SizedBox(height: 4),
                         Text(
                           _currentUserName ?? 'HRD Manager',
                           style: TextStyle(
@@ -906,10 +1029,100 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                 ],
               ),
             ),
+
+            const SizedBox(height: 20),
+
+            // Filter Periode
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.calendar_month,
+                          size: 17,
+                          color: Color(0xFF6366F1),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Periode Data Overtime',
+                          style: TextStyle(
+                            fontSize: _getResponsiveFontSize(context, 14),
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFF1F2937),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildMonthYearFilter(),
+                ],
+              ),
+            ),
+
             const SizedBox(height: 24),
+
+            // Statistics Cards
             if (_statistics != null) _buildStatisticsCards(_statistics!),
+
+            if (_statistics == null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      color: Color(0xFF6B7280),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Statistik belum tersedia untuk periode ini.',
+                        style: TextStyle(
+                          fontSize: _getResponsiveFontSize(context, 13),
+                          color: const Color(0xFF6B7280),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             const SizedBox(height: 24),
-            // Dashboard 2 kolom di web
+
+            // Dashboard 2 kolom di web / 1 kolom di mobile
             LayoutBuilder(
               builder: (context, constraints) {
                 if (constraints.maxWidth >= 600) {
@@ -922,7 +1135,9 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                     ],
                   );
                 }
+
                 return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildUrgentItems(),
                     const SizedBox(height: 24),
@@ -1005,15 +1220,19 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                     const SizedBox(height: 10),
                     // Filter dropdowns
                     if (isWide)
-                      Row(
+                      Column(
                         children: [
-                          Flexible(child: _buildStatusFilter()),
-                          const SizedBox(width: 10),
-                          Flexible(child: _buildDepartmentFilter()),
-                          const SizedBox(width: 10),
-                          Flexible(child: _buildDateRangeFilter()),
-                          const SizedBox(width: 10),
-                          Flexible(child: _buildUserFilter()),
+                          Row(
+                            children: [
+                              Flexible(child: _buildStatusFilter()),
+                              const SizedBox(width: 10),
+                              Flexible(child: _buildDepartmentFilter()),
+                              const SizedBox(width: 10),
+                              Flexible(child: _buildUserFilter()),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          _buildMonthYearFilter(),
                         ],
                       )
                     else
@@ -1027,13 +1246,9 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                             ],
                           ),
                           const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Flexible(child: _buildDateRangeFilter()),
-                              const SizedBox(width: 10),
-                              Flexible(child: _buildUserFilter()),
-                            ],
-                          ),
+                          _buildUserFilter(),
+                          const SizedBox(height: 10),
+                          _buildMonthYearFilter(),
                         ],
                       ),
                   ],
@@ -1174,31 +1389,52 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   Widget _buildUsersTab() {
     return RefreshIndicator(
       onRefresh: _refreshData,
-      child: _users.isEmpty
-          ? _buildEmptyState()
-          : LayoutBuilder(
-              builder: (context, constraints) {
-                if (constraints.maxWidth >= 700) {
-                  return GridView.builder(
-                    padding: const EdgeInsets.all(20),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                          childAspectRatio: 1.4,
-                        ),
-                    itemCount: _users.length,
-                    itemBuilder: (_, i) => _buildHRDUserCard(_users[i]),
-                  );
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _users.length,
-                  itemBuilder: (_, i) => _buildHRDUserCard(_users[i]),
-                );
-              },
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.white,
+            child: _buildMonthYearFilter(),
+          ),
+
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            color: const Color(0xFFF8FAFC),
+            child: Row(
+              children: [
+                const Text(
+                  'Daftar User Overtime',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${_users.length} user',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ],
             ),
+          ),
+
+          Expanded(
+            child: _users.isEmpty
+                ? _buildEmptyState()
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _users.length,
+                    itemBuilder: (context, index) {
+                      return _buildHRDUserCard(_users[index]);
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1763,30 +1999,6 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     onChanged: (_) {},
   );
 
-  Widget _buildDateRangeFilter() => DropdownButtonFormField<String>(
-    value: 'Bulan Ini',
-    decoration: InputDecoration(
-      labelText: 'Periode',
-      labelStyle: TextStyle(fontSize: _getResponsiveFontSize(context, 11)),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      isDense: true,
-    ),
-    style: TextStyle(
-      fontSize: _getResponsiveFontSize(context, 13),
-      color: Colors.black,
-    ),
-    isExpanded: true,
-    items: ['Hari Ini', 'Minggu Ini', 'Bulan Ini', 'Custom']
-        .map(
-          (r) => DropdownMenuItem(
-            value: r,
-            child: Text(r, overflow: TextOverflow.ellipsis),
-          ),
-        )
-        .toList(),
-    onChanged: (_) {},
-  );
 
   Widget _buildUserFilter() {
     final opts = ['Semua User'] + _users.map((u) => u.name).toList();
@@ -2558,35 +2770,651 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     }
   }
 
-  void _showOvertimeReport() => showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('Laporan Overtime'),
-      content: const Text('Fitur laporan overtime akan segera tersedia'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('OK'),
-        ),
-      ],
-    ),
-  );
+  Future<void> _loadPolicySettings() async {
+    final prefs = await SharedPreferences.getInstance();
 
-  void _showPolicySettings() => showDialog(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('Pengaturan Kebijakan'),
-      content: const Text(
-        'Fitur pengaturan kebijakan overtime akan segera tersedia',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('OK'),
+    _policyMaxDailyHours =
+        prefs.getDouble('overtime_policy_max_daily_hours') ?? 4;
+    _policyMaxMonthlyHours =
+        prefs.getDouble('overtime_policy_max_monthly_hours') ?? 40;
+    _policyAutoApproveUnderHours =
+        prefs.getDouble('overtime_policy_auto_approve_under_hours') ?? 1;
+    _policyRequireApprovalAboveHours =
+        prefs.getDouble('overtime_policy_require_approval_above_hours') ?? 2;
+    _policyAllowWeekend =
+        prefs.getBool('overtime_policy_allow_weekend') ?? false;
+    _policyRequireNote = prefs.getBool('overtime_policy_require_note') ?? true;
+  }
+
+  Future<void> _savePolicySettings({
+    required double maxDailyHours,
+    required double maxMonthlyHours,
+    required double autoApproveUnderHours,
+    required double requireApprovalAboveHours,
+    required bool allowWeekend,
+    required bool requireNote,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setDouble('overtime_policy_max_daily_hours', maxDailyHours);
+    await prefs.setDouble('overtime_policy_max_monthly_hours', maxMonthlyHours);
+    await prefs.setDouble(
+      'overtime_policy_auto_approve_under_hours',
+      autoApproveUnderHours,
+    );
+    await prefs.setDouble(
+      'overtime_policy_require_approval_above_hours',
+      requireApprovalAboveHours,
+    );
+    await prefs.setBool('overtime_policy_allow_weekend', allowWeekend);
+    await prefs.setBool('overtime_policy_require_note', requireNote);
+
+    setState(() {
+      _policyMaxDailyHours = maxDailyHours;
+      _policyMaxMonthlyHours = maxMonthlyHours;
+      _policyAutoApproveUnderHours = autoApproveUnderHours;
+      _policyRequireApprovalAboveHours = requireApprovalAboveHours;
+      _policyAllowWeekend = allowWeekend;
+      _policyRequireNote = requireNote;
+    });
+
+    _showSuccessSnackBar('Policy overtime berhasil disimpan');
+  }
+
+  String _csv(String value) {
+    if (value.contains(',') || value.contains('"') || value.contains('\n')) {
+      return '"${value.replaceAll('"', '""')}"';
+    }
+    return value;
+  }
+
+  String _formatReportDate(DateTime date) {
+    return DateFormat('dd/MM/yyyy HH:mm', 'id_ID').format(date);
+  }
+
+  Future<void> _downloadOvertimeReportCsv(List<AdminOvertimeData> data) async {
+    if (data.isEmpty) {
+      _showErrorSnackBar('Tidak ada data overtime untuk dibuat laporan');
+      return;
+    }
+
+    final totalJam = data.fold<double>(0, (sum, item) => sum + item.totalJam);
+    final pending = data
+        .where((e) => e.status.toLowerCase() == 'pending')
+        .length;
+    final approved = data
+        .where((e) => e.status.toLowerCase() == 'approved')
+        .length;
+    final rejected = data
+        .where((e) => e.status.toLowerCase() == 'rejected')
+        .length;
+
+    final Map<String, double> jamByUser = {};
+    final Map<String, int> countByUser = {};
+    final Map<String, double> jamByDept = {};
+
+    for (final item in data) {
+      jamByUser[item.userName] =
+          (jamByUser[item.userName] ?? 0) + item.totalJam;
+      countByUser[item.userName] = (countByUser[item.userName] ?? 0) + 1;
+
+      final dept = _getUserDepartment(item);
+      jamByDept[dept] = (jamByDept[dept] ?? 0) + item.totalJam;
+    }
+
+    final topUsers = jamByUser.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final topDepartments = jamByDept.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final buffer = StringBuffer();
+
+    buffer.writeln('\uFEFFLAPORAN OVERTIME HRD');
+    buffer.writeln(
+      'Tanggal Export,${DateFormat('dd MMM yyyy HH:mm', 'id_ID').format(DateTime.now())}',
+    );
+    buffer.writeln('Dibuat Oleh,${_csv(_currentUserName ?? '-')}');
+    buffer.writeln('Total Data,${data.length}');
+    buffer.writeln('');
+
+    buffer.writeln('RINGKASAN');
+    buffer.writeln('Total Pengajuan,${data.length}');
+    buffer.writeln('Pending,$pending');
+    buffer.writeln('Approved,$approved');
+    buffer.writeln('Rejected,$rejected');
+    buffer.writeln('Total Jam Overtime,${totalJam.toStringAsFixed(1)} jam');
+    buffer.writeln(
+      'Rata-rata Jam per Pengajuan,${(totalJam / data.length).toStringAsFixed(1)} jam',
+    );
+    buffer.writeln('');
+
+    buffer.writeln('POLICY YANG BERLAKU');
+    buffer.writeln(
+      'Maksimal Overtime Harian,${_policyMaxDailyHours.toStringAsFixed(1)} jam',
+    );
+    buffer.writeln(
+      'Maksimal Overtime Bulanan,${_policyMaxMonthlyHours.toStringAsFixed(1)} jam',
+    );
+    buffer.writeln(
+      'Auto Approve Di Bawah,${_policyAutoApproveUnderHours.toStringAsFixed(1)} jam',
+    );
+    buffer.writeln(
+      'Wajib Approval Di Atas,${_policyRequireApprovalAboveHours.toStringAsFixed(1)} jam',
+    );
+    buffer.writeln('Boleh Weekend,${_policyAllowWeekend ? "Ya" : "Tidak"}');
+    buffer.writeln('Wajib Catatan,${_policyRequireNote ? "Ya" : "Tidak"}');
+    buffer.writeln('');
+
+    buffer.writeln('REKAP PER KARYAWAN');
+    buffer.writeln('Nama,Jumlah Pengajuan,Total Jam');
+    for (final entry in topUsers) {
+      buffer.writeln(
+        '${_csv(entry.key)},${countByUser[entry.key] ?? 0},${entry.value.toStringAsFixed(1)}',
+      );
+    }
+    buffer.writeln('');
+
+    buffer.writeln('REKAP PER DEPARTEMEN');
+    buffer.writeln('Departemen,Total Jam');
+    for (final entry in topDepartments) {
+      buffer.writeln('${_csv(entry.key)},${entry.value.toStringAsFixed(1)}');
+    }
+    buffer.writeln('');
+
+    buffer.writeln('DETAIL DATA OVERTIME');
+    buffer.writeln(
+      'ID,Nama,Departemen,Jabatan,Tanggal,Jam Mulai - Selesai,Total Jam,Status,Catatan,Alasan Penolakan,Diajukan',
+    );
+
+    for (final item in data) {
+      buffer.writeln(
+        [
+          item.id,
+          _csv(item.userName),
+          _csv(_getUserDepartment(item)),
+          _csv(item.userJob ?? '-'),
+          _csv(item.formattedDate),
+          _csv(item.formattedTimeRange),
+          item.totalJam.toStringAsFixed(1),
+          _csv(item.statusText),
+          _csv(item.catatan ?? '-'),
+          _csv(item.rejectionReason ?? '-'),
+          _csv(_formatReportDate(item.submittedAt)),
+        ].join(','),
+      );
+    }
+
+    final bytes = Uint8List.fromList(utf8.encode(buffer.toString()));
+    final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+    final fileName = 'Laporan_Overtime_HRD_$timestamp.csv';
+
+    try {
+      if (kIsWeb) {
+        downloadFileWeb(bytes, fileName);
+        _showSuccessSnackBar('Laporan overtime berhasil diunduh');
+        return;
+      }
+
+      if (Platform.isAndroid) {
+        final info = await DeviceInfoPlugin().androidInfo;
+        final permission = info.version.sdkInt >= 33
+            ? Permission.photos
+            : Permission.storage;
+
+        var status = await permission.status;
+        if (status.isDenied || status.isPermanentlyDenied) {
+          status = await permission.request();
+        }
+
+        if (!status.isGranted) {
+          _showErrorSnackBar(
+            'Izin penyimpanan diperlukan untuk export laporan',
+          );
+          return;
+        }
+      }
+
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) {
+        throw Exception('Direktori penyimpanan tidak ditemukan');
+      }
+
+      final path = '${dir.path}/$fileName';
+      final file = File(path);
+      await file.create(recursive: true);
+      await file.writeAsBytes(bytes);
+
+      if (!mounted) return;
+
+      final open = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Laporan Berhasil Dibuat'),
+          content: Text('File tersimpan di:\n$path\n\nBuka sekarang?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Nanti'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Buka'),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
+
+      if (open == true) {
+        await OpenFile.open(path);
+      }
+
+      _showSuccessSnackBar('Laporan overtime berhasil dibuat');
+    } catch (e) {
+      _showErrorSnackBar('Gagal membuat laporan: $e');
+    }
+  }
+
+  void _showOvertimeReport() {
+    String selectedScope = 'filtered';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final reportData = selectedScope == 'all'
+                ? _allOvertimes
+                : _filteredOvertimes;
+
+            final totalJam = reportData.fold<double>(
+              0,
+              (sum, item) => sum + item.totalJam,
+            );
+
+            final pending = reportData
+                .where((e) => e.status.toLowerCase() == 'pending')
+                .length;
+            final approved = reportData
+                .where((e) => e.status.toLowerCase() == 'approved')
+                .length;
+            final rejected = reportData
+                .where((e) => e.status.toLowerCase() == 'rejected')
+                .length;
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Row(
+                children: const [
+                  Icon(Icons.assessment, color: Color(0xFF6366F1)),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Generate Laporan Overtime')),
+                ],
+              ),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Pilih data yang ingin dijadikan laporan:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      RadioListTile<String>(
+                        value: 'filtered',
+                        groupValue: selectedScope,
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: const Text('Data sesuai filter saat ini'),
+                        subtitle: Text('${_filteredOvertimes.length} data'),
+                        onChanged: (value) {
+                          setDialogState(() => selectedScope = value!);
+                        },
+                      ),
+
+                      RadioListTile<String>(
+                        value: 'all',
+                        groupValue: selectedScope,
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: const Text('Semua data overtime'),
+                        subtitle: Text('${_allOvertimes.length} data'),
+                        onChanged: (value) {
+                          setDialogState(() => selectedScope = value!);
+                        },
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          children: [
+                            _reportPreviewRow(
+                              'Total Data',
+                              '${reportData.length}',
+                            ),
+                            _reportPreviewRow(
+                              'Total Jam',
+                              '${totalJam.toStringAsFixed(1)} jam',
+                            ),
+                            _reportPreviewRow('Pending', '$pending'),
+                            _reportPreviewRow('Approved', '$approved'),
+                            _reportPreviewRow('Rejected', '$rejected'),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEEF2FF),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(
+                              Icons.info_outline,
+                              color: Color(0xFF6366F1),
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Laporan akan digenerate dalam format CSV dan bisa dibuka di Excel.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF4338CA),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Batal'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: reportData.isEmpty
+                      ? null
+                      : () async {
+                          Navigator.pop(dialogContext);
+                          await _downloadOvertimeReportCsv(reportData);
+                        },
+                  icon: const Icon(Icons.download, size: 16),
+                  label: const Text('Generate'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _reportPreviewRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPolicySettings() {
+    final maxDailyCtrl = TextEditingController(
+      text: _policyMaxDailyHours.toStringAsFixed(1),
+    );
+    final maxMonthlyCtrl = TextEditingController(
+      text: _policyMaxMonthlyHours.toStringAsFixed(1),
+    );
+    final autoApproveCtrl = TextEditingController(
+      text: _policyAutoApproveUnderHours.toStringAsFixed(1),
+    );
+    final requireApprovalCtrl = TextEditingController(
+      text: _policyRequireApprovalAboveHours.toStringAsFixed(1),
+    );
+
+    bool allowWeekend = _policyAllowWeekend;
+    bool requireNote = _policyRequireNote;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Row(
+                children: const [
+                  Icon(Icons.settings, color: Color(0xFF8B5CF6)),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Policy Settings Overtime')),
+                ],
+              ),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _policyNumberField(
+                        controller: maxDailyCtrl,
+                        label: 'Maksimal Overtime Harian',
+                        suffix: 'jam',
+                        icon: Icons.today,
+                      ),
+                      const SizedBox(height: 12),
+                      _policyNumberField(
+                        controller: maxMonthlyCtrl,
+                        label: 'Maksimal Overtime Bulanan',
+                        suffix: 'jam',
+                        icon: Icons.calendar_month,
+                      ),
+                      const SizedBox(height: 12),
+                      _policyNumberField(
+                        controller: autoApproveCtrl,
+                        label: 'Auto Approve Jika Di Bawah',
+                        suffix: 'jam',
+                        icon: Icons.check_circle,
+                      ),
+                      const SizedBox(height: 12),
+                      _policyNumberField(
+                        controller: requireApprovalCtrl,
+                        label: 'Wajib Approval Jika Di Atas',
+                        suffix: 'jam',
+                        icon: Icons.admin_panel_settings,
+                      ),
+                      const SizedBox(height: 12),
+
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: allowWeekend,
+                        title: const Text('Izinkan Overtime Weekend'),
+                        subtitle: const Text(
+                          'Sabtu/Minggu boleh mengajukan overtime',
+                        ),
+                        activeColor: const Color(0xFF8B5CF6),
+                        onChanged: (value) {
+                          setDialogState(() => allowWeekend = value);
+                        },
+                      ),
+
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: requireNote,
+                        title: const Text('Catatan Wajib Diisi'),
+                        subtitle: const Text(
+                          'Karyawan wajib mengisi alasan overtime',
+                        ),
+                        activeColor: const Color(0xFF8B5CF6),
+                        onChanged: (value) {
+                          setDialogState(() => requireNote = value);
+                        },
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F3FF),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(
+                              Icons.info_outline,
+                              color: Color(0xFF7C3AED),
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Setting ini disimpan di perangkat/app HRD. Kalau ingin berlaku global ke semua user, nanti perlu dibuatkan API dan tabel policy di database.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF6D28D9),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Batal'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final maxDaily = double.tryParse(
+                      maxDailyCtrl.text.replaceAll(',', '.'),
+                    );
+                    final maxMonthly = double.tryParse(
+                      maxMonthlyCtrl.text.replaceAll(',', '.'),
+                    );
+                    final autoApprove = double.tryParse(
+                      autoApproveCtrl.text.replaceAll(',', '.'),
+                    );
+                    final requireApproval = double.tryParse(
+                      requireApprovalCtrl.text.replaceAll(',', '.'),
+                    );
+
+                    if (maxDaily == null ||
+                        maxMonthly == null ||
+                        autoApprove == null ||
+                        requireApproval == null) {
+                      _showErrorSnackBar('Semua angka policy wajib valid');
+                      return;
+                    }
+
+                    if (maxDaily <= 0 || maxMonthly <= 0) {
+                      _showErrorSnackBar('Maksimal jam harus lebih dari 0');
+                      return;
+                    }
+
+                    if (autoApprove > requireApproval) {
+                      _showErrorSnackBar(
+                        'Auto approve tidak boleh lebih besar dari batas wajib approval',
+                      );
+                      return;
+                    }
+
+                    Navigator.pop(dialogContext);
+
+                    await _savePolicySettings(
+                      maxDailyHours: maxDaily,
+                      maxMonthlyHours: maxMonthly,
+                      autoApproveUnderHours: autoApprove,
+                      requireApprovalAboveHours: requireApproval,
+                      allowWeekend: allowWeekend,
+                      requireNote: requireNote,
+                    );
+                  },
+                  icon: const Icon(Icons.save, size: 16),
+                  label: const Text('Simpan'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B5CF6),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _policyNumberField({
+    required TextEditingController controller,
+    required String label,
+    required String suffix,
+    required IconData icon,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        labelText: label,
+        suffixText: suffix,
+        prefixIcon: Icon(icon, size: 18),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+      ),
+    );
+  }
 }
 
 // ── Helper class ───────────────────────────────────────────────────

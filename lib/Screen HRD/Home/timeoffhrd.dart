@@ -3,7 +3,9 @@
 
 import 'dart:convert';
 import 'dart:io' show File;
+import 'dart:typed_data';
 
+import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:absensikaryawan/Screen%20admin/model/timeoffmodeladmin.dart';
 import 'package:absensikaryawan/Screen%20admin/service/timeoffserviceadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
@@ -31,7 +33,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   List<AdminTimeOffData> _filteredTimeOffs = [];
   List<UserWithTimeOffs> _users = [];
   TimeOffAdminStatistics? _statistics;
-
+  double _annualLeaveQuota = 21;
+  double _maxConsecutiveLeaveDays = 12;
+  bool _requireAttachmentForSickLeave = true;
+  bool _allowBackdateRequest = false;
   bool _isLoading = true;
   String? _currentUserId;
   String? _currentUserName;
@@ -1202,30 +1207,305 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
               subtitle: 'Laporan bulanan',
               icon: Icons.assessment,
               color: const Color(0xFF6366F1),
-              onTap: () {
-                setState(() => _webTabIndex = 3);
-                _tabController.animateTo(3);
-              },
+              onTap: _openReportsTab,
             ),
             _buildQuickActionCard(
               title: 'Kelola Kebijakan',
               subtitle: 'Atur cuti tahunan',
               icon: Icons.rule,
               color: const Color(0xFF10B981),
-              onTap: () {},
+              onTap: _showPolicySettingsDialog,
             ),
             _buildQuickActionCard(
               title: 'Broadcast',
               subtitle: 'Kirim pengumuman',
               icon: Icons.campaign,
               color: const Color(0xFF8B5CF6),
-              onTap: () {},
+              onTap: _showBroadcastDialog,
             ),
           ],
         ),
       ),
     ],
   );
+  void _openReportsTab() {
+    setState(() {
+      _webTabIndex = 3;
+    });
+
+    _tabController.animateTo(3);
+  }
+
+  void _showPolicySettingsDialog() {
+    double annualQuota = _annualLeaveQuota;
+    double maxConsecutive = _maxConsecutiveLeaveDays;
+    bool requireSickAttachment = _requireAttachmentForSickLeave;
+    bool allowBackdate = _allowBackdateRequest;
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                const Icon(Icons.rule, color: Color(0xFF10B981)),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Kelola Kebijakan Cuti',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildPolicySlider(
+                    title: 'Kuota Cuti Tahunan',
+                    value: annualQuota,
+                    min: 0,
+                    max: 30,
+                    suffix: 'hari',
+                    onChanged: (v) {
+                      setDialogState(() => annualQuota = v);
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  _buildPolicySlider(
+                    title: 'Maksimal Cuti Berturut-turut',
+                    value: maxConsecutive,
+                    min: 1,
+                    max: 30,
+                    suffix: 'hari',
+                    onChanged: (v) {
+                      setDialogState(() => maxConsecutive = v);
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Wajib lampiran untuk izin sakit'),
+                    value: requireSickAttachment,
+                    onChanged: (v) {
+                      setDialogState(() => requireSickAttachment = v);
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Izinkan pengajuan tanggal mundur'),
+                    value: allowBackdate,
+                    onChanged: (v) {
+                      setDialogState(() => allowBackdate = v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _annualLeaveQuota = annualQuota;
+                    _maxConsecutiveLeaveDays = maxConsecutive;
+                    _requireAttachmentForSickLeave = requireSickAttachment;
+                    _allowBackdateRequest = allowBackdate;
+                  });
+
+                  Navigator.pop(context);
+                  _snackOk('Kebijakan cuti berhasil disimpan sementara');
+                },
+                icon: const Icon(Icons.save, size: 16),
+                label: const Text('Simpan'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPolicySlider({
+    required String title,
+    required double value,
+    required double min,
+    required double max,
+    required String suffix,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF374151),
+                ),
+              ),
+            ),
+            Text(
+              '${value.toInt()} $suffix',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF10B981),
+              ),
+            ),
+          ],
+        ),
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          divisions: (max - min).toInt(),
+          label: '${value.toInt()} $suffix',
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+
+  void _showBroadcastDialog() {
+    final titleController = TextEditingController();
+    final messageController = TextEditingController();
+
+    String target = 'Semua Karyawan';
+
+    showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                const Icon(Icons.campaign, color: Color(0xFF8B5CF6)),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Broadcast Pengumuman',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: target,
+                    decoration: InputDecoration(
+                      labelText: 'Target Penerima',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Semua Karyawan',
+                        child: Text('Semua Karyawan'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Karyawan Pending',
+                        child: Text('Karyawan dengan pengajuan pending'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Karyawan Approved',
+                        child: Text('Karyawan dengan cuti disetujui'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setDialogState(() => target = v);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: titleController,
+                    decoration: InputDecoration(
+                      labelText: 'Judul Broadcast',
+                      hintText: 'Contoh: Pengingat Pengajuan Cuti',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: messageController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Isi Pesan',
+                      hintText: 'Tulis isi pengumuman...',
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  titleController.dispose();
+                  messageController.dispose();
+                  Navigator.pop(context);
+                },
+                child: const Text('Batal'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  final title = titleController.text.trim();
+                  final message = messageController.text.trim();
+
+                  if (title.isEmpty || message.isEmpty) {
+                    _snackErr('Judul dan isi pesan wajib diisi');
+                    return;
+                  }
+
+                  titleController.dispose();
+                  messageController.dispose();
+                  Navigator.pop(context);
+
+                  _snackOk('Broadcast berhasil disiapkan untuk $target');
+                },
+                icon: const Icon(Icons.send, size: 16),
+                label: const Text('Kirim'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B5CF6),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
   Widget _buildQuickActionCard({
     required String title,
@@ -1621,37 +1901,37 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 title: 'Laporan Bulanan',
                 icon: Icons.calendar_today,
                 color: const Color(0xFF3B82F6),
-                onTap: () {},
+                onTap: () => _exportReportData('bulanan'),
               ),
               _buildReportCard(
                 title: 'Laporan Tahunan',
                 icon: Icons.date_range,
                 color: const Color(0xFF10B981),
-                onTap: () {},
+                onTap: () => _exportReportData('tahunan'),
               ),
               _buildReportCard(
                 title: 'Per Departemen',
                 icon: Icons.business,
                 color: const Color(0xFFF59E0B),
-                onTap: () {},
+                onTap: () => _exportReportData('departemen'),
               ),
               _buildReportCard(
                 title: 'Per Karyawan',
                 icon: Icons.person,
                 color: const Color(0xFF8B5CF6),
-                onTap: () {},
+                onTap: () => _exportReportData('karyawan'),
               ),
               _buildReportCard(
                 title: 'Tren Cuti',
                 icon: Icons.trending_up,
                 color: const Color(0xFFEF4444),
-                onTap: () {},
+                onTap: () => _exportReportData('tren'),
               ),
               _buildReportCard(
                 title: 'Export Data',
                 icon: Icons.download,
                 color: const Color(0xFF6B7280),
-                onTap: () {},
+                onTap: () => _exportReportData('detail'),
               ),
             ],
           ),
@@ -1704,6 +1984,323 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       ],
     ),
   );
+
+  Future<void> _exportReportData(String reportType) async {
+    try {
+      final buffer = StringBuffer();
+
+      String clean(String? value) {
+        return '"${(value ?? '-').replaceAll('"', '""')}"';
+      }
+
+      String normalizeStatus(String status) {
+        return status.trim();
+      }
+
+      bool isPendingLike(String status) {
+        final s = status.toLowerCase();
+        return s == 'pending' || s == 'menunggu laporan' || s == 'menunggu org';
+      }
+
+      bool isApprovedLike(String status) {
+        final s = status.toLowerCase();
+        return s == 'approved' || s == 'processed' || s == 'submitted';
+      }
+
+      bool isRejectedLike(String status) {
+        return status.toLowerCase() == 'rejected';
+      }
+
+      String getDept(AdminTimeOffData item) {
+        return item.userDepartment ?? 'Tidak Ada Departemen';
+      }
+
+      String title = 'laporan_timeoff_hrd';
+
+      if (reportType == 'bulanan') {
+        title = 'laporan_bulanan_timeoff_hrd';
+
+        buffer.writeln(
+          'Bulan,Tahun,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
+        );
+
+        final Map<String, List<AdminTimeOffData>> grouped = {};
+
+        for (final item in _allTimeOffs) {
+          final key =
+              '${item.tanggalMulai.year}-${item.tanggalMulai.month.toString().padLeft(2, '0')}';
+
+          grouped.putIfAbsent(key, () => []);
+          grouped[key]!.add(item);
+        }
+
+        final entries = grouped.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+
+        for (final entry in entries) {
+          final items = entry.value;
+          final first = items.first.tanggalMulai;
+
+          final menunggu = items
+              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .length;
+          final approved = items
+              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .length;
+          final rejected = items
+              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .length;
+
+          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
+
+          buffer.writeln(
+            [
+              clean(_getMonthName(first.month)),
+              clean(first.year.toString()),
+              clean(items.length.toString()),
+              clean(menunggu.toString()),
+              clean(approved.toString()),
+              clean(rejected.toString()),
+              clean(totalHari.toString()),
+            ].join(','),
+          );
+        }
+      } else if (reportType == 'tahunan') {
+        title = 'laporan_tahunan_timeoff_hrd';
+
+        buffer.writeln(
+          'Tahun,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
+        );
+
+        final Map<int, List<AdminTimeOffData>> grouped = {};
+
+        for (final item in _allTimeOffs) {
+          final key = item.tanggalMulai.year;
+          grouped.putIfAbsent(key, () => []);
+          grouped[key]!.add(item);
+        }
+
+        final entries = grouped.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+
+        for (final entry in entries) {
+          final items = entry.value;
+
+          final menunggu = items
+              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .length;
+          final approved = items
+              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .length;
+          final rejected = items
+              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .length;
+
+          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
+
+          buffer.writeln(
+            [
+              clean(entry.key.toString()),
+              clean(items.length.toString()),
+              clean(menunggu.toString()),
+              clean(approved.toString()),
+              clean(rejected.toString()),
+              clean(totalHari.toString()),
+            ].join(','),
+          );
+        }
+      } else if (reportType == 'departemen') {
+        title = 'laporan_per_departemen_timeoff_hrd';
+
+        buffer.writeln(
+          'Departemen,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
+        );
+
+        final Map<String, List<AdminTimeOffData>> grouped = {};
+
+        for (final item in _allTimeOffs) {
+          final key = getDept(item);
+          grouped.putIfAbsent(key, () => []);
+          grouped[key]!.add(item);
+        }
+
+        final entries = grouped.entries.toList()
+          ..sort((a, b) => b.value.length.compareTo(a.value.length));
+
+        for (final entry in entries) {
+          final items = entry.value;
+
+          final menunggu = items
+              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .length;
+          final approved = items
+              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .length;
+          final rejected = items
+              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .length;
+
+          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
+
+          buffer.writeln(
+            [
+              clean(entry.key),
+              clean(items.length.toString()),
+              clean(menunggu.toString()),
+              clean(approved.toString()),
+              clean(rejected.toString()),
+              clean(totalHari.toString()),
+            ].join(','),
+          );
+        }
+      } else if (reportType == 'karyawan') {
+        title = 'laporan_per_karyawan_timeoff_hrd';
+
+        buffer.writeln(
+          'User ID,Nama,Jabatan,Departemen,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
+        );
+
+        final Map<String, List<AdminTimeOffData>> grouped = {};
+
+        for (final item in _allTimeOffs) {
+          grouped.putIfAbsent(item.userId, () => []);
+          grouped[item.userId]!.add(item);
+        }
+
+        final entries = grouped.entries.toList()
+          ..sort((a, b) => b.value.length.compareTo(a.value.length));
+
+        for (final entry in entries) {
+          final items = entry.value;
+          final first = items.first;
+
+          final menunggu = items
+              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .length;
+          final approved = items
+              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .length;
+          final rejected = items
+              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .length;
+
+          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
+
+          buffer.writeln(
+            [
+              clean(first.userId),
+              clean(first.userName),
+              clean(first.userJob),
+              clean(first.userDepartment),
+              clean(items.length.toString()),
+              clean(menunggu.toString()),
+              clean(approved.toString()),
+              clean(rejected.toString()),
+              clean(totalHari.toString()),
+            ].join(','),
+          );
+        }
+      } else if (reportType == 'tren') {
+        title = 'laporan_tren_cuti_timeoff_hrd';
+
+        buffer.writeln('Periode,Total Pengajuan,Total Hari');
+
+        final Map<String, List<AdminTimeOffData>> grouped = {};
+
+        for (final item in _allTimeOffs) {
+          final key =
+              '${item.tanggalMulai.year}-${item.tanggalMulai.month.toString().padLeft(2, '0')}';
+
+          grouped.putIfAbsent(key, () => []);
+          grouped[key]!.add(item);
+        }
+
+        final entries = grouped.entries.toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+
+        for (final entry in entries) {
+          final items = entry.value;
+          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
+
+          buffer.writeln(
+            [
+              clean(entry.key),
+              clean(items.length.toString()),
+              clean(totalHari.toString()),
+            ].join(','),
+          );
+        }
+      } else {
+        title = 'laporan_detail_timeoff_hrd';
+
+        buffer.writeln(
+          'ID,User ID,Nama,Jenis Cuti,Tanggal Mulai,Tanggal Selesai,Total Hari,Status,Departemen,Catatan,Laporan Status',
+        );
+
+        for (final item in _filteredTimeOffs) {
+          buffer.writeln(
+            [
+              clean(item.id.toString()),
+              clean(item.userId),
+              clean(item.userName),
+              clean(item.jenisTimeOff),
+              clean(DateFormat('dd/MM/yyyy').format(item.tanggalMulai)),
+              clean(DateFormat('dd/MM/yyyy').format(item.tanggalSelesai)),
+              clean(item.totalHari.toString()),
+              clean(item.statusText),
+              clean(item.userDepartment),
+              clean(item.catatan),
+              clean(item.hasLaporan ? 'Ada Laporan' : 'Tidak Ada Laporan'),
+            ].join(','),
+          );
+        }
+      }
+
+      final fileName =
+          '${title}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
+
+      final content = buffer.toString();
+
+      if (kIsWeb) {
+        final bytes = Uint8List.fromList(utf8.encode(content));
+        downloadFileWeb(bytes, fileName);
+        _snackOk('Laporan berhasil diunduh');
+        return;
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$fileName');
+
+      await file.writeAsString(content);
+
+      _snackOk('Laporan berhasil dibuat');
+
+      await OpenFile.open(file.path);
+    } catch (e) {
+      _snackErr('Gagal membuat laporan: $e');
+    }
+  }
+
+  String _getMonthName(int month) {
+    const months = [
+      '',
+      'Januari',
+      'Februari',
+      'Maret',
+      'April',
+      'Mei',
+      'Juni',
+      'Juli',
+      'Agustus',
+      'September',
+      'Oktober',
+      'November',
+      'Desember',
+    ];
+
+    if (month < 1 || month > 12) return '-';
+    return months[month];
+  }
 
   Widget _buildReportCard({
     required String title,

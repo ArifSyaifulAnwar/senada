@@ -1,10 +1,13 @@
 import 'dart:convert';
+
 import 'package:absensikaryawan/Screen%20admin/model/overtimemodeladmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:http/http.dart' as http;
 
 class OvertimeAdminService {
   static const String adminEndpoint = '/api/overtime/admin';
+
+  // Ambil token API
   static Future<String?> _getToken() async {
     try {
       final response = await http
@@ -14,12 +17,15 @@ class OvertimeAdminService {
             body: {'grant_type': 'password', 'password': 'ASN_DBS'},
           )
           .timeout(const Duration(seconds: 15));
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+
         if (data.containsKey('access_token') && data['access_token'] != null) {
           return data['access_token'];
         }
       }
+
       return null;
     } catch (e) {
       return null;
@@ -28,14 +34,29 @@ class OvertimeAdminService {
 
   static Future<Map<String, String>> _getHeaders() async {
     final token = await _getToken();
+
     return {
       'Content-Type': 'application/json',
       'Authorization': 'bearer $token',
     };
   }
 
+  // Helper decode response supaya aman
+  static Map<String, dynamic> _decodeResponse(http.Response response) {
+    if (response.body.isEmpty) {
+      return {
+        'success': false,
+        'message': 'Response kosong dari server',
+        'data': null,
+      };
+    }
+
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   // Get admin statistics
   static Future<ApiResponse<OvertimeAdminStatistics>> getAdminStatistics({
+    String? adminId,
     int? year,
     int? month,
   }) async {
@@ -43,17 +64,20 @@ class OvertimeAdminService {
       final url = Uri.parse('$baseURL$adminEndpoint/statistics');
 
       final requestBody = AdminOvertimeStatisticsRequest(
+        adminId: adminId,
         year: year,
         month: month,
       );
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<OvertimeAdminStatistics>.fromJson(
@@ -76,7 +100,7 @@ class OvertimeAdminService {
     }
   }
 
-  // Get all overtimes for admin
+  // Get all overtimes for admin / HRD
   static Future<ApiResponse<List<AdminOvertimeData>>> getAllOvertimes({
     required String adminId,
     String? status,
@@ -95,13 +119,15 @@ class OvertimeAdminService {
         monthFilter: monthFilter,
       );
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<List<AdminOvertimeData>>.fromJson(
@@ -126,7 +152,7 @@ class OvertimeAdminService {
     }
   }
 
-  // Review overtime (approve/reject)
+  // Review overtime approve / reject
   static Future<ApiResponse<Map<String, dynamic>>> reviewOvertime({
     required int id,
     required String status,
@@ -145,13 +171,15 @@ class OvertimeAdminService {
         adminId: adminId,
       );
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<Map<String, dynamic>>.fromJson(
@@ -174,7 +202,7 @@ class OvertimeAdminService {
     }
   }
 
-  // Bulk action (approve/reject multiple)
+  // Bulk action approve / reject multiple
   static Future<ApiResponse<Map<String, dynamic>>> bulkAction({
     required List<int> ids,
     required String action,
@@ -193,13 +221,15 @@ class OvertimeAdminService {
         adminId: adminId,
       );
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<Map<String, dynamic>>.fromJson(
@@ -232,13 +262,15 @@ class OvertimeAdminService {
 
       final requestBody = DeleteOvertimeRequest(id: id, adminId: adminId);
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<Map<String, dynamic>>.fromJson(
@@ -262,27 +294,30 @@ class OvertimeAdminService {
   }
 
   // Get users with overtime summary
-  // Fix untuk method getUsersWithOvertimes
+  // PERBAIKAN: sekarang bisa kirim year dan month
   static Future<ApiResponse<List<UserWithOvertimes>>> getUsersWithOvertimes({
     required String adminId,
+    int? year,
+    int? month,
   }) async {
     try {
       final url = Uri.parse('$baseURL$adminEndpoint/users');
 
-      // ✅ Fix: Tambahkan adminId ke dalam request body
       final requestBody = AdminOvertimeStatisticsRequest(
-        adminId: adminId, // ← Tambahkan ini
-        year: null,
-        month: null,
+        adminId: adminId,
+        year: year,
+        month: month,
       );
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<List<UserWithOvertimes>>.fromJson(
@@ -326,13 +361,15 @@ class OvertimeAdminService {
         userId: userId,
       );
 
-      final response = await http.post(
-        url,
-        headers: await _getHeaders(),
-        body: jsonEncode(requestBody.toJson()),
-      );
+      final response = await http
+          .post(
+            url,
+            headers: await _getHeaders(),
+            body: jsonEncode(requestBody.toJson()),
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+      final Map<String, dynamic> jsonResponse = _decodeResponse(response);
 
       if (response.statusCode == 200) {
         return ApiResponse<List<Map<String, dynamic>>>.fromJson(
@@ -361,6 +398,7 @@ class OvertimeAdminService {
   static String formatDuration(Duration duration) {
     final hours = duration.inHours.toString().padLeft(2, '0');
     final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
+
     return '$hours:$minutes';
   }
 
@@ -390,8 +428,14 @@ class OvertimeAdminService {
 
   static Duration parseDuration(String timeString) {
     final parts = timeString.split(':');
-    final hours = int.parse(parts[0]);
-    final minutes = int.parse(parts[1]);
+
+    if (parts.length < 2) {
+      return Duration.zero;
+    }
+
+    final hours = int.tryParse(parts[0]) ?? 0;
+    final minutes = int.tryParse(parts[1]) ?? 0;
+
     return Duration(hours: hours, minutes: minutes);
   }
 
@@ -406,6 +450,7 @@ class OvertimeAdminService {
 
   static double calculateTotalHours(Duration start, Duration end) {
     if (!isValidTimeRange(start, end)) return 0.0;
+
     final difference = end.inMinutes - start.inMinutes;
     return difference / 60.0;
   }
@@ -429,7 +474,7 @@ class OvertimeAdminService {
     int? year,
     int? month,
   }) {
-    List<String> filters = [];
+    final List<String> filters = [];
 
     if (status != null && status != 'Semua Status') {
       filters.add(getStatusDisplayName(status));
@@ -440,42 +485,15 @@ class OvertimeAdminService {
     }
 
     if (year != null) {
-      final monthName = month != null && month > 0
-          ? OvertimeFilterOptions.monthNames[month]
-          : 'Semua Bulan';
+      String monthName = 'Semua Bulan';
+
+      if (month != null && month >= 1 && month <= 12) {
+        monthName = OvertimeFilterOptions.monthNames[month];
+      }
+
       filters.add('$monthName $year');
     }
 
     return filters.isEmpty ? 'Semua Data' : filters.join(' • ');
-  }
-
-  // Test database connection
-  static Future<ApiResponse<Map<String, dynamic>>> testConnection() async {
-    try {
-      final url = Uri.parse('$baseURL$adminEndpoint/test-connection');
-
-      final response = await http.post(url, headers: await _getHeaders());
-
-      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return ApiResponse<Map<String, dynamic>>.fromJson(
-          jsonResponse,
-          (data) => data as Map<String, dynamic>,
-        );
-      } else {
-        return ApiResponse<Map<String, dynamic>>(
-          success: false,
-          message: jsonResponse['message'] ?? 'Connection failed',
-          data: null,
-        );
-      }
-    } catch (e) {
-      return ApiResponse<Map<String, dynamic>>(
-        success: false,
-        message: 'Network error: ${e.toString()}',
-        data: null,
-      );
-    }
   }
 }

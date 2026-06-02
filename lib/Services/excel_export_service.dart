@@ -58,7 +58,7 @@ class ExcelExportService {
       );
     }
 
-    // ── Row 1: Judul — sekarang 10 kolom (A–J) ──────────────────────────
+    // ── Row 1: Judul — sekarang 9 kolom (A–I) ───────────────────────────
     sheet.cell(ex.CellIndex.indexByString('A1')).value = ex.TextCellValue(
       'LAPORAN DATA ABSENSI KARYAWAN',
     );
@@ -72,7 +72,7 @@ class ExcelExportService {
     );
     sheet.merge(
       ex.CellIndex.indexByString('A1'),
-      ex.CellIndex.indexByString('H1'),
+      ex.CellIndex.indexByString('I1'),
     );
 
     // ── Row 2: Periode + Dicetak ─────────────────────────────────────────
@@ -105,13 +105,13 @@ class ExcelExportService {
     sheet.cell(ex.CellIndex.indexByString('F2')).cellStyle = subInfoStyle;
     sheet.merge(
       ex.CellIndex.indexByString('F2'),
-      ex.CellIndex.indexByString('H2'),
+      ex.CellIndex.indexByString('I2'),
     );
 
     // ── Row 3: Spacer ────────────────────────────────────────────────────
     sheet.cell(ex.CellIndex.indexByString('A3')).value = ex.TextCellValue('');
 
-    // ── Row 4: Header kolom — 10 kolom ───────────────────────────────────
+    // ── Row 4: Header kolom — 9 kolom (ditambah Lembur) ──────────────────
     const headers = [
       'No',
       'Nama Karyawan',
@@ -119,6 +119,7 @@ class ExcelExportService {
       'Tanggal',
       'Jam Masuk',
       'Jam Keluar',
+      'Lembur',
       'Status',
       'Doa',
     ];
@@ -144,10 +145,9 @@ class ExcelExportService {
     sheet.setColumnWidth(3, 16); // Tanggal
     sheet.setColumnWidth(4, 12); // Jam Masuk
     sheet.setColumnWidth(5, 12); // Jam Keluar
-    sheet.setColumnWidth(6, 22); // Status
-    sheet.setColumnWidth(7, 10); // Doa
-    sheet.setColumnWidth(8, 10); // Ikut Doa
-    sheet.setColumnWidth(9, 10); // Tidak Doa
+    sheet.setColumnWidth(6, 12); // Lembur
+    sheet.setColumnWidth(7, 22); // Status
+    sheet.setColumnWidth(8, 10); // Doa
 
     sheet.setRowHeight(0, 28);
     sheet.setRowHeight(1, 18);
@@ -174,7 +174,8 @@ class ExcelExportService {
         grandCuti = 0,
         grandTidakHadir = 0,
         grandIkutDoa = 0,
-        grandTidakDoa = 0;
+        grandTidakDoa = 0,
+        grandLemburMinutes = 0;
 
     for (final entry in grouped.entries) {
       final rows = entry.value;
@@ -195,6 +196,14 @@ class ExcelExportService {
         final doaVal = doaMap?[tanggalKey] ?? '';
         final doaStyle = _doaCellStyle(doaVal, rowBg, borderHex);
 
+        // ── Lembur per baris ──────────────────────────────────────
+        final ovtMin = d.overtimeMinutes;
+        final hasOvt = ovtMin != null && ovtMin > 0 && ovtMin < 1440;
+        final lemburText = hasOvt
+            ? '${(ovtMin / 60).toStringAsFixed(1)} jam'
+            : '-';
+        final lemburStyle = _lemburCellStyle(ovtMin, rowBg, borderHex);
+
         void setCell(int col, ex.CellValue value, ex.CellStyle style) {
           final cell = sheet.cell(
             ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIndex),
@@ -213,15 +222,15 @@ class ExcelExportService {
         );
         setCell(4, ex.TextCellValue(d.formattedCheckIn), centerStyle);
         setCell(5, ex.TextCellValue(d.formattedCheckOut), centerStyle);
-        setCell(6, ex.TextCellValue(d.displayStatus), statusStyle);
-        setCell(7, ex.TextCellValue(doaVal), doaStyle);
-        // Kolom 8 & 9 kosong per-row (diisi di summary saja)
+        setCell(6, ex.TextCellValue(lemburText), lemburStyle); // ← Lembur
+        setCell(7, ex.TextCellValue(d.displayStatus), statusStyle);
+        setCell(8, ex.TextCellValue(doaVal), doaStyle);
 
         rowIndex++;
         no++;
       }
 
-      // Hitung summary termasuk doa
+      // Hitung summary termasuk doa + lembur
       final counts = _countStatus(rows, doaMap);
       grandTotal += counts['total']!;
       grandTepat += counts['tepat']!;
@@ -230,13 +239,12 @@ class ExcelExportService {
       grandTidakHadir += counts['tidakHadir']!;
       grandIkutDoa += counts['ikutDoa']!;
       grandTidakDoa += counts['tidakDoa']!;
+      grandLemburMinutes += counts['lemburMinutes']!;
 
-      // Summary per karyawan (hanya multi-hari)
       // ── Summary per karyawan (hanya multi-hari) ──────────────────
       if (isMultiHari) {
         rowIndex++; // blank row
 
-        // Label row — tetap 8 kolom (A-H)
         final summaryLabelStyle = makeStyle(
           bgColor: headerBg,
           fontColor: headerFg,
@@ -283,6 +291,13 @@ class ExcelExportService {
           cell.value = ex.TextCellValue(summaryLabels[col]);
           cell.cellStyle = summaryLabelStyle;
         }
+        // Col 8 (I): label Lembur
+        final lblLembur = sheet.cell(
+          ex.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex),
+        );
+        lblLembur.value = ex.TextCellValue('Lembur (jam)');
+        lblLembur.cellStyle = summaryLabelStyle;
+
         sheet.setRowHeight(rowIndex, 18);
         rowIndex++;
 
@@ -354,6 +369,22 @@ class ExcelExportService {
             hAlign: ex.HorizontalAlign.Center,
           );
         }
+        // Col 8 (I): total lembur jam
+        final lemburJamGrp = double.parse(
+          (counts['lemburMinutes']! / 60).toStringAsFixed(1),
+        );
+        final valLembur = sheet.cell(
+          ex.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex),
+        );
+        valLembur.value = ex.DoubleCellValue(lemburJamGrp);
+        valLembur.cellStyle = makeStyle(
+          bgColor: '#FCF3CF',
+          fontColor: '#B9770E',
+          bold: true,
+          fontSize: 11,
+          hAlign: ex.HorizontalAlign.Center,
+        );
+
         sheet.setRowHeight(rowIndex, 22);
         rowIndex++;
         rowIndex++; // extra blank
@@ -407,7 +438,13 @@ class ExcelExportService {
         cell.value = ex.TextCellValue(grandLabels[col]);
         cell.cellStyle = grandLabelStyle;
       }
-      // Col 8 & 9 sudah di grandLabels ✓ — col 0 sudah diset
+      // Col 8 (I): label Lembur
+      final gLblLembur = sheet.cell(
+        ex.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex),
+      );
+      gLblLembur.value = ex.TextCellValue('Lembur (jam)');
+      gLblLembur.cellStyle = grandLabelStyle;
+
       sheet.setRowHeight(rowIndex, 18);
       rowIndex++;
 
@@ -466,19 +503,36 @@ class ExcelExportService {
           hAlign: ex.HorizontalAlign.Center,
         );
       }
+      // Col 8 (I): grand total lembur jam
+      final gLemburJam = double.parse(
+        (grandLemburMinutes / 60).toStringAsFixed(1),
+      );
+      final gValLembur = sheet.cell(
+        ex.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex),
+      );
+      gValLembur.value = ex.DoubleCellValue(gLemburJam);
+      gValLembur.cellStyle = makeStyle(
+        bgColor: '#FCF3CF',
+        fontColor: '#B9770E',
+        bold: true,
+        fontSize: 13,
+        hAlign: ex.HorizontalAlign.Center,
+      );
+
       sheet.setRowHeight(rowIndex, 26);
     }
 
     return excel.encode();
   }
 
-  // ── Hitung status + doa per grup karyawan ────────────────────────────
+  // ── Hitung status + doa + lembur per grup karyawan ───────────────────
   static Map<String, int> _countStatus(
     List<AdminAttendanceData> rows,
     Map<String, String>? doaMap,
   ) {
     int tepat = 0, terlambat = 0, cuti = 0, tidakHadir = 0;
     int ikutDoa = 0, tidakDoa = 0;
+    int lemburMinutes = 0;
 
     for (final d in rows) {
       final s = d.displayStatus.toLowerCase();
@@ -492,6 +546,13 @@ class ExcelExportService {
           s.contains('absent') ||
           s.contains('tidak absen'))
         tidakHadir++;
+
+      // Lembur (abaikan data tidak wajar > 24 jam)
+      if (d.overtimeMinutes != null &&
+          d.overtimeMinutes! > 0 &&
+          d.overtimeMinutes! < 1440) {
+        lemburMinutes += d.overtimeMinutes!;
+      }
 
       // Hitung doa
       if (doaMap != null) {
@@ -513,6 +574,7 @@ class ExcelExportService {
       'tidakHadir': tidakHadir,
       'ikutDoa': ikutDoa,
       'tidakDoa': tidakDoa,
+      'lemburMinutes': lemburMinutes,
     };
   }
 
@@ -556,6 +618,33 @@ class ExcelExportService {
       backgroundColorHex: ex.ExcelColor.fromHexString(bgColor),
       fontColorHex: ex.ExcelColor.fromHexString(fontColor),
       bold: true,
+      fontSize: 10,
+      horizontalAlign: ex.HorizontalAlign.Center,
+      verticalAlign: ex.VerticalAlign.Center,
+      leftBorder: b,
+      rightBorder: b,
+      topBorder: b,
+      bottomBorder: b,
+    );
+  }
+
+  static ex.CellStyle _lemburCellStyle(
+    int? ovtMinutes,
+    String rowBg,
+    String borderHex,
+  ) {
+    final has = ovtMinutes != null && ovtMinutes > 0 && ovtMinutes < 1440;
+    final fontColor = has ? '#B9770E' : '#AEB6BF';
+    final bgColor = has ? '#FEF9E7' : rowBg;
+
+    final b = ex.Border(
+      borderStyle: ex.BorderStyle.Thin,
+      borderColorHex: ex.ExcelColor.fromHexString(borderHex),
+    );
+    return ex.CellStyle(
+      backgroundColorHex: ex.ExcelColor.fromHexString(bgColor),
+      fontColorHex: ex.ExcelColor.fromHexString(fontColor),
+      bold: has,
       fontSize: 10,
       horizontalAlign: ex.HorizontalAlign.Center,
       verticalAlign: ex.VerticalAlign.Center,
