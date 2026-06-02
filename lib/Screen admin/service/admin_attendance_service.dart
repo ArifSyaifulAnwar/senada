@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-
+import '../../Services/token_service.dart';
 import '../../Services/config.dart';
 import '../model/admin_attendance_model.dart';
 
@@ -11,35 +9,6 @@ class AdminAttendanceService {
   Future<String?> _getUserId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('UserID');
-  }
-
-  static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  Future<Map<String, String>> _getHeaders() async {
-    final token = await _getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
   }
 
   // Convert timeRange to English for backend compatibility
@@ -103,14 +72,10 @@ class AdminAttendanceService {
       final requestBody = jsonEncode(request.toJson());
       // Debug log
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/admin/attendance/all'),
-            headers: await _getHeaders(),
-            body: requestBody,
-          )
-          .timeout(Duration(seconds: 60));
-
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/all'),
+        body: requestBody,
+      );
       if (response.statusCode == 200) {
         try {
           final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
@@ -208,14 +173,10 @@ class AdminAttendanceService {
 
       final request = {'adminUserId': adminUserId, 'searchTerm': searchTerm};
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/admin/attendance/employees'),
-            headers: await _getHeaders(),
-            body: jsonEncode(request),
-          )
-          .timeout(Duration(seconds: 30));
-
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/employees'),
+        body: jsonEncode(request),
+      );
       if (response.statusCode == 200) {
         try {
           final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
@@ -287,13 +248,10 @@ class AdminAttendanceService {
 
       final request = {'adminUserId': adminUserId};
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/admin/attendance/offices'),
-            headers: await _getHeaders(),
-            body: jsonEncode(request),
-          )
-          .timeout(Duration(seconds: 30));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/offices'),
+        body: jsonEncode(request),
+      );
 
       if (response.statusCode == 200) {
         try {
@@ -379,13 +337,10 @@ class AdminAttendanceService {
         page: 1,
         pageSize: 10000,
       );
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/admin/attendance/dashboard-stats'),
-            headers: await _getHeaders(),
-            body: jsonEncode(request.toJson()),
-          )
-          .timeout(Duration(seconds: 30));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/dashboard-stats'),
+        body: jsonEncode(request.toJson()),
+      );
 
       if (response.statusCode == 200) {
         try {
@@ -467,13 +422,10 @@ class AdminAttendanceService {
         pageSize: 10000,
       );
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/admin/attendance/export'),
-            headers: await _getHeaders(),
-            body: jsonEncode(request.toJson()),
-          )
-          .timeout(Duration(seconds: 120));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/export'),
+        body: jsonEncode(request.toJson()),
+      );
       if (response.statusCode == 200) {
         return ApiResponse<String>(
           success: true,

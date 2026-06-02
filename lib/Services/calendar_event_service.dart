@@ -124,7 +124,7 @@ class CalendarEventService {
         late CalendarEvent calEvent;
 
         if (ce.isLibur) {
-          // Hari libur custom HRD → tampil merah seperti hari libur nasional
+          // LIBUR → tanggal merah, disable absen
           calEvent = CalendarEvent(
             title: ce.keterangan,
             color: Colors.red[700]!,
@@ -132,11 +132,12 @@ class CalendarEventService {
             isHoliday: true,
             isCutiBersama: false,
             isWfh: false,
+            isInfo: false,
             source: 'company',
             displayDate: DateFormat('yyyy-MM-dd').format(key),
           );
         } else if (ce.isWfh) {
-          // WFH → tampil hijau
+          // WFH → hijau, tidak tanggal merah
           calEvent = CalendarEvent(
             title: ce.keterangan,
             color: const Color(0xFF10B981),
@@ -144,24 +145,29 @@ class CalendarEventService {
             isHoliday: false,
             isCutiBersama: false,
             isWfh: true,
+            isInfo: false,
+            source: 'company',
+            displayDate: DateFormat('yyyy-MM-dd').format(key),
+          );
+        } else if (ce.isInfo) {
+          // INFO → biru, TIDAK tanggal merah, hanya informasi
+          calEvent = CalendarEvent(
+            title: ce.keterangan,
+            color: const Color(0xFF3B82F6),
+            type: 'company_info',
+            isHoliday: false, // ← tidak merah
+            isCutiBersama: false,
+            isWfh: false,
+            isInfo: true, // ← hanya info
             source: 'company',
             displayDate: DateFormat('yyyy-MM-dd').format(key),
           );
         } else {
-          // LEMBUR → tampil amber
-          calEvent = CalendarEvent(
-            title: ce.keterangan,
-            color: Colors.amber[700]!,
-            type: 'company_lembur',
-            isHoliday: false,
-            isCutiBersama: false,
-            isWfh: false,
-            source: 'company',
-            displayDate: DateFormat('yyyy-MM-dd').format(key),
-          );
+          // Tipe tidak dikenal → skip
+          continue;
         }
 
-        // Cek duplikat — jangan tambah kalau keterangan sama sudah ada
+        // Cek duplikat
         final existingEvents = merged[key] ?? [];
         final isDuplicate = existingEvents.any((e) => e.title == ce.keterangan);
         if (!isDuplicate) {

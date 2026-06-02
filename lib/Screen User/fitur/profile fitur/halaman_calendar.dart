@@ -281,6 +281,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
       {'color': Colors.red, 'label': 'Libur / Merah'},
       {'color': Colors.orange, 'label': 'Cuti Bersama'},
       {'color': const Color(0xFF10B981), 'label': 'WFH'},
+      {'color': const Color(0xFF3B82F6), 'label': 'Info'}, // ← TAMBAH
       {'color': Colors.grey[300]!, 'label': 'Sabtu'},
     ];
     return Wrap(
@@ -686,11 +687,11 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
   }
 
   Widget _buildEventCard(DateTime date, List<CalendarEvent> events) {
-    // Prioritas tampilan badge: libur company > cuti bersama > libur nasional > WFH
     final hasCompanyLibur = events.any((e) => e.type == 'company_libur');
     final hasCuti = events.any((e) => e.isCutiBersama);
     final hasLibur = events.any((e) => e.isHoliday);
     final hasWfh = events.any((e) => e.isWfh);
+    final hasInfo = events.any((e) => e.isInfo); // ← TAMBAH
 
     Widget? badge;
     if (hasCompanyLibur) {
@@ -701,6 +702,8 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
       badge = _badge('Libur', Colors.orange);
     } else if (hasWfh) {
       badge = _badge('WFH', const Color(0xFF10B981));
+    } else if (hasInfo) {
+      badge = _badge('Info', const Color(0xFF3B82F6)); // ← TAMBAH
     }
 
     return Container(
@@ -830,6 +833,9 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     if (event.isCutiBersama) return _badge('Cuti', Colors.red);
     if (event.isHoliday) return _badge('Libur', Colors.orange);
     if (event.isWfh) return _badge('WFH', const Color(0xFF10B981));
+    if (event.isInfo) {
+      return _badge('Info', const Color(0xFF3B82F6)); // ← TAMBAH
+    }
     return const SizedBox.shrink();
   }
 

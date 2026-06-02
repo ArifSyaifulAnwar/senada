@@ -3,9 +3,10 @@
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../Services/token_service.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Model
@@ -100,44 +101,21 @@ class DoaRecord {
 // Service
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Service
+// ══════════════════════════════════════════════════════════════════════════════
+
 class DoaService {
-  static Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return json.decode(res.body)['access_token'];
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<Map<String, String>> _headers() async {
-    final token = await _getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
-
   // Ambil dropdown karyawan
   static Future<List<DoaKaryawanItem>> getKaryawan(
     String hrdUserId, {
     String? search,
   }) async {
     try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/employee/list-karyawan'),
-            headers: await _headers(),
-            body: json.encode({'hrdUserId': hrdUserId, 'search': search}),
-          )
-          .timeout(const Duration(seconds: 15));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/employee/list-karyawan'),
+        body: json.encode({'hrdUserId': hrdUserId, 'search': search}),
+      );
       if (res.statusCode == 200) {
         final body = json.decode(res.body);
         final data = body['data'] ?? body['Data'] ?? [];
@@ -158,19 +136,16 @@ class DoaService {
     String? catatan,
   }) async {
     try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/employee/doa-save'),
-            headers: await _headers(),
-            body: json.encode({
-              'hrdUserId': hrdUserId,
-              'tanggal': DateFormat('yyyy-MM-dd').format(tanggal),
-              'pemimpinDoaId': pemimpinDoaId,
-              'pesertaIds': pesertaIds,
-              'catatan': catatan,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/employee/doa-save'),
+        body: json.encode({
+          'hrdUserId': hrdUserId,
+          'tanggal': DateFormat('yyyy-MM-dd').format(tanggal),
+          'pemimpinDoaId': pemimpinDoaId,
+          'pesertaIds': pesertaIds,
+          'catatan': catatan,
+        }),
+      );
       final body = json.decode(res.body);
       return {
         'success':
@@ -189,16 +164,13 @@ class DoaService {
     DateTime tanggal,
   ) async {
     try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/employee/doa-list'),
-            headers: await _headers(),
-            body: json.encode({
-              'hrdUserId': hrdUserId,
-              'tanggal': DateFormat('yyyy-MM-dd').format(tanggal),
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/employee/doa-list'),
+        body: json.encode({
+          'hrdUserId': hrdUserId,
+          'tanggal': DateFormat('yyyy-MM-dd').format(tanggal),
+        }),
+      );
       if (res.statusCode == 200) {
         final body = json.decode(res.body);
         final data = body['data'] ?? body['Data'] ?? [];

@@ -3,8 +3,9 @@
 
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../Services/token_service.dart';
 
 // ── Models ────────────────────────────────────────────────────────────────────
 
@@ -256,33 +257,6 @@ class HrdAttendanceEditLog {
 class HrdAttendanceService {
   static const String _baseUrl = '$baseURL/api/hrd/attendance';
 
-  static Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final d = json.decode(res.body);
-        return d['access_token'];
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Future<Map<String, String>> _getHeaders() async {
-    final token = await _getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
-
   static Future<String?> _getUserId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('UserID');
@@ -305,24 +279,19 @@ class HrdAttendanceService {
         return _ApiResult(success: false, message: 'UserID tidak ditemukan.');
       }
 
-      final body = {
-        'HrdUserId': hrdUserId,
-        'FilterUserId': filterUserId,
-        'StartDate': startDate,
-        'EndDate': endDate,
-        'StatusFilter': statusFilter,
-        'SearchTerm': searchTerm,
-        'Page': page,
-        'PageSize': pageSize,
-      };
-
-      final res = await http
-          .post(
-            Uri.parse('$_baseUrl/list'),
-            headers: await _getHeaders(),
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 30));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$_baseUrl/list'),
+        body: jsonEncode({
+          'HrdUserId': hrdUserId,
+          'FilterUserId': filterUserId,
+          'StartDate': startDate,
+          'EndDate': endDate,
+          'StatusFilter': statusFilter,
+          'SearchTerm': searchTerm,
+          'Page': page,
+          'PageSize': pageSize,
+        }),
+      );
 
       if (res.statusCode == 200) {
         final j = jsonDecode(res.body);
@@ -352,16 +321,13 @@ class HrdAttendanceService {
         return _ApiResult(success: false, message: 'UserID tidak ditemukan.');
       }
 
-      final res = await http
-          .post(
-            Uri.parse('$_baseUrl/detail'),
-            headers: await _getHeaders(),
-            body: jsonEncode({
-              'HrdUserId': hrdUserId,
-              'AttendanceId': attendanceId,
-            }),
-          )
-          .timeout(const Duration(seconds: 20));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$_baseUrl/detail'),
+        body: jsonEncode({
+          'HrdUserId': hrdUserId,
+          'AttendanceId': attendanceId,
+        }),
+      );
 
       if (res.statusCode == 200) {
         final j = jsonDecode(res.body);
@@ -400,24 +366,19 @@ class HrdAttendanceService {
         return _ApiResult(success: false, message: 'UserID tidak ditemukan.');
       }
 
-      final body = {
-        'HrdUserId': hrdUserId,
-        'AttendanceId': attendanceId,
-        'EditReason': editReason,
-        'CheckInTime': checkInTime,
-        'CheckOutTime': checkOutTime,
-        'CheckInStatus': checkInStatus,
-        'CheckOutStatus': checkOutStatus,
-        'Notes': notes,
-      };
-
-      final res = await http
-          .post(
-            Uri.parse('$_baseUrl/edit'),
-            headers: await _getHeaders(),
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 30));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$_baseUrl/edit'),
+        body: jsonEncode({
+          'HrdUserId': hrdUserId,
+          'AttendanceId': attendanceId,
+          'EditReason': editReason,
+          'CheckInTime': checkInTime,
+          'CheckOutTime': checkOutTime,
+          'CheckInStatus': checkInStatus,
+          'CheckOutStatus': checkOutStatus,
+          'Notes': notes,
+        }),
+      );
 
       if (res.statusCode == 200) {
         final j = jsonDecode(res.body);
@@ -443,16 +404,13 @@ class HrdAttendanceService {
         return _ApiResult(success: false, message: 'UserID tidak ditemukan.');
       }
 
-      final res = await http
-          .post(
-            Uri.parse('$_baseUrl/edit-log'),
-            headers: await _getHeaders(),
-            body: jsonEncode({
-              'HrdUserId': hrdUserId,
-              'AttendanceId': attendanceId,
-            }),
-          )
-          .timeout(const Duration(seconds: 20));
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$_baseUrl/edit-log'),
+        body: jsonEncode({
+          'HrdUserId': hrdUserId,
+          'AttendanceId': attendanceId,
+        }),
+      );
 
       if (res.statusCode == 200) {
         final j = jsonDecode(res.body);

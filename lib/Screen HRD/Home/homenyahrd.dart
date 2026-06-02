@@ -23,6 +23,8 @@ import 'package:slide_to_act/slide_to_act.dart';
 
 import '../../Screen User/Screen HRD/hrd_calendar_screen.dart';
 import '../../Screen User/fitur/org_approval_screen.dart';
+import '../../Services/notification_service.dart';
+import '../notifikasi_broadcast_screen.dart';
 
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -35,8 +37,8 @@ class HomeScreenHRD extends StatefulWidget {
 
 class _HomeScreenHRDState extends State<HomeScreenHRD> {
   ProfileDisplay? _profileDisplay;
-  String? _accessToken;
   bool _isLoading = true;
+  final NotificationService _notificationService = NotificationService();
   String? _errorMessage;
 
   bool _hasCheckedIn = false;
@@ -115,58 +117,18 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       _notificationError = null;
     });
     try {
-      String? currentToken = _accessToken ?? await _getToken();
-      if (currentToken == null) throw Exception('Failed to get access token');
       if (userID == null) await loadUserId();
       if (userID == null || userID!.isEmpty) {
-        throw Exception('User ID not found');
+        setState(() => _isLoadingNotifications = false);
+        return;
       }
-
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/admin/notifications/stats'),
-            headers: {
-              'Authorization': 'Bearer $currentToken',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-          )
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw Exception('Request timeout'),
-          );
-
+      final result = await _notificationService.getAdminNotificationStats();
       if (mounted) {
-        if (response.statusCode == 200) {
-          final d = json.decode(response.body);
-          if (d['Success'] == true) {
-            setState(() {
-              _unreadNotificationCount = d['Data']['UnreadCount'] ?? 0;
-              _isLoadingNotifications = false;
-              _notificationError = null;
-            });
-          } else {
-            setState(() {
-              _isLoadingNotifications = false;
-              _notificationError = d['Message'] ?? 'Unknown error';
-            });
-          }
-        } else if (response.statusCode == 401) {
-          final newToken = await _getToken();
-          if (newToken != null && mounted) {
-            await _loadUnreadNotificationCount();
-          } else {
-            setState(() {
-              _isLoadingNotifications = false;
-              _notificationError = 'Authentication failed';
-            });
-          }
-        } else {
-          setState(() {
-            _isLoadingNotifications = false;
-            _notificationError = 'HTTP Error: ${response.statusCode}';
-          });
-        }
+        setState(() {
+          _unreadNotificationCount = result['unreadCount'] ?? 0;
+          _isLoadingNotifications = false;
+          _notificationError = null;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -251,7 +213,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       });
       final token = await _getToken();
       if (token != null) {
-        _accessToken = token;
         await _loadProfileData();
         await loadUserId();
         await _loadPendingOrgCount();
@@ -1009,6 +970,15 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         Icons.folder_open,
         'File Saya',
         const Color(0xFFFFCC02),
+      ),
+      _buildServiceIconData(
+        Icons.campaign_rounded,
+        'Broadcast',
+        const Color(0xFF6366F1),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const BroadcastNotifScreen()),
+        ),
       ),
       // ── BARU: Persetujuan Divisi ──────────────────────────────────────────
       _buildServiceIconData(

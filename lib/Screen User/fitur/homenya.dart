@@ -19,6 +19,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
+import '../../Services/notification_service.dart';
 import 'org_approval_screen.dart';
 import 'profile fitur/halaman_calendar.dart';
 
@@ -55,6 +56,7 @@ class _HomePageState extends State<HomeScreen> {
   String? _notificationError;
   bool _debugShowTestBadge = false;
   String? userID;
+  final NotificationService _notificationService = NotificationService();
 
   // ── Org approval count ──────────────────────────────────────────────────
   int _pendingOrgCount = 0;
@@ -257,59 +259,18 @@ class _HomePageState extends State<HomeScreen> {
       _notificationError = null;
     });
     try {
-      String? currentToken = _accessToken ?? await _getToken();
-      if (currentToken == null) throw Exception('Failed to get access token');
       if (userID == null) await loadUserId();
       if (userID == null || userID!.isEmpty) {
-        throw Exception('User ID not found');
+        setState(() => _isLoadingNotifications = false);
+        return;
       }
-
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/notification/unread-count'),
-            headers: {
-              'Authorization': 'Bearer $currentToken',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: json.encode({"UserId": userID}),
-          )
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw Exception('Request timeout'),
-          );
-
+      final result = await _notificationService.getUnreadCount();
       if (mounted) {
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          if (data['Success'] == true) {
-            setState(() {
-              _unreadNotificationCount = data['Data']['UnreadCount'] ?? 0;
-              _isLoadingNotifications = false;
-              _notificationError = null;
-            });
-          } else {
-            setState(() {
-              _isLoadingNotifications = false;
-              _notificationError = data['Message'] ?? 'Unknown error';
-            });
-          }
-        } else if (response.statusCode == 401) {
-          final newToken = await _getToken();
-          if (newToken != null && mounted) {
-            await _loadUnreadNotificationCount();
-          } else {
-            setState(() {
-              _isLoadingNotifications = false;
-              _notificationError = 'Authentication failed';
-            });
-          }
-        } else {
-          setState(() {
-            _isLoadingNotifications = false;
-            _notificationError = 'HTTP Error: ${response.statusCode}';
-          });
-        }
+        setState(() {
+          _unreadNotificationCount = result['unreadCount'] ?? 0;
+          _isLoadingNotifications = false;
+          _notificationError = null;
+        });
       }
     } catch (e) {
       if (mounted) {

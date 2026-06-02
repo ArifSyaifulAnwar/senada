@@ -8,6 +8,7 @@ class CalendarEvent {
   final String? displayDate;
   final bool isCutiBersama;
   final bool isWfh;
+  final bool isInfo;
   final String source;
 
   CalendarEvent({
@@ -18,13 +19,11 @@ class CalendarEvent {
     this.displayDate,
     this.isCutiBersama = false,
     this.isWfh = false,
+    this.isInfo = false,
     this.source = 'unknown',
   });
 
-  // ─────────────────────────────────────────────────────────────────
-  // Factory: dari dayoffapi.vercel.app
-  // {"tanggal":"2026-05-27","keterangan":"Hari Raya Idul Adha","is_cuti":false}
-  // ─────────────────────────────────────────────────────────────────
+  // ── Factory: dari dayoffapi.vercel.app ────────────────────────────
   factory CalendarEvent.fromDayoffJson(Map<String, dynamic> json) {
     final title = json['keterangan'] as String? ?? 'Event';
     final displayDate = json['tanggal_display'] as String?;
@@ -40,31 +39,21 @@ class CalendarEvent {
       isHoliday: isHoliday,
       displayDate: displayDate,
       isCutiBersama: isCutiBersama,
+      source: 'national',
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // Factory: dari date.nager.at
-  // {"date":"2026-01-01","localName":"Tahun Baru Masehi","name":"New Year's Day",
-  //  "types":["Public"],"global":true}
-  // ─────────────────────────────────────────────────────────────────
+  // ── Factory: dari date.nager.at ───────────────────────────────────
   factory CalendarEvent.fromNagerJson(Map<String, dynamic> json) {
     final title =
         json['localName'] as String? ?? json['name'] as String? ?? 'Hari Libur';
 
-    // Nager.Date tidak punya field is_cuti, semua adalah hari libur nasional
-    // Tapi ada tipe "Optional" yang bisa dianggap sebagai hari biasa
     final types =
         (json['types'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
         ['Public'];
 
-    // Anggap semua Public holiday sebagai isHoliday = true
     final isHoliday = types.contains('Public') || types.contains('Bank');
-
-    // Nager tidak punya is_cuti, set false — tapi bisa dioverride
-    // berdasarkan nama (cuti bersama biasanya ada kata "Cuti")
     final isCutiBersama = title.toLowerCase().contains('cuti');
-
     final color = _determineColor(title, isCutiBersama);
     final type = _determineType(title, isCutiBersama);
 
@@ -75,12 +64,65 @@ class CalendarEvent {
       isHoliday: isHoliday,
       displayDate: json['date'] as String?,
       isCutiBersama: isCutiBersama,
+      source: 'national',
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────
+  // ── Factory: dari Company Calendar (LIBUR / WFH / INFO) ──────────
+  factory CalendarEvent.fromCompanyCalendar({
+    required String tipe,
+    required String keterangan,
+    required String tanggal,
+  }) {
+    switch (tipe) {
+      case 'LIBUR':
+        return CalendarEvent(
+          title: keterangan,
+          color: const Color(0xFFEF4444),
+          type: 'company_libur',
+          isHoliday: true, // tanggal merah, disable absen
+          isWfh: false,
+          isInfo: false,
+          source: 'company',
+          displayDate: tanggal,
+        );
+      case 'WFH':
+        return CalendarEvent(
+          title: keterangan,
+          color: const Color(0xFF10B981),
+          type: 'company_wfh',
+          isHoliday: false, // tidak tanggal merah
+          isWfh: true,
+          isInfo: false,
+          source: 'company',
+          displayDate: tanggal,
+        );
+      case 'INFO':
+        return CalendarEvent(
+          title: keterangan,
+          color: const Color(0xFF3B82F6),
+          type: 'company_info',
+          isHoliday: false, // TIDAK tanggal merah
+          isWfh: false,
+          isInfo: true, // hanya informasi
+          source: 'company',
+          displayDate: tanggal,
+        );
+      default:
+        return CalendarEvent(
+          title: keterangan,
+          color: Colors.grey,
+          type: 'company_other',
+          isHoliday: false,
+          isWfh: false,
+          isInfo: false,
+          source: 'company',
+          displayDate: tanggal,
+        );
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────
   static bool _isNationalHoliday(String title) {
     const keywords = [
       'tahun baru',
@@ -105,61 +147,64 @@ class CalendarEvent {
 
   static Color _determineColor(String title, bool isCutiBersama) {
     if (isCutiBersama) return Colors.red[400]!;
-
     final lower = title.toLowerCase();
-
     if (lower.contains('kemerdekaan') || lower.contains('tahun baru masehi')) {
       return Colors.red[600]!;
-    } else if (lower.contains('idul fitri') || lower.contains('idul adha')) {
+    }
+    if (lower.contains('idul fitri') || lower.contains('idul adha')) {
       return Colors.green[600]!;
-    } else if (lower.contains('natal') ||
+    }
+    if (lower.contains('natal') ||
         lower.contains('paskah') ||
         lower.contains('wafat isa') ||
         lower.contains('kenaikan isa') ||
         lower.contains('good friday') ||
         lower.contains('ascension')) {
       return Colors.blue[600]!;
-    } else if (lower.contains('nyepi') ||
+    }
+    if (lower.contains('nyepi') ||
         lower.contains('imlek') ||
         lower.contains('chinese')) {
       return Colors.orange[600]!;
-    } else if (lower.contains('waisak') || lower.contains('vesak')) {
+    }
+    if (lower.contains('waisak') || lower.contains('vesak')) {
       return Colors.amber[600]!;
-    } else if (lower.contains('isra') ||
+    }
+    if (lower.contains('isra') ||
         lower.contains('maulid') ||
         lower.contains('muharram') ||
         lower.contains('muhammad')) {
       return Colors.teal[600]!;
-    } else if (lower.contains('pancasila') ||
+    }
+    if (lower.contains('pancasila') ||
         lower.contains('buruh') ||
         lower.contains('labour') ||
         lower.contains('labor')) {
       return Colors.indigo[600]!;
-    } else {
-      return Colors.purple[600]!;
     }
+    return Colors.purple[600]!;
   }
 
   static String _determineType(String title, bool isCutiBersama) {
     if (isCutiBersama) return 'cuti_bersama';
-
     final lower = title.toLowerCase();
-
     if (lower.contains('kemerdekaan') ||
         lower.contains('pancasila') ||
         lower.contains('buruh') ||
         lower.contains('labour') ||
         lower.contains('labor') ||
         lower.contains('tahun baru masehi') ||
-        lower.contains("new year")) {
+        lower.contains('new year')) {
       return 'nasional';
-    } else if (lower.contains('idul') ||
+    }
+    if (lower.contains('idul') ||
         lower.contains('isra') ||
         lower.contains('maulid') ||
         lower.contains('muharram') ||
         lower.contains('muhammad')) {
       return 'islam';
-    } else if (lower.contains('natal') ||
+    }
+    if (lower.contains('natal') ||
         lower.contains('paskah') ||
         lower.contains('wafat isa') ||
         lower.contains('kenaikan isa') ||
@@ -168,20 +213,17 @@ class CalendarEvent {
         lower.contains('easter') ||
         lower.contains('ascension')) {
       return 'kristen';
-    } else if (lower.contains('waisak') || lower.contains('vesak')) {
-      return 'buddha';
-    } else if (lower.contains('nyepi') ||
+    }
+    if (lower.contains('waisak') || lower.contains('vesak')) return 'buddha';
+    if (lower.contains('nyepi') ||
         lower.contains('imlek') ||
         lower.contains('chinese')) {
       return 'tradisional';
-    } else {
-      return 'lainnya';
     }
+    return 'lainnya';
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // Display getters
-  // ─────────────────────────────────────────────────────────────────
+  // ── Display getters ───────────────────────────────────────────────
   String get typeDescription {
     switch (type) {
       case 'cuti_bersama':
@@ -198,6 +240,12 @@ class CalendarEvent {
         return 'Hari Tradisional';
       case 'negara':
         return 'Hari Negara';
+      case 'company_libur':
+        return 'Libur Perusahaan';
+      case 'company_wfh':
+        return 'Work From Home';
+      case 'company_info':
+        return 'Info / Pengumuman';
       default:
         return 'Hari Libur';
     }
@@ -219,6 +267,12 @@ class CalendarEvent {
         return Icons.festival;
       case 'negara':
         return Icons.account_balance;
+      case 'company_libur':
+        return Icons.event_busy;
+      case 'company_wfh':
+        return Icons.home_work;
+      case 'company_info':
+        return Icons.info_outline;
       default:
         return Icons.event;
     }
@@ -226,5 +280,5 @@ class CalendarEvent {
 
   @override
   String toString() =>
-      'CalendarEvent{title: $title, type: $type, isHoliday: $isHoliday}';
+      'CalendarEvent{title: $title, type: $type, isHoliday: $isHoliday, isInfo: $isInfo}';
 }

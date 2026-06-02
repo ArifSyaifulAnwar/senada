@@ -1,11 +1,12 @@
 import 'dart:convert';
+import 'dart:ui';
 import 'package:http/http.dart' as http;
 import 'config.dart';
 
 class CompanyCalendarEvent {
   final int id;
   final DateTime tanggal;
-  final String tipe; // 'LIBUR' | 'WFH' | 'LEMBUR'
+  final String tipe; // 'LIBUR' | 'WFH' | 'INFO'
   final String keterangan;
   final String createdBy;
 
@@ -30,7 +31,52 @@ class CompanyCalendarEvent {
 
   bool get isLibur => tipe == 'LIBUR';
   bool get isWfh => tipe == 'WFH';
-  bool get isLembur => tipe == 'LEMBUR';
+  bool get isInfo => tipe == 'INFO';
+
+  /// Apakah tipe ini block absen / tanggal merah
+  bool get blocksAttendance => isLibur;
+
+  /// Apakah hanya informasi (tidak tanggal merah, tidak disable absen)
+  bool get isInfoOnly => isInfo;
+
+  Color get tipeColor {
+    switch (tipe) {
+      case 'LIBUR':
+        return const Color(0xFFEF4444); // merah
+      case 'WFH':
+        return const Color(0xFF10B981); // hijau
+      case 'INFO':
+        return const Color(0xFF3B82F6); // biru
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  String get tipeLabel {
+    switch (tipe) {
+      case 'LIBUR':
+        return 'Hari Libur';
+      case 'WFH':
+        return 'Work From Home';
+      case 'INFO':
+        return 'Info / Pengumuman';
+      default:
+        return tipe;
+    }
+  }
+
+  String get tipeEmoji {
+    switch (tipe) {
+      case 'LIBUR':
+        return '🔴';
+      case 'WFH':
+        return '🟢';
+      case 'INFO':
+        return '🔵';
+      default:
+        return '⚪';
+    }
+  }
 }
 
 class CompanyCalendarService {
@@ -60,7 +106,7 @@ class CompanyCalendarService {
     };
   }
 
-  // Ambil semua event company untuk 1 tahun
+  // ── Ambil semua event company untuk 1 tahun ───────────────────────
   static Future<List<CompanyCalendarEvent>> getByYear(
     int tahun, {
     bool forceRefresh = false,
@@ -91,7 +137,7 @@ class CompanyCalendarService {
     return _cache[tahun] ?? [];
   }
 
-  // Ambil event per tanggal tertentu
+  // ── Ambil event untuk tanggal tertentu ───────────────────────────
   static List<CompanyCalendarEvent> getForDate(
     DateTime date,
     List<CompanyCalendarEvent> allEvents,
@@ -106,7 +152,8 @@ class CompanyCalendarService {
         .toList();
   }
 
-  // Cek apakah tanggal libur (LIBUR atau weekend)
+  // ── Cek apakah tanggal libur (LIBUR atau weekend) ─────────────────
+  // INFO tidak dihitung sebagai hari libur
   static bool isHariLibur(DateTime date, List<CompanyCalendarEvent> allEvents) {
     if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
       return true;
@@ -120,14 +167,45 @@ class CompanyCalendarService {
     );
   }
 
-  // Save (HRD only)
+  // ── Cek apakah tanggal WFH ────────────────────────────────────────
+  static bool isHariWfh(DateTime date, List<CompanyCalendarEvent> allEvents) {
+    return allEvents.any(
+      (e) =>
+          e.isWfh &&
+          e.tanggal.year == date.year &&
+          e.tanggal.month == date.month &&
+          e.tanggal.day == date.day,
+    );
+  }
+
+  // ── Ambil event INFO untuk tanggal tertentu ───────────────────────
+  static List<CompanyCalendarEvent> getInfoForDate(
+    DateTime date,
+    List<CompanyCalendarEvent> allEvents,
+  ) {
+    return allEvents
+        .where(
+          (e) =>
+              e.isInfo &&
+              e.tanggal.year == date.year &&
+              e.tanggal.month == date.month &&
+              e.tanggal.day == date.day,
+        )
+        .toList();
+  }
+
+  // ── Save (HRD only) ───────────────────────────────────────────────
   static Future<Map<String, dynamic>> save({
     int? id,
     required String tanggal,
-    required String tipe,
+    required String tipe, // 'LIBUR' | 'WFH' | 'INFO'
     required String keterangan,
     required String createdBy,
   }) async {
+    if (!['LIBUR', 'WFH', 'INFO'].contains(tipe)) {
+      return {'success': false, 'message': 'Tipe tidak valid: $tipe'};
+    }
+
     try {
       final res = await http
           .post(
@@ -156,7 +234,7 @@ class CompanyCalendarService {
     }
   }
 
-  // Delete (HRD only)
+  // ── Delete (HRD only) ─────────────────────────────────────────────
   static Future<Map<String, dynamic>> delete({
     required int id,
     required String deletedBy,

@@ -87,12 +87,10 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     return list;
   }
 
-  // Events untuk bulan tertentu
   List<CompanyCalendarEvent> _eventsForMonth(int month) => _events
       .where((e) => e.tanggal.year == _selectedYear && e.tanggal.month == month)
       .toList();
 
-  // Events untuk tanggal tertentu
   List<CompanyCalendarEvent> _eventsForDate(DateTime date) => _events
       .where(
         (e) =>
@@ -102,14 +100,15 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
       )
       .toList();
 
+  // ── Warna & icon per tipe ─────────────────────────────────────────
   Color _tipeColor(String tipe) {
     switch (tipe) {
       case 'LIBUR':
         return const Color(0xFFEF4444);
       case 'WFH':
         return const Color(0xFF10B981);
-      case 'LEMBUR':
-        return const Color(0xFFF59E0B);
+      case 'INFO':
+        return const Color(0xFF3B82F6);
       default:
         return Colors.grey;
     }
@@ -121,10 +120,23 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return Icons.beach_access_rounded;
       case 'WFH':
         return Icons.home_work_rounded;
-      case 'LEMBUR':
-        return Icons.access_time_rounded;
+      case 'INFO':
+        return Icons.info_outline;
       default:
         return Icons.event;
+    }
+  }
+
+  String _tipeLabel(String tipe) {
+    switch (tipe) {
+      case 'LIBUR':
+        return 'Hari Libur';
+      case 'WFH':
+        return 'Work From Home';
+      case 'INFO':
+        return 'Info / Pengumuman';
+      default:
+        return tipe;
     }
   }
 
@@ -156,7 +168,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     ),
   );
 
-  // ── DIALOG TAMBAH / EDIT ────────────────────────────────────────
+  // ── DIALOG TAMBAH / EDIT ──────────────────────────────────────────
   Future<void> _showFormDialog({
     CompanyCalendarEvent? existing,
     DateTime? initialDate,
@@ -183,7 +195,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Tanggal
+                // ── Tanggal ──────────────────────────────────────
                 const Text(
                   'Tanggal',
                   style: TextStyle(
@@ -244,7 +256,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 ),
                 const SizedBox(height: 16),
 
-                // Tipe
+                // ── Tipe: LIBUR | WFH | INFO ──────────────────────
                 const Text(
                   'Tipe',
                   style: TextStyle(
@@ -255,7 +267,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 ),
                 const SizedBox(height: 6),
                 Row(
-                  children: ['LIBUR', 'WFH', 'LEMBUR'].map((tipe) {
+                  children: ['LIBUR', 'WFH', 'INFO'].map((tipe) {
                     final sel = selectedTipe == tipe;
                     return Expanded(
                       child: GestureDetector(
@@ -298,9 +310,43 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                     );
                   }).toList(),
                 ),
+
+                // ── Info hint untuk tipe INFO ──────────────────────
+                if (selectedTipe == 'INFO') ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3B82F6).withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF3B82F6).withOpacity(0.2),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 14,
+                          color: Color(0xFF3B82F6),
+                        ),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Info hanya sebagai pengumuman. Tidak mempengaruhi absen atau hari merah.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF3B82F6),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
 
-                // Keterangan
+                // ── Keterangan ────────────────────────────────────
                 const Text(
                   'Keterangan',
                   style: TextStyle(
@@ -314,7 +360,11 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                   controller: keteranganCtrl,
                   maxLines: 2,
                   decoration: InputDecoration(
-                    hintText: 'Contoh: Hari Raya Idul Fitri',
+                    hintText: selectedTipe == 'INFO'
+                        ? 'Contoh: Ultah Direktur, Rapat All Hands...'
+                        : selectedTipe == 'WFH'
+                        ? 'Contoh: WFH seluruh karyawan...'
+                        : 'Contoh: Hari Raya Idul Fitri...',
                     hintStyle: const TextStyle(
                       fontSize: 13,
                       color: Color(0xFF9CA3AF),
@@ -384,7 +434,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     );
   }
 
-  // ── DELETE ──────────────────────────────────────────────────────
+  // ── DELETE ────────────────────────────────────────────────────────
   Future<void> _confirmDelete(CompanyCalendarEvent event) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -427,7 +477,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     }
   }
 
-  // ── BUILD ───────────────────────────────────────────────────────
+  // ── BUILD ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -500,11 +550,10 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     );
   }
 
-  // ── TAB 1: LIST ─────────────────────────────────────────────────
+  // ── TAB 1: LIST ───────────────────────────────────────────────────
   Widget _buildListTab() {
     return Column(
       children: [
-        // Year selector + filter
         Container(
           color: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -534,11 +583,12 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 visualDensity: VisualDensity.compact,
               ),
               const Spacer(),
+              // Filter chips: SEMUA | LIBUR | WFH | INFO
               ...[
                 ('SEMUA', Colors.grey),
                 ('LIBUR', const Color(0xFFEF4444)),
                 ('WFH', const Color(0xFF10B981)),
-                ('LEMBUR', const Color(0xFFF59E0B)),
+                ('INFO', const Color(0xFF3B82F6)),
               ].map((item) {
                 final sel = _filterTipe == item.$1;
                 return GestureDetector(
@@ -574,10 +624,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         ),
         const Divider(height: 1),
 
-        // Stats bar
         if (!_isLoading && _events.isNotEmpty) _buildStatsBar(),
 
-        // List
         Expanded(
           child: _isLoading
               ? const Center(
@@ -605,7 +653,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
   Widget _buildStatsBar() {
     final liburCount = _events.where((e) => e.tipe == 'LIBUR').length;
     final wfhCount = _events.where((e) => e.tipe == 'WFH').length;
-    final lemburCount = _events.where((e) => e.tipe == 'LEMBUR').length;
+    final infoCount = _events.where((e) => e.tipe == 'INFO').length;
 
     return Container(
       color: Colors.white,
@@ -616,7 +664,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
           const SizedBox(width: 8),
           _statChip('$wfhCount WFH', const Color(0xFF10B981)),
           const SizedBox(width: 8),
-          _statChip('$lemburCount Lembur', const Color(0xFFF59E0B)),
+          _statChip('$infoCount Info', const Color(0xFF3B82F6)),
         ],
       ),
     );
@@ -751,7 +799,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                event.tipe,
+                _tipeLabel(event.tipe),
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
@@ -796,11 +844,10 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     );
   }
 
-  // ── TAB 2: KALENDER GRID ────────────────────────────────────────
+  // ── TAB 2: KALENDER GRID ──────────────────────────────────────────
   Widget _buildCalendarTab() {
     return Column(
       children: [
-        // Month + Year navigator
         Container(
           color: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
@@ -860,8 +907,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
           ),
         ),
         const Divider(height: 1),
-
-        // Kalender grid + event list bulan ini
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
@@ -878,7 +923,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     );
   }
 
-  // Grid kalender 1 bulan
   Widget _buildMonthGrid(int month) {
     final firstDay = DateTime(_selectedYear, month, 1);
     final lastDay = DateTime(_selectedYear, month + 1, 0);
@@ -901,7 +945,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Header hari
             Row(
               children: _dayNames
                   .map(
@@ -927,8 +970,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
             const SizedBox(height: 8),
             const Divider(height: 1, color: Color(0xFFE5E7EB)),
             const SizedBox(height: 8),
-
-            // Grid hari
             ..._buildGridRows(firstDay, lastDay, startWeekday),
           ],
         ),
@@ -944,7 +985,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     final List<Widget> rows = [];
     List<Widget> cells = [];
 
-    // Empty cells awal
     for (int i = 0; i < startWeekday; i++) {
       cells.add(const Expanded(child: SizedBox(height: 48)));
     }
@@ -960,9 +1000,11 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
       final isSaturday = date.weekday == DateTime.saturday;
       final isWeekend = isSunday || isSaturday;
 
-      // Warna background
+      // ── Warna cell ────────────────────────────────────────────────
+      // INFO tidak mengubah warna cell — hanya dot biru yang muncul
       Color? bgColor;
       Color textColor;
+
       if (isToday) {
         bgColor = const Color(0xFF6366F1);
         textColor = Colors.white;
@@ -972,12 +1014,10 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
       } else if (events.any((e) => e.tipe == 'WFH')) {
         bgColor = const Color(0xFF10B981).withOpacity(0.1);
         textColor = const Color(0xFF10B981);
-      } else if (events.any((e) => e.tipe == 'LEMBUR')) {
-        bgColor = const Color(0xFFF59E0B).withOpacity(0.1);
-        textColor = const Color(0xFFF59E0B);
       } else if (isWeekend) {
         textColor = Colors.red[300]!;
       } else {
+        // INFO tidak ubah warna — warna normal
         textColor = const Color(0xFF1E293B);
       }
 
@@ -988,7 +1028,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
               if (events.isNotEmpty) {
                 _showDayEventsSheet(date, events);
               } else {
-                // Langsung buka form tambah dengan tanggal ini
                 _showFormDialog(initialDate: date);
               }
             },
@@ -1014,7 +1053,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                       color: textColor,
                     ),
                   ),
-                  // Dot indicator event
                   if (events.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Row(
@@ -1044,7 +1082,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         ),
       );
 
-      // Akhir minggu atau akhir bulan
       if ((startWeekday + day) % 7 == 0 || day == lastDay.day) {
         if (day == lastDay.day) {
           final rem = 7 - cells.length;
@@ -1059,7 +1096,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     return rows;
   }
 
-  // List event dalam 1 bulan (di bawah grid)
   Widget _buildMonthEventList(int month) {
     final events = _eventsForMonth(month)
       ..sort((a, b) => a.tanggal.compareTo(b.tanggal));
@@ -1115,7 +1151,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     );
   }
 
-  // Bottom sheet detail event per hari (saat tap tanggal yang ada event)
   void _showDayEventsSheet(DateTime date, List<CompanyCalendarEvent> events) {
     showModalBottomSheet(
       context: context,
@@ -1153,7 +1188,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                         ),
                       ),
                       const Spacer(),
-                      // Tombol tambah event di hari ini
                       TextButton.icon(
                         onPressed: () {
                           Navigator.pop(context);
@@ -1199,16 +1233,25 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                                   ),
                                 ),
                                 Text(
-                                  e.tipe,
+                                  _tipeLabel(e.tipe),
                                   style: TextStyle(
                                     fontSize: 11,
                                     color: _tipeColor(e.tipe),
                                   ),
                                 ),
+                                // Info hint untuk tipe INFO
+                                if (e.tipe == 'INFO')
+                                  Text(
+                                    'Hanya informasi · tidak mempengaruhi absen',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[400],
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
-                          // Edit
                           IconButton(
                             onPressed: () {
                               Navigator.pop(context);
@@ -1221,7 +1264,6 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                             ),
                             visualDensity: VisualDensity.compact,
                           ),
-                          // Delete
                           IconButton(
                             onPressed: () {
                               Navigator.pop(context);
@@ -1276,7 +1318,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
           ),
           const SizedBox(height: 8),
           const Text(
-            'Tap tombol + untuk menambah hari libur, WFH, atau lembur',
+            'Tap tombol + untuk menambah hari libur, WFH, atau info pengumuman',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
           ),

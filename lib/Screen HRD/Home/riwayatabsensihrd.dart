@@ -30,7 +30,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   final AdminAttendanceService _adminService = AdminAttendanceService();
   final TextEditingController _searchController = TextEditingController();
   late TabController _tabController;
-
+  DateTime? _dashboardDate; // null = hari ini
   bool isLoading = false;
   String errorMessage = '';
   String selectedTimeRange = 'Semua Data';
@@ -46,7 +46,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   List<Employee> employees = [];
   List<Office> offices = [];
   List<String> departments = [];
-
+  List<Map<String, dynamic>> _tidakHadirList = [];
   int currentPage = 1;
   int totalPages = 1;
   bool hasMoreData = false;
@@ -103,6 +103,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     ]);
     await _loadAttendanceData(refresh: true);
     await _loadHRDAnalytics();
+    await _loadTidakHadirList(); // ← load sendiri, tidak bergantung attendanceData
   }
 
   Future<void> _loadEmployees() async {
@@ -130,16 +131,74 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     }
   }
 
+  Future<void> _loadTidakHadirList() async {
+    if (employees.isEmpty) return;
+
+    try {
+      final now = DateTime.now();
+      final targetDate = _dashboardDate ?? now;
+      final targetStr = DateFormat('yyyy-MM-dd').format(targetDate);
+      final isToday = targetStr == DateFormat('yyyy-MM-dd').format(now);
+      final jamSekarang = now.hour * 60 + now.minute;
+      final jam17 = 17 * 60;
+
+      // Load data absensi untuk tanggal yang dipilih
+      final r = await _adminService.getAllAttendanceData(
+        timeRange: isToday ? 'Hari Ini' : null,
+        startDate: isToday ? null : targetDate,
+        endDate: isToday ? null : targetDate,
+        page: 1,
+        pageSize: 500,
+      );
+
+      final hadirUserIds = (r.data?.data ?? [])
+          .where(
+            (d) =>
+                DateFormat('yyyy-MM-dd').format(d.attendanceDate) == targetStr,
+          )
+          .map((d) => d.userId)
+          .toSet();
+
+      // Label: kalau hari ini sebelum jam 17 → "Belum Absen", lainnya → "Tidak Hadir"
+      final label = (isToday && jamSekarang < jam17)
+          ? 'Belum Absen'
+          : 'Tidak Hadir';
+
+      final tidakHadir = employees
+          .where((e) => !hadirUserIds.contains(e.userId))
+          .map(
+            (e) => {
+              'userId': e.userId,
+              'name': e.name,
+              'department': e.department ?? '-',
+              'label': label,
+            },
+          )
+          .toList();
+
+      if (mounted) setState(() => _tidakHadirList = tidakHadir);
+    } catch (_) {
+      if (mounted) setState(() => _tidakHadirList = []);
+    }
+  }
+
   Future<void> _loadDashboardStats() async {
     try {
       String? timeRangeToSend;
       DateTime? startDateToSend, endDateToSend;
-      if (selectedTimeRange == 'Pilih Periode' && customDateRange != null) {
+
+      if (_dashboardDate != null) {
+        // ← Filter dari date picker dashboard
+        startDateToSend = _dashboardDate;
+        endDateToSend = _dashboardDate;
+      } else if (selectedTimeRange == 'Pilih Periode' &&
+          customDateRange != null) {
         startDateToSend = customDateRange!.start;
         endDateToSend = customDateRange!.end;
       } else if (selectedTimeRange != 'Semua Data') {
         timeRangeToSend = selectedTimeRange;
       }
+
       final r = await _adminService.getDashboardStats(
         timeRange: timeRangeToSend,
         startDate: startDateToSend,
@@ -276,7 +335,9 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     await _loadAttendanceData();
   }
 
-  Future<void> _refreshData() async => _loadInitialData();
+  Future<void> _refreshData() async {
+    await _loadInitialData(); // sudah include _loadTidakHadirList
+  }
 
   // ── TAMBAH: Load doa map otomatis ────────────────────────────────────
   Future<void> _loadDoaMap() async {
@@ -916,18 +977,93 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     return RefreshIndicator(
       onRefresh: _refreshData,
       child: SingleChildScrollView(
+        controller: _dashboardScrollController,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Dashboard HRD - Absensi',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1E293B),
-              ),
+            Row(
+              children: [
+                const Text(
+                  'Dashboard HRD - Absensi',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+                const Spacer(),
+                // ── FILTER TANGGAL ──────────────────────────────
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _dashboardDate ?? DateTime.now(),
+                      firstDate: DateTime(2024),
+                      lastDate: DateTime.now(),
+                      helpText: 'Pilih Tanggal Dashboard',
+                    );
+                    if (picked != null) {
+                      setState(() => _dashboardDate = picked);
+                      await _loadDashboardStats();
+                      await _loadTidakHadirList();
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: const Color(0xFF6366F1).withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.calendar_today,
+                          size: 14,
+                          color: Color(0xFF6366F1),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _dashboardDate == null
+                              ? 'Hari Ini'
+                              : DateFormat(
+                                  'dd MMM yyyy',
+                                  'id_ID',
+                                ).format(_dashboardDate!),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6366F1),
+                          ),
+                        ),
+                        if (_dashboardDate != null) ...[
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() => _dashboardDate = null);
+                              _loadDashboardStats();
+                              _loadTidakHadirList();
+                            },
+                            child: const Icon(
+                              Icons.close,
+                              size: 14,
+                              color: Color(0xFF6366F1),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             _buildHRDStatsGrid(),
@@ -940,7 +1076,15 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                     children: [
                       Expanded(child: _buildDepartmentAnalytics()),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildProblematicEmployees()),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _buildProblematicEmployees(),
+                            const SizedBox(height: 16),
+                            _buildTidakHadirSection(), // ← TAMBAH
+                          ],
+                        ),
+                      ),
                     ],
                   );
                 return Column(
@@ -948,6 +1092,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                     _buildDepartmentAnalytics(),
                     const SizedBox(height: 16),
                     _buildProblematicEmployees(),
+                    const SizedBox(height: 16),
+                    _buildTidakHadirSection(), // ← TAMBAH
                   ],
                 );
               },
@@ -955,6 +1101,243 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             const SizedBox(height: 20),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildTidakHadirSection() {
+    if (_tidakHadirList.isEmpty) return const SizedBox.shrink();
+
+    final now = DateTime.now();
+    final jamSekarang = now.hour * 60 + now.minute;
+    final jam17 = 17 * 60;
+    final targetDate = _dashboardDate ?? now;
+    final isToday =
+        DateFormat('yyyy-MM-dd').format(targetDate) ==
+        DateFormat('yyyy-MM-dd').format(now);
+    final isBelumAbsen = isToday && jamSekarang < jam17;
+
+    return Container(
+      key: _tidakHadirKey,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isBelumAbsen
+              ? const Color(0xFFF59E0B).withOpacity(0.3)
+              : const Color(0xFFEF4444).withOpacity(0.3),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color:
+                      (isBelumAbsen
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFFEF4444))
+                          .withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isBelumAbsen ? Icons.access_time : Icons.cancel,
+                  color: isBelumAbsen
+                      ? const Color(0xFFF59E0B)
+                      : const Color(0xFFEF4444),
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isBelumAbsen
+                      ? 'Karyawan Belum Absen'
+                      : 'Karyawan Tidak Hadir',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                      (isBelumAbsen
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFFEF4444))
+                          .withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${stats?.tidakHadir ?? _tidakHadirList.length} orang',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isBelumAbsen
+                        ? const Color(0xFFF59E0B)
+                        : const Color(0xFFEF4444),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // Info waktu
+          if (isBelumAbsen) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: Color(0xFFD97706),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Jam kerja 08:00–17:00 • Update otomatis tiap refresh',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFD97706),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          ..._tidakHadirList.map((karyawan) {
+            final label = karyawan['label'] as String? ?? 'Tidak Hadir';
+            final labelColor = label == 'Belum Absen'
+                ? const Color(0xFFF59E0B)
+                : const Color(0xFFEF4444);
+            final bgColor = label == 'Belum Absen'
+                ? const Color(0xFFFFFBEB)
+                : const Color(0xFFFEF2F2);
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: labelColor.withOpacity(0.15)),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: labelColor.withOpacity(0.15),
+                    child: Text(
+                      (karyawan['name'] as String).isNotEmpty
+                          ? (karyawan['name'] as String)[0].toUpperCase()
+                          : '?',
+                      style: TextStyle(
+                        color: labelColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          karyawan['name'] as String,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        Text(
+                          karyawan['department'] as String,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Badge label
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: labelColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: labelColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    onPressed: () {
+                      final emp = employees.firstWhere(
+                        (e) => e.userId == karyawan['userId'],
+                        orElse: () => Employee(
+                          userId: karyawan['userId'] as String,
+                          name: karyawan['name'] as String,
+                        ),
+                      );
+                      setState(() {
+                        selectedEmployee = emp;
+                        selectedTimeRange = 'Semua Data';
+                        _webTabIndex = 1;
+                      });
+                      _tabController.animateTo(1);
+                      _loadAttendanceData(refresh: true);
+                    },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      foregroundColor: const Color(0xFF6366F1),
+                    ),
+                    child: const Text(
+                      'Riwayat',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
   }
@@ -1139,6 +1522,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   Icons.people,
                   const Color(0xFF3B82F6),
                   subtitle: 'Terdaftar',
+                  // Tidak perlu filter — tampilkan semua
                 ),
                 _statCard(
                   'Tepat Waktu',
@@ -1146,6 +1530,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   Icons.check_circle,
                   const Color(0xFF10B981),
                   subtitle: 'Karyawan',
+                  onTap: () => _filterByStatusAndGoToTab('Tepat Waktu'),
                 ),
                 _statCard(
                   'Terlambat',
@@ -1154,6 +1539,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   const Color(0xFFF59E0B),
                   subtitle: 'Karyawan',
                   warn: s.terlambat > 5,
+                  onTap: () => _filterByStatusAndGoToTab('Terlambat'),
                 ),
                 _statCard(
                   'Tidak Hadir',
@@ -1162,10 +1548,12 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   const Color(0xFFEF4444),
                   subtitle: 'Karyawan',
                   warn: s.tidakHadir > 3,
+                  onTap: () => _scrollToTidakHadir(),
                 ),
               ],
             ),
             const SizedBox(height: 16),
+            // Tingkat Kehadiran
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1185,16 +1573,23 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Tingkat Kehadiran',
+                          'Tingkat Kehadiran Hari Ini',
                           style: TextStyle(color: Colors.white70, fontSize: 14),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${_calculateAttendanceRate()}%',
+                          '${_calculateAttendanceRate().toStringAsFixed(1)}%',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 28,
                             fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${s.tepatWaktu + s.terlambat} dari ${s.totalKaryawan} karyawan hadir',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
                           ),
                         ),
                       ],
@@ -1222,6 +1617,47 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     );
   }
 
+  final ScrollController _dashboardScrollController = ScrollController();
+  final GlobalKey _tidakHadirKey = GlobalKey();
+  void _filterByStatusAndGoToTab(String status) {
+    setState(() {
+      selectedStatusFilter = status;
+      selectedTimeRange = '1 Hari'; // ← pastikan ini, bukan '1 Hari'
+      customDateRange = null;
+      _webTabIndex = 1;
+    });
+    _tabController.animateTo(1);
+    _loadAttendanceData(refresh: true);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.filter_alt, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Text('Menampilkan karyawan: $status hari ini'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF6366F1),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _scrollToTidakHadir() {
+    // Scroll ke bagian tidak hadir di dashboard
+    if (_tidakHadirKey.currentContext != null) {
+      Scrollable.ensureVisible(
+        _tidakHadirKey.currentContext!,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
   Widget _statCard(
     String title,
     String value,
@@ -1229,83 +1665,111 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     Color color, {
     String? subtitle,
     bool warn = false,
+    VoidCallback? onTap, // ← TAMBAH
   }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: warn ? color.withOpacity(0.5) : color.withOpacity(0.2),
-          width: warn ? 2 : 1,
+    return GestureDetector(
+      // ← WRAP dengan GestureDetector
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color:
+                onTap !=
+                    null // ← highlight kalau bisa diklik
+                ? color.withOpacity(0.4)
+                : warn
+                ? color.withOpacity(0.5)
+                : color.withOpacity(0.2),
+            width: warn || onTap != null ? 2 : 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: warn
+                  ? color.withOpacity(0.1)
+                  : Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: warn
-                ? color.withOpacity(0.1)
-                : Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: color, size: 18),
-              ),
-              if (warn)
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
                 Container(
-                  padding: const EdgeInsets.all(3),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    shape: BoxShape.circle,
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.priority_high,
-                    size: 10,
-                    color: Colors.red,
-                  ),
+                  child: Icon(icon, color: color, size: 18),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color,
+                if (warn)
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.priority_high,
+                      size: 10,
+                      color: Colors.red,
+                    ),
+                  ),
+                // Icon tap hint
+                if (onTap != null && !warn)
+                  Icon(
+                    Icons.touch_app,
+                    size: 14,
+                    color: color.withOpacity(0.5),
+                  ),
+              ],
             ),
-          ),
-          const SizedBox(height: 2),
-          if (subtitle != null)
+            const SizedBox(height: 8),
             Text(
-              subtitle,
-              style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
             ),
-          const SizedBox(height: 2),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Colors.black87,
+            const SizedBox(height: 2),
+            if (subtitle != null)
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+              ),
+            const SizedBox(height: 2),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.black87,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            // Label "Tap untuk lihat detail"
+            if (onTap != null)
+              Text(
+                'Tap untuk lihat',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: color.withOpacity(0.6),
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2365,9 +2829,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   double _calculateAttendanceRate() {
     if (stats == null || stats!.totalKaryawan == 0) return 0;
-    return ((stats!.tepatWaktu + stats!.masukKantor) /
-            stats!.totalKaryawan *
-            100)
+    // Hanya hitung yang benar-benar hadir (tepat waktu + terlambat)
+    return ((stats!.tepatWaktu + stats!.terlambat) / stats!.totalKaryawan * 100)
         .clamp(0, 100);
   }
 
