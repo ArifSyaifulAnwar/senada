@@ -1228,11 +1228,9 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       ),
     ],
   );
-  void _openReportsTab() {
-    setState(() {
-      _webTabIndex = 3;
-    });
 
+  void _openReportsTab() {
+    setState(() => _webTabIndex = 3);
     _tabController.animateTo(3);
   }
 
@@ -1272,9 +1270,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                     min: 0,
                     max: 30,
                     suffix: 'hari',
-                    onChanged: (v) {
-                      setDialogState(() => annualQuota = v);
-                    },
+                    onChanged: (v) => setDialogState(() => annualQuota = v),
                   ),
                   const SizedBox(height: 14),
                   _buildPolicySlider(
@@ -1283,26 +1279,21 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                     min: 1,
                     max: 30,
                     suffix: 'hari',
-                    onChanged: (v) {
-                      setDialogState(() => maxConsecutive = v);
-                    },
+                    onChanged: (v) => setDialogState(() => maxConsecutive = v),
                   ),
                   const SizedBox(height: 14),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Wajib lampiran untuk izin sakit'),
                     value: requireSickAttachment,
-                    onChanged: (v) {
-                      setDialogState(() => requireSickAttachment = v);
-                    },
+                    onChanged: (v) =>
+                        setDialogState(() => requireSickAttachment = v),
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Izinkan pengajuan tanggal mundur'),
                     value: allowBackdate,
-                    onChanged: (v) {
-                      setDialogState(() => allowBackdate = v);
-                    },
+                    onChanged: (v) => setDialogState(() => allowBackdate = v),
                   ),
                 ],
               ),
@@ -1320,7 +1311,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                     _requireAttachmentForSickLeave = requireSickAttachment;
                     _allowBackdateRequest = allowBackdate;
                   });
-
                   Navigator.pop(context);
                   _snackOk('Kebijakan cuti berhasil disimpan sementara');
                 },
@@ -1387,7 +1377,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   void _showBroadcastDialog() {
     final titleController = TextEditingController();
     final messageController = TextEditingController();
-
     String target = 'Semua Karyawan';
 
     showDialog(
@@ -1481,16 +1470,13 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 onPressed: () {
                   final title = titleController.text.trim();
                   final message = messageController.text.trim();
-
                   if (title.isEmpty || message.isEmpty) {
                     _snackErr('Judul dan isi pesan wajib diisi');
                     return;
                   }
-
                   titleController.dispose();
                   messageController.dispose();
                   Navigator.pop(context);
-
                   _snackOk('Broadcast berhasil disiapkan untuk $target');
                 },
                 icon: const Icon(Icons.send, size: 16),
@@ -1831,24 +1817,28 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     child: _users.isEmpty
         ? _buildEmptyState()
         : LayoutBuilder(
-            builder: (_, c) => c.maxWidth >= 700
-                ? GridView.builder(
-                    padding: const EdgeInsets.all(20),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                          childAspectRatio: 1.3,
-                        ),
-                    itemCount: _users.length,
-                    itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _users.length,
-                    itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
-                  ),
+            builder: (_, c) {
+              final bool isWeb = c.maxWidth >= 700;
+              if (!isWeb) {
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _users.length,
+                  itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
+                );
+              }
+              final int crossAxisCount = c.maxWidth >= 1300 ? 3 : 2;
+              return GridView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: _users.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: crossAxisCount == 3 ? 2.45 : 3.4,
+                ),
+                itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
+              );
+            },
           ),
   );
 
@@ -1988,15 +1978,9 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   Future<void> _exportReportData(String reportType) async {
     try {
       final buffer = StringBuffer();
-
-      String clean(String? value) {
-        return '"${(value ?? '-').replaceAll('"', '""')}"';
-      }
-
-      String normalizeStatus(String status) {
-        return status.trim();
-      }
-
+      String clean(String? value) =>
+          '"${(value ?? '-').replaceAll('"', '""')}"';
+      String normalizeStatus(String status) => status.trim();
       bool isPendingLike(String status) {
         final s = status.toLowerCase();
         return s == 'pending' || s == 'menunggu laporan' || s == 'menunggu org';
@@ -2007,40 +1991,29 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         return s == 'approved' || s == 'processed' || s == 'submitted';
       }
 
-      bool isRejectedLike(String status) {
-        return status.toLowerCase() == 'rejected';
-      }
-
-      String getDept(AdminTimeOffData item) {
-        return item.userDepartment ?? 'Tidak Ada Departemen';
-      }
+      bool isRejectedLike(String status) => status.toLowerCase() == 'rejected';
+      String getDept(AdminTimeOffData item) =>
+          item.userDepartment ?? 'Tidak Ada Departemen';
 
       String title = 'laporan_timeoff_hrd';
 
       if (reportType == 'bulanan') {
         title = 'laporan_bulanan_timeoff_hrd';
-
         buffer.writeln(
           'Bulan,Tahun,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
         );
-
         final Map<String, List<AdminTimeOffData>> grouped = {};
-
         for (final item in _allTimeOffs) {
           final key =
               '${item.tanggalMulai.year}-${item.tanggalMulai.month.toString().padLeft(2, '0')}';
-
           grouped.putIfAbsent(key, () => []);
           grouped[key]!.add(item);
         }
-
         final entries = grouped.entries.toList()
           ..sort((a, b) => a.key.compareTo(b.key));
-
         for (final entry in entries) {
           final items = entry.value;
           final first = items.first.tanggalMulai;
-
           final menunggu = items
               .where((e) => isPendingLike(normalizeStatus(e.status)))
               .length;
@@ -2050,9 +2023,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           final rejected = items
               .where((e) => isRejectedLike(normalizeStatus(e.status)))
               .length;
-
           final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-
           buffer.writeln(
             [
               clean(_getMonthName(first.month)),
@@ -2067,25 +2038,18 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
       } else if (reportType == 'tahunan') {
         title = 'laporan_tahunan_timeoff_hrd';
-
         buffer.writeln(
           'Tahun,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
         );
-
         final Map<int, List<AdminTimeOffData>> grouped = {};
-
         for (final item in _allTimeOffs) {
-          final key = item.tanggalMulai.year;
-          grouped.putIfAbsent(key, () => []);
-          grouped[key]!.add(item);
+          grouped.putIfAbsent(item.tanggalMulai.year, () => []);
+          grouped[item.tanggalMulai.year]!.add(item);
         }
-
         final entries = grouped.entries.toList()
           ..sort((a, b) => a.key.compareTo(b.key));
-
         for (final entry in entries) {
           final items = entry.value;
-
           final menunggu = items
               .where((e) => isPendingLike(normalizeStatus(e.status)))
               .length;
@@ -2095,9 +2059,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           final rejected = items
               .where((e) => isRejectedLike(normalizeStatus(e.status)))
               .length;
-
           final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-
           buffer.writeln(
             [
               clean(entry.key.toString()),
@@ -2111,25 +2073,19 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
       } else if (reportType == 'departemen') {
         title = 'laporan_per_departemen_timeoff_hrd';
-
         buffer.writeln(
           'Departemen,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
         );
-
         final Map<String, List<AdminTimeOffData>> grouped = {};
-
         for (final item in _allTimeOffs) {
           final key = getDept(item);
           grouped.putIfAbsent(key, () => []);
           grouped[key]!.add(item);
         }
-
         final entries = grouped.entries.toList()
           ..sort((a, b) => b.value.length.compareTo(a.value.length));
-
         for (final entry in entries) {
           final items = entry.value;
-
           final menunggu = items
               .where((e) => isPendingLike(normalizeStatus(e.status)))
               .length;
@@ -2139,9 +2095,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           final rejected = items
               .where((e) => isRejectedLike(normalizeStatus(e.status)))
               .length;
-
           final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-
           buffer.writeln(
             [
               clean(entry.key),
@@ -2155,25 +2109,19 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
       } else if (reportType == 'karyawan') {
         title = 'laporan_per_karyawan_timeoff_hrd';
-
         buffer.writeln(
           'User ID,Nama,Jabatan,Departemen,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
         );
-
         final Map<String, List<AdminTimeOffData>> grouped = {};
-
         for (final item in _allTimeOffs) {
           grouped.putIfAbsent(item.userId, () => []);
           grouped[item.userId]!.add(item);
         }
-
         final entries = grouped.entries.toList()
           ..sort((a, b) => b.value.length.compareTo(a.value.length));
-
         for (final entry in entries) {
           final items = entry.value;
           final first = items.first;
-
           final menunggu = items
               .where((e) => isPendingLike(normalizeStatus(e.status)))
               .length;
@@ -2183,9 +2131,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           final rejected = items
               .where((e) => isRejectedLike(normalizeStatus(e.status)))
               .length;
-
           final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-
           buffer.writeln(
             [
               clean(first.userId),
@@ -2202,26 +2148,19 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
       } else if (reportType == 'tren') {
         title = 'laporan_tren_cuti_timeoff_hrd';
-
         buffer.writeln('Periode,Total Pengajuan,Total Hari');
-
         final Map<String, List<AdminTimeOffData>> grouped = {};
-
         for (final item in _allTimeOffs) {
           final key =
               '${item.tanggalMulai.year}-${item.tanggalMulai.month.toString().padLeft(2, '0')}';
-
           grouped.putIfAbsent(key, () => []);
           grouped[key]!.add(item);
         }
-
         final entries = grouped.entries.toList()
           ..sort((a, b) => a.key.compareTo(b.key));
-
         for (final entry in entries) {
           final items = entry.value;
           final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-
           buffer.writeln(
             [
               clean(entry.key),
@@ -2232,11 +2171,9 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
       } else {
         title = 'laporan_detail_timeoff_hrd';
-
         buffer.writeln(
           'ID,User ID,Nama,Jenis Cuti,Tanggal Mulai,Tanggal Selesai,Total Hari,Status,Departemen,Catatan,Laporan Status',
         );
-
         for (final item in _filteredTimeOffs) {
           buffer.writeln(
             [
@@ -2258,7 +2195,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
       final fileName =
           '${title}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
-
       final content = buffer.toString();
 
       if (kIsWeb) {
@@ -2270,11 +2206,8 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/$fileName');
-
       await file.writeAsString(content);
-
       _snackOk('Laporan berhasil dibuat');
-
       await OpenFile.open(file.path);
     } catch (e) {
       _snackErr('Gagal membuat laporan: $e');
@@ -2297,7 +2230,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       'November',
       'Desember',
     ];
-
     if (month < 1 || month > 12) return '-';
     return months[month];
   }
@@ -2549,7 +2481,45 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 ],
               ),
             ),
-            // Badge laporan tersedia
+            if (!item.isDinasLuar && item.hasFile) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.attach_file,
+                          size: 12,
+                          color: Color(0xFF059669),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Ada lampiran',
+                          style: TextStyle(
+                            fontSize: _fs(10),
+                            color: const Color(0xFF059669),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (item.isDinasLuar &&
                 item.hasLaporan &&
                 item.status == 'Pending') ...[
@@ -2574,12 +2544,14 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                       color: Color(0xFF7C3AED),
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      '📎 Laporan DL sudah diupload — siap direview',
-                      style: TextStyle(
-                        fontSize: _fs(11),
-                        color: const Color(0xFF5B21B6),
-                        fontWeight: FontWeight.w500,
+                    Expanded(
+                      child: Text(
+                        'Laporan DL sudah diupload — siap direview',
+                        style: TextStyle(
+                          fontSize: _fs(11),
+                          color: const Color(0xFF5B21B6),
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],
@@ -2591,23 +2563,28 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.access_time,
-                        size: 13,
-                        color: Color(0xFF94A3B8),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'Diajukan ${item.daysSinceSubmitted} hari yang lalu',
-                        style: TextStyle(
-                          fontSize: _fs(11),
-                          color: item.urgencyColor,
-                          fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.access_time,
+                          size: 13,
+                          color: Color(0xFF94A3B8),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            'Diajukan ${item.daysSinceSubmitted} hari lalu',
+                            style: TextStyle(
+                              fontSize: _fs(11),
+                              color: item.urgencyColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   Row(
                     children: [
@@ -2972,6 +2949,37 @@ class _WebTab {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Model file lampiran HRD (multi-file + legacy)
+// ══════════════════════════════════════════════════════════════════════════════
+class _HrdAttachment {
+  final int id; // 0 = file legacy (kolom file_name di udt_timeoff)
+  final String fileName;
+  final int? fileSize;
+  final String? fileType;
+
+  const _HrdAttachment({
+    required this.id,
+    required this.fileName,
+    this.fileSize,
+    this.fileType,
+  });
+
+  String get ext =>
+      fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+  bool get isImage => ['jpg', 'jpeg', 'png'].contains(ext);
+  bool get isPdf => ext == 'pdf';
+  bool get isLegacy => id == 0;
+
+  String get sizeLabel {
+    if (fileSize == null || fileSize! <= 0) return '';
+    final b = fileSize!;
+    return b >= 1024 * 1024
+        ? '${(b / (1024 * 1024)).toStringAsFixed(1)} MB'
+        : '${(b / 1024).toStringAsFixed(0)} KB';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // HRDTimeOffDetailModal
 // ══════════════════════════════════════════════════════════════════════════════
 class HRDTimeOffDetailModal extends StatefulWidget {
@@ -2996,7 +3004,21 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
   final TextEditingController _reviewNotesController = TextEditingController();
   final FocusNode _reviewNotesFocusNode = FocusNode();
   bool _isProcessing = false;
-  bool _isDownloading = false;
+
+  List<_HrdAttachment> _attachments = [];
+  bool _filesLoading = true;
+  int? _downloadingFileId;
+  bool _isDownloadingDl = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.item.isDinasLuar) {
+      _loadAttachments();
+    } else {
+      _filesLoading = false;
+    }
+  }
 
   @override
   void dispose() {
@@ -3005,7 +3027,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     super.dispose();
   }
 
-  // ── Token (pakai method dari TimeOffAdminService) ─────────────────
   Future<String?> _getToken() async {
     try {
       final res = await http
@@ -3025,9 +3046,169 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     }
   }
 
-  // ── Download laporan / anggaran ──────────────────────────────────
+  // Ambil semua file: multi-file (udt_timeoff_files) + fallback legacy
+  Future<void> _loadAttachments() async {
+    setState(() => _filesLoading = true);
+    final List<_HrdAttachment> result = [];
+
+    try {
+      final token = await _getToken();
+      if (token != null) {
+        final res = await http
+            .post(
+              Uri.parse('$baseURL/api/timeoff/files/list'),
+              headers: {
+                'Authorization': 'Bearer $token',
+                'Content-Type': 'application/json',
+              },
+              body: json.encode({
+                'timeOffId': widget.item.id,
+                'userId': widget.currentHRDId,
+              }),
+            )
+            .timeout(const Duration(seconds: 20));
+
+        if (res.statusCode == 200) {
+          final body = json.decode(res.body) as Map<String, dynamic>;
+          final ok = body['success'] == true || body['Success'] == true;
+          final data = body['data'] ?? body['Data'];
+          if (ok && data is List) {
+            for (final e in data) {
+              final m = e as Map<String, dynamic>;
+              result.add(
+                _HrdAttachment(
+                  id: (m['id'] ?? m['Id'] ?? 0) as int,
+                  fileName:
+                      (m['fileName'] ?? m['FileName'] ?? m['file_name'] ?? '')
+                          .toString(),
+                  fileSize:
+                      (m['fileSize'] ?? m['FileSize'] ?? m['file_size'])
+                          as int?,
+                  fileType: (m['fileType'] ?? m['FileType'] ?? m['file_type'])
+                      ?.toString(),
+                ),
+              );
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Fallback legacy (kolom file_name) bila multi-file kosong
+    if (result.isEmpty &&
+        widget.item.hasFile &&
+        widget.item.fileName != null &&
+        widget.item.fileName!.isNotEmpty) {
+      result.add(
+        _HrdAttachment(
+          id: 0,
+          fileName: widget.item.fileName!,
+          fileSize: widget.item.fileSize,
+          fileType: widget.item.fileType,
+        ),
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        _attachments = result;
+        _filesLoading = false;
+      });
+    }
+  }
+
+  Future<void> _downloadAttachment(
+    _HrdAttachment file, {
+    required bool preview,
+  }) async {
+    if (widget.item.id <= 0) {
+      _snack('ID pengajuan tidak valid', err: true);
+      return;
+    }
+
+    setState(() => _downloadingFileId = file.id);
+    _snack(
+      preview ? 'Membuka file...' : 'Mengunduh file...',
+      err: false,
+      dur: 1,
+    );
+
+    try {
+      final token = await _getToken();
+      if (token == null) {
+        _snack('Gagal mendapatkan token', err: true);
+        return;
+      }
+
+      final Uri url;
+      final Map<String, dynamic> bodyData;
+      if (file.isLegacy) {
+        url = Uri.parse('$baseURL/api/timeoff/admin/download-file');
+        bodyData = {
+          'timeOffId': widget.item.id,
+          'adminId': widget.currentHRDId,
+        };
+      } else {
+        url = Uri.parse('$baseURL/api/timeoff/admin/download-multi-file');
+        bodyData = {
+          'timeOffId': widget.item.id,
+          'fileId': file.id,
+          'adminId': widget.currentHRDId,
+        };
+      }
+
+      final response = await http
+          .post(
+            url,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: json.encode(bodyData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final fileName = file.fileName;
+
+        if (kIsWeb) {
+          downloadFileWeb(response.bodyBytes, fileName);
+          _snack('File $fileName berhasil diunduh', err: false);
+          return;
+        }
+
+        if (preview) {
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File('${tempDir.path}/$fileName');
+          await tempFile.writeAsBytes(response.bodyBytes);
+          final result = await OpenFile.open(tempFile.path);
+          if (result.type != ResultType.done) {
+            _snack('Tidak dapat membuka: ${result.message}', err: true);
+          }
+        } else {
+          final dir = await getApplicationDocumentsDirectory();
+          final f = File('${dir.path}/$fileName');
+          await f.writeAsBytes(response.bodyBytes);
+          _snack('File "$fileName" tersimpan', err: false);
+          await OpenFile.open(f.path);
+        }
+      } else {
+        String errMsg = 'Gagal mengambil file (${response.statusCode})';
+        try {
+          final body = json.decode(response.body) as Map;
+          errMsg = (body['message'] ?? body['Message'] ?? errMsg).toString();
+        } catch (_) {}
+        _snack(errMsg, err: true);
+      }
+    } catch (e) {
+      _snack('Error: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _downloadingFileId = null);
+    }
+  }
+
   Future<void> _downloadDlFile(String fileType) async {
-    setState(() => _isDownloading = true);
+    setState(() => _isDownloadingDl = true);
     _snack('Mengunduh file $fileType...', err: false, dur: 1);
     try {
       final token = await _getToken();
@@ -3057,6 +3238,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
             : (widget.item.anggaranFileName ?? 'anggaran.pdf');
 
         if (kIsWeb) {
+          downloadFileWeb(response.bodyBytes, fileName);
           _snack('File $fileName berhasil diunduh', err: false);
         } else {
           final tempDir = await getTemporaryDirectory();
@@ -3071,7 +3253,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
         final body = response.body.isNotEmpty ? json.decode(response.body) : {};
         _snack(
           (body as Map)['Message'] ??
-              (body)['message'] ??
+              body['message'] ??
               'Gagal mengunduh (${response.statusCode})',
           err: true,
         );
@@ -3079,7 +3261,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     } catch (e) {
       _snack('Error: $e', err: true);
     } finally {
-      if (mounted) setState(() => _isDownloading = false);
+      if (mounted) setState(() => _isDownloadingDl = false);
     }
   }
 
@@ -3144,7 +3326,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            // Header
             Container(
               padding: const EdgeInsets.all(20),
               decoration: const BoxDecoration(
@@ -3177,7 +3358,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                 ],
               ),
             ),
-            // Body
             Expanded(
               child: SingleChildScrollView(
                 controller: scrollController,
@@ -3185,7 +3365,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Status badges
                     Row(
                       children: [
                         Container(
@@ -3232,8 +3411,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                       ],
                     ),
                     const SizedBox(height: 20),
-
-                    // Info Karyawan
                     _buildInfoCard(
                       title: 'Informasi Karyawan',
                       icon: Icons.person,
@@ -3249,8 +3426,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    // Detail Cuti
                     _buildInfoCard(
                       title: 'Detail Cuti',
                       icon: Icons.calendar_today,
@@ -3275,13 +3450,18 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                       ],
                     ),
 
-                    // ── Section Laporan DL ────────────────────────────────
+                    // File lampiran non-DL
+                    if (!widget.item.isDinasLuar) ...[
+                      const SizedBox(height: 16),
+                      _buildAttachmentSection(),
+                    ],
+
+                    // Laporan DL
                     if (widget.item.isDinasLuar) ...[
                       const SizedBox(height: 16),
                       _buildDlLaporanSection(),
                     ],
 
-                    // Review notes
                     if (widget.item.status == 'Pending') ...[
                       const SizedBox(height: 20),
                       const Text(
@@ -3325,7 +3505,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
                 ),
               ),
             ),
-            // Bottom
             Container(
               padding: const EdgeInsets.all(20),
               decoration: const BoxDecoration(
@@ -3344,7 +3523,205 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     );
   }
 
-  // ── Laporan DL section ───────────────────────────────────────────
+  Widget _buildAttachmentSection() {
+    return _buildInfoCard(
+      title:
+          'File Lampiran'
+          '${(!_filesLoading && _attachments.isNotEmpty) ? ' (${_attachments.length})' : ''}',
+      icon: Icons.attach_file,
+      children: [
+        if (_filesLoading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          )
+        else if (_attachments.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.grey[400], size: 16),
+                const SizedBox(width: 8),
+                Text(
+                  'Tidak ada file lampiran',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                ),
+              ],
+            ),
+          )
+        else
+          Column(
+            children: [
+              for (int i = 0; i < _attachments.length; i++) ...[
+                if (i > 0) const SizedBox(height: 8),
+                _buildAttachmentRow(_attachments[i]),
+              ],
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAttachmentRow(_HrdAttachment file) {
+    final IconData fileIcon;
+    final Color fileColor;
+    if (file.isImage) {
+      fileIcon = Icons.image_rounded;
+      fileColor = const Color(0xFF10B981);
+    } else if (file.isPdf) {
+      fileIcon = Icons.picture_as_pdf_rounded;
+      fileColor = const Color(0xFFEF4444);
+    } else {
+      fileIcon = Icons.insert_drive_file_rounded;
+      fileColor = const Color(0xFF6B7280);
+    }
+
+    final isThisDownloading = _downloadingFileId == file.id;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: fileColor.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: fileColor.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: fileColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(fileIcon, color: fileColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  file.fileName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+                if (file.sizeLabel.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '${file.ext.toUpperCase()} • ${file.sizeLabel}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (isThisDownloading)
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(fileColor),
+              ),
+            )
+          else
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: () => _downloadAttachment(file, preview: true),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF3B82F6).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.visibility_rounded,
+                          size: 14,
+                          color: Color(0xFF3B82F6),
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'Lihat',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF3B82F6),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () => _downloadAttachment(file, preview: false),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: fileColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.download_rounded,
+                          size: 14,
+                          color: fileColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Unduh',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: fileColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDlLaporanSection() {
     if (!widget.item.hasLaporan) {
       return _buildInfoCard(
@@ -3414,7 +3791,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
           const SizedBox(height: 10),
         ],
         if (widget.item.laporanFileName != null)
-          _buildFileRow(
+          _buildDlFileRow(
             label: 'Laporan Hasil Kerja',
             fileName: widget.item.laporanFileName!,
             fileType: 'laporan',
@@ -3425,7 +3802,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
             widget.item.anggaranFileName != null)
           const SizedBox(height: 8),
         if (widget.item.anggaranFileName != null)
-          _buildFileRow(
+          _buildDlFileRow(
             label: 'Laporan Anggaran',
             fileName: widget.item.anggaranFileName!,
             fileType: 'anggaran',
@@ -3449,7 +3826,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     );
   }
 
-  Widget _buildFileRow({
+  Widget _buildDlFileRow({
     required String label,
     required String fileName,
     required String fileType,
@@ -3495,7 +3872,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
           ),
         ),
         const SizedBox(width: 8),
-        _isDownloading
+        _isDownloadingDl
             ? SizedBox(
                 width: 20,
                 height: 20,
@@ -3544,12 +3921,14 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
           children: [
             Icon(icon, size: 18, color: const Color(0xFF6366F1)),
             const SizedBox(width: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1F2937),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1F2937),
+                ),
               ),
             ),
           ],

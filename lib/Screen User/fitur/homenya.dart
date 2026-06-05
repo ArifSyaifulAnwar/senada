@@ -766,7 +766,7 @@ class _HomePageState extends State<HomeScreen> {
           context,
           MaterialPageRoute(
             builder: (_) =>
-                TimeOffScreen(userId: _profileDisplay?.userId ?? ''),
+                TimeOffScreen(userId: _profileDisplay?.userId ?? userID ?? ''),
           ),
         ),
       ),
@@ -799,11 +799,11 @@ class _HomePageState extends State<HomeScreen> {
           ),
         ),
       ),
-      // ── BARU: Persetujuan Divisi ──────────────────────────────────────────
       _buildServiceIconData(
         Icons.groups_rounded,
-        "Persetujuan\nDivisi",
+        "Persetujuan Divisi",
         const Color(0xFF0EA5E9),
+        badge: _pendingOrgCount,
         onTap: () async {
           await Navigator.push(
             context,
@@ -813,10 +813,8 @@ class _HomePageState extends State<HomeScreen> {
               ),
             ),
           );
-          // Refresh count setelah kembali
           _loadPendingOrgCount();
         },
-        badge: _pendingOrgCount,
       ),
       _buildServiceIconData(
         Icons.event,
@@ -833,20 +831,19 @@ class _HomePageState extends State<HomeScreen> {
     ];
 
     return Container(
-      padding: EdgeInsets.all(14 * scale),
+      width: double.infinity,
+      padding: EdgeInsets.all(isWeb ? 18 : 16),
       decoration: BoxDecoration(
-        color: isWeb ? const Color(0xFFF8FAFC) : Colors.white,
-        borderRadius: BorderRadius.circular(12 * scale),
-        boxShadow: isWeb
-            ? null
-            : [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 4 * scale,
-                  offset: Offset(0, 2 * scale),
-                ),
-              ],
-        border: isWeb ? Border.all(color: Colors.grey.shade200) : null,
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -854,113 +851,122 @@ class _HomePageState extends State<HomeScreen> {
           Text(
             'Layanan',
             style: TextStyle(
-              fontSize: 15 * scale,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
+              fontSize: isWeb ? 17 : 16,
+              fontWeight: FontWeight.w800,
+              color: const Color(0xFF1F2937),
             ),
           ),
-          SizedBox(height: 14 * scale),
-          if (isWeb)
-            Wrap(
-              spacing: 8,
-              runSpacing: 12,
-              children: allServices.map((s) {
-                return GestureDetector(
-                  onTap: s.onTap,
-                  child: SizedBox(
-                    width: 80,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Stack(
-                          children: [
-                            Container(
-                              width: 46,
-                              height: 46,
-                              decoration: BoxDecoration(
-                                color: s.color.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(13),
-                              ),
-                              child: Icon(s.icon, size: 22, color: s.color),
-                            ),
-                            if (s.badge != null && s.badge! > 0)
-                              Positioned(
-                                top: 0,
-                                right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFEF4444),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Text(
-                                    s.badge! > 99 ? '99+' : '${s.badge}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
+          const SizedBox(height: 16),
+
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+
+              if (isWeb) {
+                return Wrap(
+                  spacing: 28,
+                  runSpacing: 16,
+                  children: allServices.map((s) {
+                    return SizedBox(
+                      width: 90,
+                      height: 78,
+                      child: _buildServiceItemUser(s, isWeb: true),
+                    );
+                  }).toList(),
+                );
+              }
+
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: allServices.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 14,
+                  childAspectRatio: 1.05,
+                ),
+                itemBuilder: (context, index) {
+                  return _buildServiceItemUser(
+                    allServices[index],
+                    isWeb: false,
+                  );
+                },
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServiceItemUser(ServiceIconData s, {required bool isWeb}) {
+    final double iconBoxSize = isWeb ? 48 : 50;
+    final double iconSize = isWeb ? 23 : 24;
+    final double fontSize = isWeb ? 11 : 11;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: s.onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: iconBoxSize,
+                height: iconBoxSize,
+                decoration: BoxDecoration(
+                  color: s.color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(s.icon, size: iconSize, color: s.color),
+              ),
+              if (s.badge != null && s.badge! > 0)
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minWidth: 20,
+                      minHeight: 20,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        s.badge! > 99 ? '99+' : '${s.badge}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
                         ),
-                        const SizedBox(height: 5),
-                        Text(
-                          s.label,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 11,
-                            color: Colors.grey[800],
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                );
-              }).toList(),
-            )
-          else
-            SizedBox(
-              height: 176 * scale,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Column(
-                  children: [
-                    Row(
-                      children: allServices
-                          .sublist(0, 4)
-                          .map(
-                            (s) => Container(
-                              width: 70 * scale,
-                              height: 80 * scale,
-                              margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIconWidget(s, scale),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                    SizedBox(height: 16 * scale),
-                    Row(
-                      children: allServices
-                          .sublist(4)
-                          .map(
-                            (s) => Container(
-                              width: 70 * scale,
-                              height: 80 * scale,
-                              margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIconWidget(s, scale),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
                 ),
-              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Text(
+            s.label,
+            style: TextStyle(
+              fontSize: fontSize,
+              height: 1.15,
+              fontWeight: FontWeight.w500,
+              color: const Color(0xFF374151),
             ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            softWrap: true,
+          ),
         ],
       ),
     );

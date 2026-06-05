@@ -19,7 +19,6 @@ import '../fitur/ajukanreimbursement.dart';
 
 bool _isWideScreen(BuildContext ctx) => MediaQuery.of(ctx).size.width >= 768;
 
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // PendingFile — file yang dipilih user sebelum diupload
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -230,10 +229,20 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
             )
           : null;
 
-      // File pertama dikirim via receiptFile (backward compat dengan SP)
+      // ── File pertama: kirim via BYTES (web + mobile) ──────────────────────
+      final PendingFile? firstPending = _pendingFiles.isNotEmpty
+          ? _pendingFiles.first
+          : null;
+
+      // File path hanya untuk fallback mobile (tidak dipakai kalau bytes ada)
       File? firstFile;
-      if (_pendingFiles.isNotEmpty && !kIsWeb)
-        firstFile = File(_pendingFiles.first.xfile.path);
+      if (firstPending != null && !kIsWeb) {
+        firstFile = File(firstPending.xfile.path);
+      }
+
+      // bytes & nama file pertama (sumber utama yang dikirim ke server)
+      final List<int>? firstBytes = firstPending?.bytes;
+      final String? firstName = firstPending?.name;
 
       int? newTimeOffId;
 
@@ -253,7 +262,11 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           nominalUangKantor: nominalKantor,
           reimbursementItems: reimburseItems,
         );
-        final res = await TimeOffService.updateTimeOff(req);
+        final res = await TimeOffService.updateTimeOff(
+          req,
+          receiptBytes: firstBytes,
+          receiptFileName: firstName,
+        );
         if (!res.success) {
           _snack(res.message, err: true);
           return;
@@ -275,7 +288,11 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           nominalUangKantor: nominalKantor,
           reimbursementItems: reimburseItems,
         );
-        final res = await TimeOffService.submitTimeOff(req);
+        final res = await TimeOffService.submitTimeOff(
+          req,
+          receiptBytes: firstBytes,
+          receiptFileName: firstName,
+        );
         if (!res.success || res.data == null) {
           _snack(res.message, err: true);
           return;
@@ -285,7 +302,9 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
         await _showSuccessNotif(newTimeOffId.toString());
       }
 
-      // Upload file ke-2 dst via multi-file endpoint
+      // ── File ke-2 dst via multi-file endpoint ─────────────────────────────
+      // Catatan: uploadFiles saat ini pakai dart:io File → mobile saja.
+      // Di web, file ke-2 dst belum terkirim (butuh versi bytes).
       final extraFiles = _isEditMode
           ? _pendingFiles
           : _pendingFiles.skip(1).toList();

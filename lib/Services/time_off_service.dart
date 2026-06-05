@@ -1,4 +1,7 @@
 // Services/time_off_service.dart — FULL REPLACE
+// FIX: submitTimeOff & updateTimeOff sekarang bisa kirim file via BYTES
+// (aman untuk web + mobile). Sebelumnya hanya pakai dart:io File yang
+// di-guard !kIsWeb sehingga di web file tidak pernah terkirim.
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
@@ -64,7 +67,13 @@ class TimeOffService {
       json[key[0].toUpperCase() + key.substring(1)] ?? json[key];
 
   // ── SUBMIT ─────────────────────────────────────────────────────────────────
-  static Future<ApiResponse<int>> submitTimeOff(TimeOffRequest request) async {
+  // receiptBytes/receiptFileName → jalur web + mobile (diprioritaskan).
+  // request.receiptFile (dart:io File) → fallback mobile.
+  static Future<ApiResponse<int>> submitTimeOff(
+    TimeOffRequest request, {
+    List<int>? receiptBytes,
+    String? receiptFileName,
+  }) async {
     try {
       final url = Uri.parse('$baseURL$_base/submit');
       final mr = http.MultipartRequest('POST', url);
@@ -85,7 +94,20 @@ class TimeOffService {
       };
       mr.fields['request'] = jsonEncode(reqData);
 
-      if (request.receiptFile != null) {
+      // ── Attach file: prioritas BYTES (web + mobile), fallback File path ──
+      if (receiptBytes != null &&
+          receiptBytes.isNotEmpty &&
+          receiptFileName != null &&
+          receiptFileName.isNotEmpty) {
+        mr.files.add(
+          http.MultipartFile.fromBytes(
+            'receiptFile',
+            receiptBytes,
+            filename: receiptFileName,
+            contentType: _mediaTypeFromName(receiptFileName),
+          ),
+        );
+      } else if (request.receiptFile != null) {
         mr.files.add(
           await http.MultipartFile.fromPath(
             'receiptFile',
@@ -120,8 +142,10 @@ class TimeOffService {
 
   // ── UPDATE ─────────────────────────────────────────────────────────────────
   static Future<ApiResponse<Map<String, dynamic>>> updateTimeOff(
-    UpdateTimeOffRequest request,
-  ) async {
+    UpdateTimeOffRequest request, {
+    List<int>? receiptBytes,
+    String? receiptFileName,
+  }) async {
     try {
       final url = Uri.parse('$baseURL$_base/update');
       final mr = http.MultipartRequest('POST', url);
@@ -146,7 +170,20 @@ class TimeOffService {
         );
       }
 
-      if (request.receiptFile != null) {
+      // ── Attach file: prioritas BYTES (web + mobile), fallback File path ──
+      if (receiptBytes != null &&
+          receiptBytes.isNotEmpty &&
+          receiptFileName != null &&
+          receiptFileName.isNotEmpty) {
+        mr.files.add(
+          http.MultipartFile.fromBytes(
+            'receiptFile',
+            receiptBytes,
+            filename: receiptFileName,
+            contentType: _mediaTypeFromName(receiptFileName),
+          ),
+        );
+      } else if (request.receiptFile != null) {
         mr.files.add(
           await http.MultipartFile.fromPath(
             'receiptFile',
@@ -194,7 +231,6 @@ class TimeOffService {
 
       // ── Laporan file ──────────────────────────────────────────────────────
       if (request.laporanBytes != null) {
-        // Web / bytes path
         mr.files.add(
           http.MultipartFile.fromBytes(
             'laporanFile',
@@ -204,7 +240,6 @@ class TimeOffService {
           ),
         );
       } else if (request.laporanFile != null) {
-        // Mobile / File path
         final lFile = request.laporanFile!;
         mr.files.add(
           await http.MultipartFile.fromPath(
@@ -251,19 +286,13 @@ class TimeOffService {
       final res = await http.Response.fromStream(await mr.send());
       final body = jsonDecode(res.body) as Map<String, dynamic>;
 
-      // Handle berbagai format response:
-      // { success: true, message: '...' }  → standar
-      // { Message: '...' } dengan status 200/400 → legacy .NET
       final successField = _get(body, 'success');
       final msgField =
           (_get(body, 'message') ?? _get(body, 'Message') ?? '') as String;
 
-      // Jika ada field success → pakai itu
       if (successField != null) {
         return ApiResponse(success: successField == true, message: msgField);
       }
-      // Jika tidak ada field success → pakai HTTP status code
-      // 200-299 = sukses, lainnya = gagal
       final httpOk = res.statusCode >= 200 && res.statusCode < 300;
       return ApiResponse(success: httpOk, message: msgField);
     } catch (e) {
@@ -304,28 +333,6 @@ class TimeOffService {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (res.statusCode == 200 && _get(body, 'success') == true) {
         final rawData = _get(body, 'data');
-
-        // DEBUG — lihat di console Flutter keys apa yang ada
-        try {
-          final rawMap = rawData as Map<String, dynamic>;
-          final list = rawMap['Data'] ?? rawMap['data'];
-          if (list != null && (list as List).isNotEmpty) {
-            final first = list[0] as Map;
-            // ignore: avoid_print
-            print('[DEBUG my-timeoff] keys: ${first.keys.toList()}');
-            // ignore: avoid_print
-            print(
-              '[DEBUG] tanggal_mulai=${first["tanggal_mulai"]} TanggalMulai=${first["TanggalMulai"]}',
-            );
-            // ignore: avoid_print
-            print(
-              '[DEBUG] total_hari=${first["total_hari"]} TotalHari=${first["TotalHari"]}',
-            );
-            // ignore: avoid_print
-            print('[DEBUG] status=${first["status"] ?? first["Status"]}');
-          }
-        } catch (_) {}
-
         return ApiResponse(
           success: true,
           message: '',

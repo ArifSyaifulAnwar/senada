@@ -918,7 +918,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   Widget _buildServiceIconsSection(double scale) {
     final bool isWeb = _isWideScreen(context);
 
-    final firstRow = [
+    final services = [
       _buildServiceIconData(
         Icons.receipt_long,
         'Reimbursement',
@@ -955,9 +955,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           MaterialPageRoute(builder: (_) => const LiveAttendanceScreenAdmin()),
         ),
       ),
-    ];
-
-    final secondRow = [
       _buildServiceIconData(
         Icons.access_time_filled,
         'Lembur',
@@ -987,10 +984,9 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           MaterialPageRoute(builder: (_) => const BroadcastNotifScreen()),
         ),
       ),
-      // ── BARU: Persetujuan Divisi ──────────────────────────────────────────
       _buildServiceIconData(
         Icons.groups_rounded,
-        'Persetujuan\nDivisi',
+        'Persetujuan Divisi',
         const Color(0xFF0EA5E9),
         badge: _pendingOrgCount,
         onTap: () async {
@@ -1019,196 +1015,173 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       ),
     ];
 
-    final allServices = [...firstRow, ...secondRow];
-
     return Container(
-      padding: EdgeInsets.all(16 * scale),
+      width: double.infinity,
+      padding: EdgeInsets.all(isWeb ? 22 : 18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12 * scale),
+        borderRadius: BorderRadius.circular(isWeb ? 18 : 16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4 * scale,
-            offset: Offset(0, 2 * scale),
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Layanan',
-            style: TextStyle(
-              fontSize: 16 * scale,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey[800],
-            ),
-          ),
-          SizedBox(height: 16 * scale),
-          if (isWeb)
-            Wrap(
-              spacing: 8,
-              runSpacing: 12,
-              children: allServices.map((s) {
-                return GestureDetector(
-                  onTap: s.onTap,
-                  child: SizedBox(
-                    width: 90,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Stack(
-                          children: [
-                            Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: s.color.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Icon(s.icon, size: 24, color: s.color),
-                            ),
-                            if (s.badge != null && s.badge! > 0)
-                              Positioned(
-                                top: 0,
-                                right: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFEF4444),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Text(
-                                    s.badge! > 99 ? '99+' : '${s.badge}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          s.label,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 11,
-                            color: Colors.grey[800],
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            )
-          else
-            SizedBox(
-              height: 176 * scale,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Column(
-                  children: [
-                    Row(
-                      children: firstRow
-                          .map(
-                            (s) => Container(
-                              width: 70 * scale,
-                              height: 80 * scale,
-                              margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIconMobile(s, scale),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                    SizedBox(height: 16 * scale),
-                    Row(
-                      children: secondRow
-                          .map(
-                            (s) => Container(
-                              width: 70 * scale,
-                              height: 80 * scale,
-                              margin: EdgeInsets.only(right: 12 * scale),
-                              child: _buildServiceIconMobile(s, scale),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
+          Row(
+            children: [
+              Container(
+                width: 4,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF007AFF),
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
-            ),
+              const SizedBox(width: 10),
+              Text(
+                'Layanan',
+                style: TextStyle(
+                  fontSize: isWeb ? 18 : 17,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF1F2937),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: isWeb ? 22 : 18),
+
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+
+              int crossAxisCount;
+              double childAspectRatio;
+
+              if (isWeb) {
+                if (width >= 1200) {
+                  crossAxisCount = 6;
+                } else if (width >= 900) {
+                  crossAxisCount = 5;
+                } else {
+                  crossAxisCount = 4;
+                }
+                childAspectRatio = 1.05;
+              } else {
+                crossAxisCount = 3;
+                childAspectRatio = 1.05;
+              }
+
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: services.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: isWeb ? 14 : 12,
+                  mainAxisSpacing: isWeb ? 14 : 14,
+                  childAspectRatio: childAspectRatio,
+                ),
+                itemBuilder: (context, index) {
+                  return _buildServiceGridItem(services[index], isWeb: isWeb);
+                },
+              );
+            },
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildServiceIconMobile(ServiceIconData s, double scale) {
-    return GestureDetector(
-      onTap: s.onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            flex: 3,
-            child: Stack(
-              children: [
-                Container(
-                  width: 45 * scale,
-                  height: 45 * scale,
-                  decoration: BoxDecoration(
-                    color: s.color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12 * scale),
+  Widget _buildServiceGridItem(ServiceIconData s, {required bool isWeb}) {
+    final double iconBoxSize = isWeb ? 54 : 50;
+    final double iconSize = isWeb ? 26 : 24;
+    final double fontSize = isWeb ? 12 : 11;
+
+    return Material(
+      color: isWeb ? const Color(0xFFF8FAFC) : Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: s.onTap,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isWeb ? 10 : 6,
+            vertical: isWeb ? 12 : 8,
+          ),
+          decoration: BoxDecoration(
+            color: isWeb ? const Color(0xFFF8FAFC) : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            border: isWeb ? Border.all(color: const Color(0xFFE5E7EB)) : null,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: iconBoxSize,
+                    height: iconBoxSize,
+                    decoration: BoxDecoration(
+                      color: s.color.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Icon(s.icon, size: iconSize, color: s.color),
                   ),
-                  child: Icon(s.icon, size: 22 * scale, color: s.color),
-                ),
-                if (s.badge != null && s.badge! > 0)
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        s.badge! > 99 ? '99+' : '${s.badge}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
+                  if (s.badge != null && s.badge! > 0)
+                    Positioned(
+                      top: -6,
+                      right: -6,
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 20,
+                          minHeight: 20,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: Center(
+                          child: Text(
+                            s.badge! > 99 ? '99+' : '${s.badge}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          SizedBox(height: 6 * scale),
-          Flexible(
-            flex: 2,
-            child: Text(
-              s.label,
-              style: TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 10 * scale,
-                color: Colors.grey[800],
+                ],
               ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: Text(
+                  s.label,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    height: 1.15,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF374151),
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
