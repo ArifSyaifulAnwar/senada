@@ -36,6 +36,7 @@ class TimeOffModel {
   final String? anggaranFileName;
   final List<ReimbursementItem>? reimbursementItems;
   final List<TimeOffFileItem>? files; // multi-file
+  final bool? requiresDirectorApproval;
 
   const TimeOffModel({
     this.id,
@@ -68,6 +69,7 @@ class TimeOffModel {
     this.anggaranFileName,
     this.reimbursementItems,
     this.files,
+    this.requiresDirectorApproval,
   });
 
   // Helper: cek camelCase, PascalCase, dan snake_case sekaligus
@@ -147,6 +149,10 @@ class TimeOffModel {
               .map((e) => TimeOffFileItem.fromJson(e as Map<String, dynamic>))
               .toList()
         : null,
+    requiresDirectorApproval:
+        (_f(json, 'requiresDirectorApproval', 'requires_director_approval')
+            as bool?) ??
+        false,
   );
 
   static DateTime? _parseDate(dynamic val) {
@@ -190,6 +196,10 @@ class TimeOffModel {
     switch (status) {
       case 'Pending':
         return 'Menunggu Persetujuan';
+      case 'Pending HRD':
+        return 'Menunggu HRD';
+      case 'Pending Director':
+        return 'Menunggu Direktur';
       case 'Menunggu Manager':
         return 'Menunggu Manager';
       case 'Menunggu Org':
@@ -206,6 +216,13 @@ class TimeOffModel {
         return status;
     }
   }
+
+  // ── Status helpers ────────────────────────────────────────────────────────────
+  bool get isPendingHrd => status == 'Pending HRD';
+  bool get isPendingDirector => status == 'Pending Director';
+  bool get isApproved => status == 'Approved';
+  bool get isRejected => status == 'Rejected';
+  bool get requiresDirector => requiresDirectorApproval == true;
 }
 
 // ── Reimbursement item ────────────────────────────────────────────────────────

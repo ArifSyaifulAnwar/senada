@@ -1,6 +1,7 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../Screen admin/service/admin_attendance_service.dart';
 import '../Screen admin/service/hrd_attendance_service.dart';
 
 class HrdAbsensiEditPage extends StatefulWidget {
@@ -22,7 +23,9 @@ class _HrdAbsensiEditPageState extends State<HrdAbsensiEditPage>
   String? _endDate;
   int _page = 1;
   int _totalPages = 1;
+  final AdminAttendanceService _adminService = AdminAttendanceService();
 
+  List<HrdWorkPeriod> _workPeriods = [];
   List<HrdAttendanceData> _attendanceList = [];
   final TextEditingController _searchCtrl = TextEditingController();
 
@@ -30,7 +33,53 @@ class _HrdAbsensiEditPageState extends State<HrdAbsensiEditPage>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
-    _loadData();
+    _initData();
+  }
+
+  Future<void> _initData() async {
+    await _loadDefaultWorkPeriod();
+    await _loadData(refresh: true);
+  }
+
+  Future<void> _loadDefaultWorkPeriod() async {
+    try {
+      final result = await _adminService.getCurrentWorkPeriod();
+
+      if (!mounted) return;
+
+      if (result.success && result.data != null) {
+        final range = result.data!;
+
+        setState(() {
+          _startDate = DateFormat('yyyy-MM-dd').format(range.start);
+          _endDate = DateFormat('yyyy-MM-dd').format(range.end);
+        });
+      } else {
+        final now = DateTime.now();
+
+        setState(() {
+          _startDate = DateFormat(
+            'yyyy-MM-dd',
+          ).format(DateTime(now.year, now.month, 1));
+          _endDate = DateFormat(
+            'yyyy-MM-dd',
+          ).format(DateTime(now.year, now.month + 1, 0));
+        });
+      }
+    } catch (_) {
+      final now = DateTime.now();
+
+      if (!mounted) return;
+
+      setState(() {
+        _startDate = DateFormat(
+          'yyyy-MM-dd',
+        ).format(DateTime(now.year, now.month, 1));
+        _endDate = DateFormat(
+          'yyyy-MM-dd',
+        ).format(DateTime(now.year, now.month + 1, 0));
+      });
+    }
   }
 
   @override
@@ -272,8 +321,8 @@ class _HrdAbsensiEditPageState extends State<HrdAbsensiEditPage>
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          _startDate != null
-                              ? 'Periode Dipilih'
+                          _startDate != null && _endDate != null
+                              ? '${DateFormat('dd/MM').format(DateTime.parse(_startDate!))} - ${DateFormat('dd/MM').format(DateTime.parse(_endDate!))}'
                               : 'Pilih Periode',
                           style: TextStyle(
                             fontSize: 11,
@@ -692,26 +741,153 @@ class _HrdAbsensiEditPageState extends State<HrdAbsensiEditPage>
   // ── Date filter ───────────────────────────────────────────────────────────
 
   Future<void> _showDateFilter() async {
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(primary: Color(0xFF6366F1)),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      setState(() {
-        _startDate = DateFormat('yyyy-MM-dd').format(picked.start);
-        _endDate = DateFormat('yyyy-MM-dd').format(picked.end);
-      });
-      _loadData(refresh: true);
+    final now = DateTime.now();
+
+    final result = await _adminService.getWorkPeriodsByYear(tahun: now.year);
+
+    if (!mounted) return;
+
+    if (!result.success || result.data == null || result.data!.isEmpty) {
+      _showSnackBar('Belum ada periode kerja yang disetting HRD.', true);
+      return;
     }
+
+    final periods = result.data!
+      ..sort((a, b) {
+        final tahunCompare = b.tahun.compareTo(a.tahun);
+        if (tahunCompare != 0) return tahunCompare;
+        return b.bulan.compareTo(a.bulan);
+      });
+
+    setState(() {
+      _workPeriods = periods;
+    });
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+                child: Text(
+                  'Pilih Periode Kerja',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+              ),
+
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'Periode diambil dari data yang sudah disetting HRD.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _workPeriods.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final p = _workPeriods[i];
+
+                    final start = DateFormat(
+                      'yyyy-MM-dd',
+                    ).format(p.tanggalMulai);
+                    final end = DateFormat(
+                      'yyyy-MM-dd',
+                    ).format(p.tanggalSelesai);
+
+                    final selected = _startDate == start && _endDate == end;
+
+                    return ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.calendar_month_rounded,
+                          color: Color(0xFF6366F1),
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(
+                        p.bulanLabel,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${DateFormat('dd MMM yyyy', 'id_ID').format(p.tanggalMulai)} - '
+                        '${DateFormat('dd MMM yyyy', 'id_ID').format(p.tanggalSelesai)}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: selected
+                          ? const Icon(
+                              Icons.check_circle,
+                              color: Color(0xFF6366F1),
+                            )
+                          : null,
+                      selected: selected,
+                      onTap: () {
+                        Navigator.pop(context);
+
+                        setState(() {
+                          _startDate = start;
+                          _endDate = end;
+                        });
+
+                        _loadData(refresh: true);
+                      },
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
   }
 
+  void _showSnackBar(String message, bool isError) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
   // ── Load more ─────────────────────────────────────────────────────────────
 
   Widget _buildLoadMore() {

@@ -212,10 +212,20 @@ class AdminTimeOffData {
   // ── Getters BARU ───────────────────────────────────────────────
   bool get isDinasLuar => jenisTimeOff == 'Dinas Luar';
   bool get hasLaporan => laporanFileName != null || anggaranFileName != null;
+  bool get isPendingHrd => status.toLowerCase() == 'pending hrd';
+  bool get isPendingDirector => status.toLowerCase() == 'pending director';
+  bool get needsReview =>
+      status.toLowerCase() == 'pending hrd' ||
+      status.toLowerCase() == 'pending director' ||
+      status.toLowerCase() == 'pending';
 
   // ── Getters lama (dipertahankan) ───────────────────────────────
   String get statusText {
     switch (status.toLowerCase()) {
+      case 'pending hrd': // ← TAMBAH
+        return 'Menunggu HRD'; // ← TAMBAH
+      case 'pending director': // ← TAMBAH
+        return 'Menunggu Direktur'; // ← TAMBAH
       case 'pending':
         return 'Menunggu Review';
       case 'approved':
@@ -237,6 +247,10 @@ class AdminTimeOffData {
 
   Color get statusColorValue {
     switch (status.toLowerCase()) {
+      case 'pending hrd': // ← TAMBAH
+        return const Color(0xFFF59E0B); // ← TAMBAH
+      case 'pending director': // ← TAMBAH
+        return const Color(0xFF8B5CF6); // ← TAMBAH
       case 'pending':
         return const Color(0xFFF59E0B);
       case 'approved':
@@ -314,11 +328,19 @@ class AdminTimeOffData {
 }
 
 class UserWithTimeOffs {
+  final int annualQuota;
+  final int usedDays;
+  final int remainingDays;
   final String userId;
   final String name;
   final String email;
   final String? phone;
   final String? jobs;
+
+  final String? companyName;
+  final String? department;
+  final String? jobPosition;
+
   final int totalTimeOff;
   final int pendingCount;
   final int approvedCount;
@@ -333,6 +355,9 @@ class UserWithTimeOffs {
     required this.email,
     this.phone,
     this.jobs,
+    this.companyName,
+    this.department,
+    this.jobPosition,
     required this.totalTimeOff,
     required this.pendingCount,
     required this.approvedCount,
@@ -340,32 +365,68 @@ class UserWithTimeOffs {
     required this.processedCount,
     required this.totalApprovedDays,
     required this.totalRequestedDays,
+    required this.annualQuota,
+    required this.usedDays,
+    required this.remainingDays,
   });
 
   factory UserWithTimeOffs.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return int.tryParse(value.toString()) ?? 0;
+    }
+
+    String? toStr(dynamic value) {
+      if (value == null) return null;
+      final text = value.toString().trim();
+      if (text.isEmpty || text.toLowerCase() == 'null') return null;
+      return text;
+    }
+
+    final organization = toStr(
+      json['Organization'] ??
+          json['organization'] ??
+          json['Department'] ??
+          json['department'],
+    );
+
+    final jobPosition = toStr(
+      json['JobPosition'] ?? json['jobPosition'] ?? json['job_position'],
+    );
+
+    final jobs = toStr(
+      json['Jobs'] ?? json['jobs'] ?? json['Job'] ?? json['job'] ?? jobPosition,
+    );
+
     return UserWithTimeOffs(
-      userId: json['UserId'] ?? json['userId'] ?? '',
-      name: json['Name'] ?? json['name'] ?? '',
-      email: json['Email'] ?? json['email'] ?? '',
-      phone: json['Phone'] ?? json['phone'],
-      jobs: json['Jobs'] ?? json['jobs'],
-      totalTimeOff: (json['TotalTimeOff'] ?? json['totalTimeOff'] ?? 0) as int,
-      pendingCount: (json['PendingCount'] ?? json['pendingCount'] ?? 0) as int,
-      approvedCount:
-          (json['ApprovedCount'] ?? json['approvedCount'] ?? 0) as int,
-      rejectedCount:
-          (json['RejectedCount'] ??
-                  json['rejectedCount'] ??
-                  json['PejectedCount'] ??
-                  0)
-              as int,
-      processedCount:
-          (json['ProcessedCount'] ?? json['processedCount'] ?? 0) as int,
-      totalApprovedDays:
-          (json['TotalApprovedDays'] ?? json['totalApprovedDays'] ?? 0) as int,
-      totalRequestedDays:
-          (json['TotalRequestedDays'] ?? json['totalRequestedDays'] ?? 0)
-              as int,
+      annualQuota: toInt(json['AnnualQuota'] ?? json['annualQuota']),
+      usedDays: toInt(json['UsedDays'] ?? json['usedDays']),
+      remainingDays: toInt(json['RemainingDays'] ?? json['remainingDays']),
+      userId: toStr(json['UserId'] ?? json['userId'] ?? json['userid']) ?? '',
+      name: toStr(json['Name'] ?? json['name']) ?? '',
+      email: toStr(json['Email'] ?? json['email'] ?? json['mail']) ?? '',
+      phone: toStr(json['Phone'] ?? json['phone']),
+      jobs: jobs,
+
+      companyName: toStr(
+        json['CompanyName'] ?? json['companyName'] ?? json['company_name'],
+      ),
+      department: organization,
+      jobPosition: jobPosition,
+
+      totalTimeOff: toInt(json['TotalTimeOff'] ?? json['totalTimeOff']),
+      pendingCount: toInt(json['PendingCount'] ?? json['pendingCount']),
+      approvedCount: toInt(json['ApprovedCount'] ?? json['approvedCount']),
+      rejectedCount: toInt(json['RejectedCount'] ?? json['rejectedCount']),
+      processedCount: toInt(json['ProcessedCount'] ?? json['processedCount']),
+      totalApprovedDays: toInt(
+        json['TotalApprovedDays'] ?? json['totalApprovedDays'],
+      ),
+      totalRequestedDays: toInt(
+        json['TotalRequestedDays'] ?? json['totalRequestedDays'],
+      ),
     );
   }
 
@@ -375,10 +436,17 @@ class UserWithTimeOffs {
 // ── Request Models (tidak berubah) ─────────────────────────────────────────
 
 class AdminStatisticsRequest {
+  final String? adminId;
   final int? year;
   final int? month;
-  AdminStatisticsRequest({this.year, this.month});
-  Map<String, dynamic> toJson() => {'year': year, 'month': month};
+
+  AdminStatisticsRequest({this.adminId, this.year, this.month});
+
+  Map<String, dynamic> toJson() => {
+    'adminId': adminId,
+    'year': year,
+    'month': month,
+  };
 }
 
 class AdminTimeOffListRequest {

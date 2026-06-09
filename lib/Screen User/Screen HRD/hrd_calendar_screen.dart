@@ -14,7 +14,8 @@ class HrdCalendarScreen extends StatefulWidget {
 class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-
+  List<WorkPeriod> _periods = [];
+  bool _isLoadingPeriods = false;
   String? _hrdUserId;
   int _selectedYear = DateTime.now().year;
   int _selectedMonth = DateTime.now().month;
@@ -49,7 +50,10 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadUserId();
   }
 
@@ -63,6 +67,23 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     final prefs = await SharedPreferences.getInstance();
     setState(() => _hrdUserId = prefs.getString('UserID'));
     await _loadEvents();
+    await _loadPeriods();
+  }
+
+  Future<void> _loadPeriods() async {
+    setState(() => _isLoadingPeriods = true);
+
+    final data = await CompanyCalendarService.getWorkPeriodsByYear(
+      _selectedYear,
+      forceRefresh: true,
+    );
+
+    if (mounted) {
+      setState(() {
+        _periods = data;
+        _isLoadingPeriods = false;
+      });
+    }
   }
 
   Future<void> _loadEvents() async {
@@ -530,22 +551,590 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
           tabs: const [
             Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Daftar Event'),
             Tab(icon: Icon(Icons.calendar_month, size: 18), text: 'Kalender'),
+            Tab(
+              icon: Icon(Icons.date_range_rounded, size: 18),
+              text: 'Periode',
+            ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showFormDialog(),
+        onPressed: () {
+          if (_tabController.index == 2) {
+            _showPeriodDialog();
+          } else {
+            _showFormDialog();
+          }
+        },
         backgroundColor: const Color(0xFF6366F1),
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text(
-          'Tambah Event',
-          style: TextStyle(fontWeight: FontWeight.w600),
+        icon: Icon(
+          _tabController.index == 2
+              ? Icons.date_range_rounded
+              : Icons.add_rounded,
+        ),
+        label: Text(
+          _tabController.index == 2 ? 'Tambah Periode' : 'Tambah Event',
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [_buildListTab(), _buildCalendarTab()],
+        children: [_buildListTab(), _buildCalendarTab(), _buildPeriodTab()],
+      ),
+    );
+  }
+
+  Widget _buildPeriodTab() {
+    final sorted = [..._periods]..sort((a, b) => a.bulan.compareTo(b.bulan));
+
+    return Column(
+      children: [
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: () {
+                  setState(() => _selectedYear--);
+                  _loadEvents();
+                  _loadPeriods();
+                },
+                icon: const Icon(Icons.chevron_left),
+                visualDensity: VisualDensity.compact,
+              ),
+              Text(
+                'Periode $_selectedYear',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              IconButton(
+                onPressed: () {
+                  setState(() => _selectedYear++);
+                  _loadEvents();
+                  _loadPeriods();
+                },
+                icon: const Icon(Icons.chevron_right),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: _isLoadingPeriods
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Color(0xFF6366F1),
+                    ),
+                  ),
+                )
+              : sorted.isEmpty
+              ? _buildEmptyPeriod()
+              : RefreshIndicator(
+                  onRefresh: _loadPeriods,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                    itemCount: sorted.length,
+                    itemBuilder: (_, i) => _buildPeriodCard(sorted[i]),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyPeriod() => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(40),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(100),
+            ),
+            child: const Icon(
+              Icons.date_range_rounded,
+              size: 56,
+              color: Color(0xFFD1D5DB),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Belum Ada Periode Kerja',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Tap tombol Tambah Periode untuk menentukan periode kerja per bulan.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildPeriodCard(WorkPeriod period) {
+    final start = DateFormat(
+      'dd MMM yyyy',
+      'id_ID',
+    ).format(period.tanggalMulai);
+    final end = DateFormat(
+      'dd MMM yyyy',
+      'id_ID',
+    ).format(period.tanggalSelesai);
+    final monthName = _monthNames[period.bulan - 1];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: const Color(0xFF6366F1).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.date_range_rounded,
+                color: Color(0xFF6366F1),
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$monthName ${period.tahun}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$start - $end',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (period.keterangan.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      period.keterangan,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF94A3B8),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            PopupMenuButton<String>(
+              onSelected: (val) {
+                if (val == 'edit') _showPeriodDialog(existing: period);
+                if (val == 'delete') _confirmDeletePeriod(period);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit, size: 16, color: Color(0xFF6366F1)),
+                      SizedBox(width: 8),
+                      Text('Edit'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, size: 16, color: Color(0xFFEF4444)),
+                      SizedBox(width: 8),
+                      Text('Hapus'),
+                    ],
+                  ),
+                ),
+              ],
+              child: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeletePeriod(WorkPeriod period) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Periode?'),
+        content: Text(
+          'Yakin hapus periode ${_monthNames[period.bulan - 1]} ${period.tahun}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      final result = await CompanyCalendarService.deleteWorkPeriod(
+        id: period.id,
+        deletedBy: _hrdUserId ?? '',
+      );
+
+      if (result['success'] == true) {
+        _snack('Periode kerja berhasil dihapus!');
+        await _loadPeriods();
+      } else {
+        _snack(result['message'] ?? 'Gagal menghapus periode', err: true);
+      }
+    }
+  }
+
+  Future<void> _showPeriodDialog({WorkPeriod? existing}) async {
+    int selectedYear = existing?.tahun ?? _selectedYear;
+    int selectedMonth = existing?.bulan ?? _selectedMonth;
+
+    DateTime startDate =
+        existing?.tanggalMulai ?? DateTime(selectedYear, selectedMonth, 1);
+
+    DateTime endDate =
+        existing?.tanggalSelesai ??
+        DateTime(selectedYear, selectedMonth + 1, 0);
+
+    final ketCtrl = TextEditingController(text: existing?.keterangan ?? '');
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            existing == null ? 'Tambah Periode Kerja' : 'Edit Periode Kerja',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  value: selectedYear,
+                  decoration: _periodInputDecoration('Tahun'),
+                  items: List.generate(11, (i) {
+                    final year = DateTime.now().year - 5 + i;
+                    return DropdownMenuItem(value: year, child: Text('$year'));
+                  }),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setDlg(() {
+                      selectedYear = v;
+                      startDate = DateTime(
+                        selectedYear,
+                        selectedMonth,
+                        startDate.day,
+                      );
+                      endDate = DateTime(
+                        selectedYear,
+                        selectedMonth,
+                        endDate.day,
+                      );
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                DropdownButtonFormField<int>(
+                  value: selectedMonth,
+                  decoration: _periodInputDecoration('Bulan Periode'),
+                  items: List.generate(12, (i) {
+                    final month = i + 1;
+                    return DropdownMenuItem(
+                      value: month,
+                      child: Text(_monthNames[i]),
+                    );
+                  }),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setDlg(() {
+                      selectedMonth = v;
+                      startDate = DateTime(selectedYear, selectedMonth, 1);
+                      endDate = DateTime(selectedYear, selectedMonth + 1, 0);
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                _datePickTile(
+                  title: 'Tanggal Mulai',
+                  date: startDate,
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: startDate,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2035),
+                      builder: (_, child) => Theme(
+                        data: Theme.of(context).copyWith(
+                          colorScheme: const ColorScheme.light(
+                            primary: Color(0xFF6366F1),
+                          ),
+                        ),
+                        child: child!,
+                      ),
+                    );
+
+                    if (picked != null) {
+                      setDlg(() => startDate = picked);
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+
+                _datePickTile(
+                  title: 'Tanggal Selesai',
+                  date: endDate,
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: endDate,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2035),
+                      builder: (_, child) => Theme(
+                        data: Theme.of(context).copyWith(
+                          colorScheme: const ColorScheme.light(
+                            primary: Color(0xFF6366F1),
+                          ),
+                        ),
+                        child: child!,
+                      ),
+                    );
+
+                    if (picked != null) {
+                      setDlg(() => endDate = picked);
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: ketCtrl,
+                  maxLines: 2,
+                  decoration: _periodInputDecoration(
+                    'Keterangan',
+                    hint: 'Contoh: Periode kerja tutup buku Juni',
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xFF6366F1).withOpacity(0.2),
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 15,
+                        color: Color(0xFF6366F1),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Periode kerja ini tidak mengirim notifikasi ke karyawan. Data ini hanya untuk pengaturan absensi dan laporan.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF6366F1),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (_hrdUserId == null || _hrdUserId!.isEmpty) {
+                  _snack(
+                    'User HRD tidak ditemukan. Silakan login ulang.',
+                    err: true,
+                  );
+                  return;
+                }
+
+                if (startDate.isAfter(endDate)) {
+                  _snack(
+                    'Tanggal mulai tidak boleh lebih besar dari tanggal selesai',
+                    err: true,
+                  );
+                  return;
+                }
+
+                Navigator.pop(ctx);
+
+                final result = await CompanyCalendarService.saveWorkPeriod(
+                  id: existing?.id,
+                  tahun: selectedYear,
+                  bulan: selectedMonth,
+                  tanggalMulai: DateFormat('yyyy-MM-dd').format(startDate),
+                  tanggalSelesai: DateFormat('yyyy-MM-dd').format(endDate),
+                  keterangan: ketCtrl.text.trim(),
+                  createdBy: _hrdUserId ?? '',
+                );
+
+                if (result['success'] == true) {
+                  _snack(
+                    existing == null
+                        ? 'Periode kerja berhasil ditambahkan!'
+                        : 'Periode kerja berhasil diupdate!',
+                  );
+                  await _loadPeriods();
+                } else {
+                  _snack(
+                    result['message'] ?? 'Gagal menyimpan periode',
+                    err: true,
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+                foregroundColor: Colors.white,
+              ),
+              child: Text(existing == null ? 'Simpan' : 'Update'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  InputDecoration _periodInputDecoration(String label, {String? hint}) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      labelStyle: const TextStyle(fontSize: 13),
+      hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF6366F1)),
+      ),
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    );
+  }
+
+  Widget _datePickTile({
+    required String title,
+    required DateTime date,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          borderRadius: BorderRadius.circular(10),
+          color: Colors.white,
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.calendar_today,
+              size: 16,
+              color: Color(0xFF6366F1),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+            ),
+            Text(
+              DateFormat('dd MMM yyyy', 'id_ID').format(date),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1E293B),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

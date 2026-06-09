@@ -79,6 +79,49 @@ class CompanyCalendarEvent {
   }
 }
 
+class WorkPeriod {
+  final int id;
+  final int tahun;
+  final int bulan;
+  final DateTime tanggalMulai;
+  final DateTime tanggalSelesai;
+  final String keterangan;
+  final String createdBy;
+
+  const WorkPeriod({
+    required this.id,
+    required this.tahun,
+    required this.bulan,
+    required this.tanggalMulai,
+    required this.tanggalSelesai,
+    required this.keterangan,
+    required this.createdBy,
+  });
+
+  factory WorkPeriod.fromJson(Map<String, dynamic> j) {
+    return WorkPeriod(
+      id: j['Id'] ?? j['id'] ?? 0,
+      tahun: j['Tahun'] ?? j['tahun'] ?? 0,
+      bulan: j['Bulan'] ?? j['bulan'] ?? 0,
+      tanggalMulai:
+          DateTime.tryParse(
+            j['TanggalMulai'] ?? j['tanggalMulai'] ?? j['tanggal_mulai'] ?? '',
+          ) ??
+          DateTime.now(),
+      tanggalSelesai:
+          DateTime.tryParse(
+            j['TanggalSelesai'] ??
+                j['tanggalSelesai'] ??
+                j['tanggal_selesai'] ??
+                '',
+          ) ??
+          DateTime.now(),
+      keterangan: j['Keterangan'] ?? j['keterangan'] ?? '',
+      createdBy: j['CreatedBy'] ?? j['createdBy'] ?? j['created_by'] ?? '',
+    );
+  }
+}
+
 class CompanyCalendarService {
   static final Map<int, List<CompanyCalendarEvent>> _cache = {};
 
@@ -96,6 +139,117 @@ class CompanyCalendarService {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<List<WorkPeriod>> getWorkPeriodsByYear(
+    int tahun, {
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/period/list'),
+            headers: await _headers(),
+            body: json.encode({'tahun': tahun}),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        if (body['Success'] == true || body['success'] == true) {
+          final data = body['Data'] ?? body['data'] ?? [];
+          return (data as List).map((e) => WorkPeriod.fromJson(e)).toList();
+        }
+      }
+    } catch (_) {}
+
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> saveWorkPeriod({
+    int? id,
+    required int tahun,
+    required int bulan,
+    required String tanggalMulai,
+    required String tanggalSelesai,
+    required String keterangan,
+    required String createdBy,
+  }) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/period/save'),
+            headers: await _headers(),
+            body: json.encode({
+              'id': id,
+              'tahun': tahun,
+              'bulan': bulan,
+              'tanggalMulai': tanggalMulai,
+              'tanggalSelesai': tanggalSelesai,
+              'keterangan': keterangan,
+              'createdBy': createdBy,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final body = json.decode(res.body);
+
+      return {
+        'success': body['Success'] ?? body['success'] ?? false,
+        'message': body['Message'] ?? body['message'] ?? 'Terjadi kesalahan',
+        'id': body['Id'] ?? body['id'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Koneksi bermasalah: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteWorkPeriod({
+    required int id,
+    required String deletedBy,
+  }) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/period/delete'),
+            headers: await _headers(),
+            body: json.encode({'id': id, 'deletedBy': deletedBy}),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final body = json.decode(res.body);
+
+      return {
+        'success': body['Success'] ?? body['success'] ?? false,
+        'message': body['Message'] ?? body['message'] ?? 'Terjadi kesalahan',
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Koneksi bermasalah: $e'};
+    }
+  }
+
+  static Future<WorkPeriod?> checkWorkPeriodByDate(String tanggal) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/period/check'),
+            headers: await _headers(),
+            body: json.encode({'tanggal': tanggal}),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body);
+        final success = body['Success'] ?? body['success'] ?? false;
+        final data = body['Data'] ?? body['data'];
+
+        if (success == true && data != null) {
+          return WorkPeriod.fromJson(data);
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   static Future<Map<String, String>> _headers() async {

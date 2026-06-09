@@ -106,10 +106,53 @@ class HrdAttendanceData {
   // Display helpers
   String get displayStatus {
     final s = (checkInStatus ?? '').toLowerCase();
-    if (s.contains('tepat')) return 'Tepat Waktu';
-    if (s.contains('terlambat')) return 'Terlambat';
-    if (s.contains('cuti')) return 'Cuti';
-    if (s.contains('absent') || s.contains('tidak hadir')) return 'Tidak Hadir';
+    final out = (checkOutStatus ?? '').toLowerCase();
+    final mode = (attendanceMode ?? '').toLowerCase();
+    final note = (notes ?? '').toLowerCase();
+
+    if (s.contains('tepat') || s.contains('on_time')) {
+      return 'Tepat Waktu';
+    }
+
+    if (s.contains('sangat terlambat') || s.contains('very_late')) {
+      return 'Sangat Terlambat';
+    }
+
+    if (s.contains('terlambat') || s.contains('late')) {
+      return 'Terlambat';
+    }
+
+    if (s.contains('cuti') ||
+        s.contains('izin') ||
+        s.contains('sakit') ||
+        s.contains('dinas') ||
+        s.contains('timeoff') ||
+        s.contains('leave') ||
+        out.contains('cuti') ||
+        out.contains('izin') ||
+        out.contains('sakit') ||
+        out.contains('dinas') ||
+        out.contains('timeoff') ||
+        out.contains('leave') ||
+        mode.contains('timeoff') ||
+        mode.contains('leave') ||
+        note.contains('cuti') ||
+        note.contains('izin') ||
+        note.contains('sakit') ||
+        note.contains('dinas')) {
+      return 'Cuti';
+    }
+
+    if (s.contains('tidak hadir') ||
+        s.contains('tidak absen') ||
+        s.contains('absent') ||
+        s.contains('alpha') ||
+        out.contains('tidak hadir') ||
+        out.contains('tidak absen') ||
+        out.contains('absent')) {
+      return 'Tidak Hadir';
+    }
+
     return checkInStatus ?? '-';
   }
 

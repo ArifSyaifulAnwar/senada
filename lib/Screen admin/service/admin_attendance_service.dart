@@ -1,14 +1,140 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../Services/token_service.dart';
 import '../../Services/config.dart';
 import '../model/admin_attendance_model.dart';
 
+class HrdWorkPeriod {
+  final int id;
+  final int tahun;
+  final int bulan;
+  final DateTime tanggalMulai;
+  final DateTime tanggalSelesai;
+  final String keterangan;
+
+  const HrdWorkPeriod({
+    required this.id,
+    required this.tahun,
+    required this.bulan,
+    required this.tanggalMulai,
+    required this.tanggalSelesai,
+    required this.keterangan,
+  });
+
+  factory HrdWorkPeriod.fromJson(Map<String, dynamic> json) {
+    return HrdWorkPeriod(
+      id: json['Id'] ?? json['id'] ?? 0,
+      tahun: json['Tahun'] ?? json['tahun'] ?? 0,
+      bulan: json['Bulan'] ?? json['bulan'] ?? 0,
+      tanggalMulai:
+          DateTime.tryParse(
+            (json['TanggalMulai'] ??
+                    json['tanggalMulai'] ??
+                    json['tanggal_mulai'] ??
+                    '')
+                .toString(),
+          ) ??
+          DateTime.now(),
+      tanggalSelesai:
+          DateTime.tryParse(
+            (json['TanggalSelesai'] ??
+                    json['tanggalSelesai'] ??
+                    json['tanggal_selesai'] ??
+                    '')
+                .toString(),
+          ) ??
+          DateTime.now(),
+      keterangan: (json['Keterangan'] ?? json['keterangan'] ?? '').toString(),
+    );
+  }
+
+  String get bulanLabel {
+    const bulanNames = [
+      '',
+      'Januari',
+      'Februari',
+      'Maret',
+      'April',
+      'Mei',
+      'Juni',
+      'Juli',
+      'Agustus',
+      'September',
+      'Oktober',
+      'November',
+      'Desember',
+    ];
+
+    if (bulan >= 1 && bulan <= 12) {
+      return '${bulanNames[bulan]} $tahun';
+    }
+
+    return '$bulan/$tahun';
+  }
+}
+
 class AdminAttendanceService {
   Future<String?> _getUserId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('UserID');
+  }
+
+  Future<ApiResponse<List<HrdWorkPeriod>>> getWorkPeriodsByYear({
+    required int tahun,
+  }) async {
+    try {
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/calendar/period/list'),
+        body: jsonEncode({'tahun': tahun}),
+      );
+
+      if (response.statusCode == 200) {
+        final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+
+        final success =
+            jsonData['Success'] == true || jsonData['success'] == true;
+
+        if (!success) {
+          return ApiResponse<List<HrdWorkPeriod>>(
+            success: false,
+            message:
+                jsonData['Message'] ??
+                jsonData['message'] ??
+                'Gagal mengambil periode kerja',
+          );
+        }
+
+        final rawData = jsonData['Data'] ?? jsonData['data'] ?? [];
+
+        final periods = rawData is List
+            ? rawData
+                  .whereType<Map<String, dynamic>>()
+                  .map((e) => HrdWorkPeriod.fromJson(e))
+                  .toList()
+            : <HrdWorkPeriod>[];
+
+        periods.sort((a, b) => a.bulan.compareTo(b.bulan));
+
+        return ApiResponse<List<HrdWorkPeriod>>(
+          success: true,
+          message: 'Periode kerja berhasil diambil',
+          data: periods,
+        );
+      }
+
+      return ApiResponse<List<HrdWorkPeriod>>(
+        success: false,
+        message: 'Server error (${response.statusCode})',
+      );
+    } catch (e) {
+      return ApiResponse<List<HrdWorkPeriod>>(
+        success: false,
+        message: 'Terjadi kesalahan: $e',
+      );
+    }
   }
 
   // Convert timeRange to English for backend compatibility
@@ -157,6 +283,151 @@ class AdminAttendanceService {
         success: false,
         message: 'Terjadi kesalahan: ${e.toString()}',
         error: e.toString(),
+      );
+    }
+  }
+
+  Future<ApiResponse<DateTimeRange>> getCurrentWorkPeriod() async {
+    try {
+      final adminUserId = await _getUserId();
+      if (adminUserId == null) {
+        return ApiResponse<DateTimeRange>(
+          success: false,
+          message: 'User ID tidak ditemukan. Silakan login ulang.',
+        );
+      }
+
+      final now = DateTime.now();
+
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/calendar/period/list'),
+        body: jsonEncode({'tahun': now.year}),
+      );
+
+      if (response.statusCode == 200) {
+        final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+
+        final success =
+            jsonData['Success'] == true || jsonData['success'] == true;
+        if (!success) {
+          return ApiResponse<DateTimeRange>(
+            success: false,
+            message:
+                jsonData['Message'] ??
+                jsonData['message'] ??
+                'Gagal mengambil periode kerja',
+          );
+        }
+
+        final data = jsonData['Data'] ?? jsonData['data'] ?? [];
+
+        if (data is List) {
+          final currentMonth = now.month;
+
+          Map<String, dynamic>? item;
+          for (final x in data) {
+            if (x is Map<String, dynamic>) {
+              final bulan = x['Bulan'] ?? x['bulan'];
+              if (bulan == currentMonth) {
+                item = x;
+                break;
+              }
+            }
+          }
+
+          if (item != null) {
+            final startStr =
+                item['TanggalMulai'] ??
+                item['tanggalMulai'] ??
+                item['tanggal_mulai'];
+
+            final endStr =
+                item['TanggalSelesai'] ??
+                item['tanggalSelesai'] ??
+                item['tanggal_selesai'];
+
+            final start = DateTime.tryParse(startStr?.toString() ?? '');
+            final end = DateTime.tryParse(endStr?.toString() ?? '');
+
+            if (start != null && end != null) {
+              return ApiResponse<DateTimeRange>(
+                success: true,
+                message: 'Periode kerja ditemukan',
+                data: DateTimeRange(start: start, end: end),
+              );
+            }
+          }
+        }
+
+        return ApiResponse<DateTimeRange>(
+          success: false,
+          message: 'Periode bulan berjalan belum disetting',
+        );
+      }
+
+      return ApiResponse<DateTimeRange>(
+        success: false,
+        message: 'Server error (${response.statusCode})',
+      );
+    } catch (e) {
+      return ApiResponse<DateTimeRange>(
+        success: false,
+        message: 'Terjadi kesalahan: $e',
+      );
+    }
+  }
+
+  Future<ApiResponse<Map<String, dynamic>>> notifyBelumAbsenWa({
+    required DateTime tanggal,
+  }) async {
+    try {
+      final adminUserId = await _getUserId();
+
+      if (adminUserId == null || adminUserId.isEmpty) {
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          message: 'User ID tidak ditemukan. Silakan login ulang.',
+        );
+      }
+
+      final request = {
+        'adminUserId': adminUserId,
+        'tanggal': DateFormat('yyyy-MM-dd').format(tanggal),
+      };
+
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/notify-belum-absen-wa'),
+        body: jsonEncode(request),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+
+        final success =
+            jsonData['Success'] == true || jsonData['success'] == true;
+
+        final message =
+            jsonData['Message'] ??
+            jsonData['message'] ??
+            (success
+                ? 'Notifikasi WA sedang diproses.'
+                : 'Gagal memproses notifikasi WA.');
+
+        return ApiResponse<Map<String, dynamic>>(
+          success: success,
+          message: message.toString(),
+          data: jsonData,
+        );
+      }
+
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        message: 'Server error (${response.statusCode})',
+      );
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        message: 'Gagal memproses notifikasi WA: $e',
       );
     }
   }

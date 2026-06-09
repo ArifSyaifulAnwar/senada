@@ -61,6 +61,97 @@ class TimeOffService {
         return MediaType('application', 'octet-stream');
     }
   }
+  // time_off_service.dart — tambah 3 method ini di dalam class TimeOffService
+
+  // ── HRD Review ────────────────────────────────────────────────────────────────
+  static Future<ApiResponse<void>> hrdReview({
+    required int id,
+    required String status,
+    required String hrdUserId,
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/hrd-review'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': id,
+          'status': status,
+          'hrdUserId': hrdUserId,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── Director Review ───────────────────────────────────────────────────────────
+  static Future<ApiResponse<void>> directorReview({
+    required int id,
+    required String status,
+    required String directorUserId,
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/director-review'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': id,
+          'status': status,
+          'directorUserId': directorUserId,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── Pending Director List ─────────────────────────────────────────────────────
+  static Future<ApiResponse<List<TimeOffModel>>> getPendingDirector(
+    String directorUserId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/pending-director'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': directorUserId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (_get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final rawList = rawData?['items'] as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: rawList
+              .map((e) => TimeOffModel.fromJson(e as Map<String, dynamic>))
+              .toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
 
   /// Helper: baca value dari JSON yang bisa PascalCase atau camelCase
   static dynamic _get(Map<String, dynamic> json, String key) =>

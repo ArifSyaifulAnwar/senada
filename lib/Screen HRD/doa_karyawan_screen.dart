@@ -127,6 +127,31 @@ class DoaService {
     }
   }
 
+  static Future<bool> canInputDoa(String userId) async {
+    try {
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/can-input'),
+        body: jsonEncode({'userId': userId}),
+      );
+
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+
+        final success = body['Success'] == true || body['success'] == true;
+        final canInput =
+            body['CanInput'] == true ||
+            body['canInput'] == true ||
+            body['can_input'] == true;
+
+        return success && canInput;
+      }
+
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Simpan data doa
   static Future<Map<String, dynamic>> saveDoa({
     required String hrdUserId,

@@ -16,6 +16,8 @@ import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../Screen admin/service/web_preview.dart';
+import '../../Services/time_off_service.dart';
 
 bool _isWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -52,17 +54,33 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   final Map<String, int> _departmentStats = {};
   final Map<String, double> _leaveBalances = {};
 
-  final List<String> _departments = [
-    'Semua Departemen',
-    'IT',
-    'HR',
-    'Finance',
-    'Marketing',
-    'Operations',
-  ];
+  List<String> get _departments {
+    final departments =
+        _users
+            .map((u) => u.department)
+            .where((d) => d != null && d.trim().isNotEmpty)
+            .map((d) => d!.trim())
+            .toSet()
+            .toList()
+          ..sort();
+
+    return ['Semua Departemen', ...departments];
+  }
+
+  void _openEmployeesTab() {
+    setState(() {
+      _webTabIndex = 2;
+      _selectedUserId = null;
+      _selectedDepartment = null;
+    });
+
+    _tabController.animateTo(2);
+  }
+
   final List<String> _statusOptions = [
     'Semua Status',
-    'Pending',
+    'Pending HRD',
+    'Pending Director',
     'Approved',
     'Rejected',
     'Processed',
@@ -149,21 +167,233 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
   void _calculateDepartmentStats() {
     _departmentStats.clear();
+
     for (var u in _users) {
-      final d = u.department ?? 'Unknown';
+      final d = (u.department?.trim().isNotEmpty ?? false)
+          ? u.department!.trim()
+          : (u.jobs?.trim().isNotEmpty ?? false)
+          ? u.jobs!.trim()
+          : (u.jobPosition?.trim().isNotEmpty ?? false)
+          ? u.jobPosition!.trim()
+          : 'Tidak Ada Departemen';
+
       _departmentStats[d] = (_departmentStats[d] ?? 0) + u.totalTimeOff;
     }
   }
 
+  void _showSetQuotaDialog(UserWithTimeOffs user) {
+    final year = DateTime.now().year;
+    // Ambil nilai kuota saat ini dari _leaveBalances atau default
+    final annualCtrl = TextEditingController(text: user.annualQuota.toString());
+    final birthCtrl = TextEditingController(text: '5');
+    final bereavCtrl = TextEditingController(text: '2');
+
+    // Load kuota aktual dari server dulu
+    TimeOffAdminService.getEmployeeDetail(
+      adminId: _currentUserId!,
+      userId: user.userId,
+      year: year,
+    ).then((data) {
+      final quotas = data['quotas'] as List<dynamic>? ?? [];
+      for (final q in quotas) {
+        final qt = (q['quotaType'] ?? '').toString();
+        final qa = (q['quotaAwal'] as num?)?.toInt() ?? 0;
+        if (qt == 'annual') annualCtrl.text = qa.toString();
+        if (qt == 'birth_leave') birthCtrl.text = qa.toString();
+        if (qt == 'bereavement') bereavCtrl.text = qa.toString();
+      }
+    });
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.tune, color: Color(0xFF6366F1), size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'Atur Kuota Izin',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              user.name,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF6B7280),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _quotaInputTile(
+                icon: '🏖️',
+                label: 'Izin Tahunan',
+                desc: 'Cuti tahunan berbayar',
+                ctrl: annualCtrl,
+                color: const Color(0xFF6366F1),
+              ),
+              const SizedBox(height: 10),
+              _quotaInputTile(
+                icon: '👶',
+                label: 'Izin Lahiran',
+                desc: 'Cuti melahirkan/lahiran',
+                ctrl: birthCtrl,
+                color: const Color(0xFF10B981),
+              ),
+              const SizedBox(height: 10),
+              _quotaInputTile(
+                icon: '🕯️',
+                label: 'Keluarga Meninggal',
+                desc: 'Cuti duka keluarga',
+                ctrl: bereavCtrl,
+                color: const Color(0xFF8B5CF6),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              annualCtrl.dispose();
+              birthCtrl.dispose();
+              bereavCtrl.dispose();
+              Navigator.pop(context);
+            },
+            child: const Text('Batal'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              final annual = int.tryParse(annualCtrl.text.trim()) ?? -1;
+              final birth = int.tryParse(birthCtrl.text.trim()) ?? -1;
+              final bereav = int.tryParse(bereavCtrl.text.trim()) ?? -1;
+              if (annual < 0 || birth < 0 || bereav < 0) {
+                _snackErr('Nilai kuota tidak valid');
+                return;
+              }
+              Navigator.pop(context);
+              annualCtrl.dispose();
+              birthCtrl.dispose();
+              bereavCtrl.dispose();
+              final res = await TimeOffAdminService.setUserQuotaAll(
+                adminId: _currentUserId!,
+                userId: user.userId,
+                year: year,
+                annualDays: annual,
+                birthDays: birth,
+                bereavDays: bereav,
+              );
+
+              if (res.success) {
+                _snackOk(res.message);
+                await _refreshData();
+              } else {
+                _snackErr(res.message);
+              }
+            },
+            icon: const Icon(Icons.save, size: 16),
+            label: const Text('Simpan'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quotaInputTile({
+    required String icon,
+    required String label,
+    required String desc,
+    required TextEditingController ctrl,
+    required Color color,
+  }) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.04),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: color.withOpacity(0.2)),
+    ),
+    child: Row(
+      children: [
+        Text(icon, style: const TextStyle(fontSize: 24)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF1F2937),
+                ),
+              ),
+              Text(
+                desc,
+                style: TextStyle(fontSize: 11, color: const Color(0xFF6B7280)),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 70,
+          child: TextField(
+            controller: ctrl,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+            decoration: InputDecoration(
+              suffixText: 'hr',
+              suffixStyle: TextStyle(fontSize: 11, color: color),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: color),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: color, width: 2),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 8,
+              ),
+              isDense: true,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
   void _calculateLeaveBalances() {
     _leaveBalances.clear();
+
     for (var u in _users) {
-      _leaveBalances[u.userId] = 21.0 - u.totalApprovedDays.toDouble();
+      _leaveBalances[u.userId] = u.remainingDays.toDouble();
     }
   }
 
   void _applyFilters() {
     List<AdminTimeOffData> f = _allTimeOffs;
+
     if (_selectedStatus != null && _selectedStatus != 'Semua Status') {
       f = f.where((i) => i.status == _selectedStatus).toList();
     }
@@ -196,6 +426,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       }
       f = f.where((i) => i.submittedAt.isAfter(start)).toList();
     }
+
     final kw = _searchController.text.toLowerCase();
     if (kw.isNotEmpty) {
       f = f
@@ -208,13 +439,20 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           .toList();
     }
 
+    // Sort: Pending HRD dulu → Pending Director → lainnya
+    // Di dalam grup sama, urutkan dari yang paling lama menunggu
     f.sort((a, b) {
-      if (a.status == 'Pending' && b.status != 'Pending') return -1;
-      if (a.status != 'Pending' && b.status == 'Pending') return 1;
-      if (a.status == 'Pending' && b.status == 'Pending') {
-        return b.daysSinceSubmitted.compareTo(a.daysSinceSubmitted);
+      int priority(AdminTimeOffData x) {
+        if (x.isPendingHrd) return 0;
+        if (x.isPendingDirector) return 1;
+        if (x.status.toLowerCase() == 'pending') return 2;
+        return 3;
       }
-      return b.submittedAt.compareTo(a.submittedAt);
+
+      final pa = priority(a);
+      final pb = priority(b);
+      if (pa != pb) return pa.compareTo(pb);
+      return b.daysSinceSubmitted.compareTo(a.daysSinceSubmitted);
     });
 
     setState(() => _filteredTimeOffs = f);
@@ -1009,7 +1247,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'Sisa Cuti Karyawan',
+              'Dashboard Izin Karyawan',
               style: TextStyle(
                 fontSize: _fs(15),
                 fontWeight: FontWeight.w700,
@@ -1017,10 +1255,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
               ),
             ),
             TextButton(
-              onPressed: () {
-                setState(() => _webTabIndex = 2);
-                _tabController.animateTo(2);
-              },
+              onPressed: _openEmployeesTab,
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF6366F1),
               ),
@@ -1032,6 +1267,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         ..._users.take(5).map((u) {
           final bal = _leaveBalances[u.userId] ?? 21.0;
           final low = bal < 7;
+
           return Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(10),
@@ -1072,23 +1308,39 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      Text(
-                        u.jobs ?? '-',
-                        style: TextStyle(
-                          fontSize: _fs(11),
-                          color: const Color(0xFF6B7280),
-                        ),
-                      ),
+                      Text(u.jobPosition ?? u.jobs ?? u.department ?? '-'),
                     ],
                   ),
                 ),
-                Text(
-                  '${bal.toInt()} hr',
-                  style: TextStyle(
-                    fontSize: _fs(13),
-                    fontWeight: FontWeight.w700,
-                    color: low ? Colors.red : const Color(0xFF10B981),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${bal.toInt()} hr',
+                      style: TextStyle(
+                        fontSize: _fs(13),
+                        fontWeight: FontWeight.w700,
+                        color: low ? Colors.red : const Color(0xFF10B981),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => _showSetQuotaDialog(u),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.settings,
+                          size: 16,
+                          color: Color(0xFF6366F1),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1100,9 +1352,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
   Widget _buildUrgentItems() {
     final urgent = _allTimeOffs
-        .where((i) => i.status == 'Pending' && i.daysSinceSubmitted > 2)
+        .where((i) => i.needsReview && i.daysSinceSubmitted > 2)
         .take(3)
         .toList();
+
     if (urgent.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(16),
@@ -1155,7 +1408,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
               ],
             ),
             TextButton(
-              onPressed: () => _navFilter('Pending'),
+              onPressed: () => _navFilter('Pending HRD'),
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF6366F1),
               ),
@@ -1816,29 +2069,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     onRefresh: _refreshData,
     child: _users.isEmpty
         ? _buildEmptyState()
-        : LayoutBuilder(
-            builder: (_, c) {
-              final bool isWeb = c.maxWidth >= 700;
-              if (!isWeb) {
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _users.length,
-                  itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
-                );
-              }
-              final int crossAxisCount = c.maxWidth >= 1300 ? 3 : 2;
-              return GridView.builder(
-                padding: const EdgeInsets.all(20),
-                itemCount: _users.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: crossAxisCount == 3 ? 2.45 : 3.4,
-                ),
-                itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
-              );
-            },
+        : ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: _users.length,
+            itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
           ),
   );
 
@@ -2313,6 +2547,8 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       borderRadius: BorderRadius.circular(12),
       side: isUrgent
           ? const BorderSide(color: Color(0xFFEF4444), width: 1)
+          : item.isPendingDirector
+          ? const BorderSide(color: Color(0xFF8B5CF6), width: 1)
           : BorderSide.none,
     ),
     child: InkWell(
@@ -2323,6 +2559,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Row 1: Badge urgent + jenis + status ──────────────────
             Row(
               children: [
                 if (isUrgent) ...[
@@ -2390,7 +2627,44 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 ),
               ],
             ),
+
+            // ── Badge requires director (kalau izin butuh direktur) ───
+            if (item.isPendingDirector) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFF8B5CF6).withOpacity(0.25),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.account_balance,
+                      size: 11,
+                      color: Color(0xFF8B5CF6),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Sudah disetujui HRD — menunggu Direktur',
+                      style: TextStyle(
+                        fontSize: _fs(10),
+                        color: const Color(0xFF6D28D9),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 10),
+
+            // ── Row 2: Avatar + nama + posisi ─────────────────────────
             Row(
               children: [
                 CircleAvatar(
@@ -2433,7 +2707,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 ),
               ],
             ),
+
             const SizedBox(height: 10),
+
+            // ── Row 3: Tanggal + total hari ───────────────────────────
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
@@ -2481,45 +2758,42 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 ],
               ),
             ),
+
+            // ── Badge lampiran (non-DL) ───────────────────────────────
             if (!item.isDinasLuar && item.hasFile) ...[
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFF10B981).withOpacity(0.3),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.attach_file,
+                      size: 12,
+                      color: Color(0xFF059669),
                     ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: const Color(0xFF10B981).withOpacity(0.3),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Ada lampiran',
+                      style: TextStyle(
+                        fontSize: _fs(10),
+                        color: const Color(0xFF059669),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.attach_file,
-                          size: 12,
-                          color: Color(0xFF059669),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Ada lampiran',
-                          style: TextStyle(
-                            fontSize: _fs(10),
-                            color: const Color(0xFF059669),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
+
+            // ── Badge laporan DL siap direview ────────────────────────
             if (item.isDinasLuar &&
                 item.hasLaporan &&
                 item.status == 'Pending') ...[
@@ -2558,26 +2832,37 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 ),
               ),
             ],
-            if (item.status == 'Pending') ...[
+
+            // ── Baris aksi: tombol approve/reject ─────────────────────
+            if (item.needsReview) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
+                  // Info waktu tunggu
                   Flexible(
                     child: Row(
                       children: [
-                        const Icon(
-                          Icons.access_time,
+                        Icon(
+                          item.isPendingDirector
+                              ? Icons.account_balance
+                              : Icons.access_time,
                           size: 13,
-                          color: Color(0xFF94A3B8),
+                          color: item.isPendingDirector
+                              ? const Color(0xFF8B5CF6)
+                              : const Color(0xFF94A3B8),
                         ),
                         const SizedBox(width: 5),
                         Flexible(
                           child: Text(
-                            'Diajukan ${item.daysSinceSubmitted} hari lalu',
+                            item.isPendingDirector
+                                ? 'Menunggu Direktur — ${item.daysSinceSubmitted} hari'
+                                : 'Diajukan ${item.daysSinceSubmitted} hari lalu',
                             style: TextStyle(
                               fontSize: _fs(11),
-                              color: item.urgencyColor,
+                              color: item.isPendingDirector
+                                  ? const Color(0xFF8B5CF6)
+                                  : item.urgencyColor,
                               fontWeight: FontWeight.w500,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -2586,30 +2871,35 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                       ],
                     ),
                   ),
-                  Row(
-                    children: [
-                      TextButton.icon(
-                        onPressed: () => _quickReview(item, 'Rejected'),
-                        icon: const Icon(Icons.close, size: 14),
-                        label: const Text('Tolak'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFFEF4444),
-                          visualDensity: VisualDensity.compact,
+
+                  // Tombol hanya kalau user berhak review
+                  if (_canReview(item))
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => _quickReview(item, 'Rejected'),
+                          icon: const Icon(Icons.close, size: 14),
+                          label: const Text('Tolak'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFEF4444),
+                            visualDensity: VisualDensity.compact,
+                          ),
                         ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: () => _quickReview(item, 'Approved'),
-                        icon: const Icon(Icons.check, size: 14),
-                        label: const Text('Setujui'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF10B981),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          visualDensity: VisualDensity.compact,
+                        ElevatedButton.icon(
+                          onPressed: () => _quickReview(item, 'Approved'),
+                          icon: const Icon(Icons.check, size: 14),
+                          label: const Text('Setujui'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: item.isPendingDirector
+                                ? const Color(0xFF8B5CF6)
+                                : const Color(0xFF10B981),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            visualDensity: VisualDensity.compact,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
             ],
@@ -2619,177 +2909,228 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     ),
   );
 
-  Widget _buildEmployeeCard(UserWithTimeOffs user) {
-    final bal = _leaveBalances[user.userId] ?? 21.0;
-    final low = bal < 7;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          setState(() {
-            _selectedUserId = user.userId;
-            _webTabIndex = 1;
-            _tabController.animateTo(1);
-            _applyFilters();
+  // ── Helper: apakah user saat ini berhak review item ini ──────────────────────
+  bool _canReview(AdminTimeOffData item) {
+    if (_currentUserId == null) return false;
+    return item.needsReview;
+  }
+
+  void _showEmployeeDetail(UserWithTimeOffs user) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EmployeeDetailModal(
+        user: user,
+        adminId: _currentUserId!,
+        onEditQuota: (selectedUser) {
+          Navigator.pop(context);
+          Future.delayed(const Duration(milliseconds: 200), () {
+            _showSetQuotaDialog(selectedUser);
           });
         },
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: const Color(0xFF6366F1).withOpacity(0.1),
-                    child: Text(
-                      user.name.isNotEmpty ? user.name[0].toUpperCase() : 'U',
-                      style: const TextStyle(
-                        color: Color(0xFF6366F1),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
+      ),
+    );
+  }
+
+  Widget _buildEmployeeCard(UserWithTimeOffs user) {
+    final bal = _leaveBalances[user.userId] ?? user.remainingDays.toDouble();
+    final low = bal < 7;
+
+    return InkWell(
+      onTap: () => _showEmployeeDetail(user),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header: avatar + nama + tombol setting ──
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: const Color(0xFF6366F1).withOpacity(0.1),
+                  child: Text(
+                    user.name.isNotEmpty ? user.name[0].toUpperCase() : 'U',
+                    style: const TextStyle(
+                      color: Color(0xFF6366F1),
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          user.name,
-                          style: TextStyle(
-                            fontSize: _fs(14),
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF1E293B),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          '${user.jobs ?? '-'} • ${user.department ?? '-'}',
-                          style: TextStyle(
-                            fontSize: _fs(12),
-                            color: const Color(0xFF64748B),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (low)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.warning,
-                            size: 11,
-                            color: Colors.red,
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            'Low',
-                            style: TextStyle(
-                              fontSize: _fs(10),
-                              fontWeight: FontWeight.w600,
-                              color: Colors.red,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Sisa Cuti',
-                    style: TextStyle(
-                      fontSize: _fs(11),
-                      color: const Color(0xFF6B7280),
-                    ),
-                  ),
-                  Text(
-                    '${bal.toInt()} / 21 hari',
-                    style: TextStyle(
-                      fontSize: _fs(11),
-                      fontWeight: FontWeight.w600,
-                      color: low ? Colors.red : const Color(0xFF10B981),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              LinearProgressIndicator(
-                value: (bal / 21).clamp(0.0, 1.0),
-                backgroundColor: const Color(0xFFE5E7EB),
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  low ? Colors.red : const Color(0xFF10B981),
                 ),
-                minHeight: 5,
-              ),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildUserStatItem(
-                    'Total',
-                    user.totalTimeOff.toString(),
-                    Colors.blue,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        user.name,
+                        style: TextStyle(
+                          fontSize: _fs(14),
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF1F2937),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        user.jobPosition ?? user.jobs ?? '-',
+                        style: TextStyle(
+                          fontSize: _fs(11),
+                          color: const Color(0xFF6B7280),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  _buildUserStatItem(
-                    'Pending',
-                    user.pendingCount.toString(),
-                    Colors.orange,
+                ),
+                // Tombol set kuota
+                InkWell(
+                  onTap: () => _showSetQuotaDialog(user),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.tune,
+                      size: 17,
+                      color: Color(0xFF6366F1),
+                    ),
                   ),
-                  _buildUserStatItem(
-                    'Approved',
-                    user.approvedCount.toString(),
-                    Colors.green,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Kuota badges ──
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _buildQuotaBadge(
+                  'Cuti Tahunan',
+                  '${bal.toInt()}/${user.annualQuota}',
+                  low ? const Color(0xFFEF4444) : const Color(0xFF6366F1),
+                ),
+                _buildQuotaBadge(
+                  'Total Izin',
+                  '${user.totalTimeOff} req',
+                  const Color(0xFFF59E0B),
+                ),
+                _buildQuotaBadge(
+                  'Disetujui',
+                  '${user.approvedCount}',
+                  const Color(0xFF10B981),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Progress bar kuota tahunan ──
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: user.annualQuota <= 0
+                          ? 0
+                          : (user.usedDays / user.annualQuota).clamp(0.0, 1.0),
+                      minHeight: 6,
+                      backgroundColor: const Color(0xFFE5E7EB),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        low ? const Color(0xFFEF4444) : const Color(0xFF6366F1),
+                      ),
+                    ),
                   ),
-                  _buildUserStatItem(
-                    'Rejected',
-                    user.rejectedCount.toString(),
-                    Colors.red,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '${user.usedDays}/${user.annualQuota} hari',
+                  style: TextStyle(
+                    fontSize: _fs(11),
+                    color: const Color(0xFF6B7280),
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            // ── Footer: tap untuk detail ──
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  'Lihat riwayat izin',
+                  style: TextStyle(
+                    fontSize: _fs(11),
+                    color: const Color(0xFF6366F1),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 11,
+                  color: Color(0xFF6366F1),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildUserStatItem(String label, String value, Color color) => Column(
-    children: [
-      Text(
-        value,
-        style: TextStyle(
-          fontSize: _fs(15),
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
+  Widget _buildQuotaBadge(String label, String value, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: color.withOpacity(0.2)),
+    ),
+    child: RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$label: ',
+            style: TextStyle(
+              fontSize: _fs(10),
+              color: const Color(0xFF6B7280),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          TextSpan(
+            text: value,
+            style: TextStyle(
+              fontSize: _fs(10),
+              color: color,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
-      const SizedBox(height: 3),
-      Text(
-        label,
-        style: TextStyle(fontSize: _fs(10), color: const Color(0xFF6B7280)),
-        textAlign: TextAlign.center,
-      ),
-    ],
+    ),
   );
 
   Widget _buildEmptyState() => Center(
@@ -2919,14 +3260,28 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     });
   }
 
+  // timeoffhrd.dart — REPLACE method _quickReview yang lama
+
   Future<void> _quickReview(AdminTimeOffData item, String status) async {
     try {
-      final resp = await TimeOffAdminService.reviewTimeOff(
-        id: item.id,
-        status: status,
-        approvedBy: _currentUserName!,
-        adminId: _currentUserId!,
-      );
+      dynamic resp;
+
+      if (item.status.toLowerCase() == 'pending director') {
+        // Direktur yang review
+        resp = await TimeOffService.directorReview(
+          id: item.id,
+          status: status,
+          directorUserId: _currentUserId!,
+        );
+      } else {
+        // HRD yang review (Pending HRD atau Pending untuk DL)
+        resp = await TimeOffService.hrdReview(
+          id: item.id,
+          status: status,
+          hrdUserId: _currentUserId!,
+        );
+      }
+
       if (resp.success) {
         await _refreshData();
         _snackOk(
@@ -3128,7 +3483,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
 
     setState(() => _downloadingFileId = file.id);
     _snack(
-      preview ? 'Membuka file...' : 'Mengunduh file...',
+      preview ? 'Memuat pratinjau...' : 'Mengunduh file...',
       err: false,
       dur: 1,
     );
@@ -3169,28 +3524,20 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final fileName = file.fileName;
-
-        if (kIsWeb) {
-          downloadFileWeb(response.bodyBytes, fileName);
-          _snack('File $fileName berhasil diunduh', err: false);
-          return;
-        }
-
         if (preview) {
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File('${tempDir.path}/$fileName');
-          await tempFile.writeAsBytes(response.bodyBytes);
-          final result = await OpenFile.open(tempFile.path);
-          if (result.type != ResultType.done) {
-            _snack('Tidak dapat membuka: ${result.message}', err: true);
-          }
+          // ── PREVIEW: tampilkan, jangan download ──
+          await _previewBytes(response.bodyBytes, file.fileName);
         } else {
-          final dir = await getApplicationDocumentsDirectory();
-          final f = File('${dir.path}/$fileName');
-          await f.writeAsBytes(response.bodyBytes);
-          _snack('File "$fileName" tersimpan', err: false);
-          await OpenFile.open(f.path);
+          // ── UNDUH: benar-benar simpan/download ──
+          if (kIsWeb) {
+            downloadFileWeb(response.bodyBytes, file.fileName);
+            _snack('File "${file.fileName}" diunduh', err: false);
+          } else {
+            final dir = await getApplicationDocumentsDirectory();
+            final f = File('${dir.path}/${file.fileName}');
+            await f.writeAsBytes(response.bodyBytes);
+            _snack('Tersimpan: ${file.fileName}', err: false);
+          }
         }
       } else {
         String errMsg = 'Gagal mengambil file (${response.statusCode})';
@@ -3209,7 +3556,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
 
   Future<void> _downloadDlFile(String fileType) async {
     setState(() => _isDownloadingDl = true);
-    _snack('Mengunduh file $fileType...', err: false, dur: 1);
+    _snack('Memuat pratinjau...', err: false, dur: 1);
     try {
       final token = await _getToken();
       if (token == null) {
@@ -3236,25 +3583,13 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
         final fileName = fileType == 'laporan'
             ? (widget.item.laporanFileName ?? 'laporan.pdf')
             : (widget.item.anggaranFileName ?? 'anggaran.pdf');
-
-        if (kIsWeb) {
-          downloadFileWeb(response.bodyBytes, fileName);
-          _snack('File $fileName berhasil diunduh', err: false);
-        } else {
-          final tempDir = await getTemporaryDirectory();
-          final file = File('${tempDir.path}/$fileName');
-          await file.writeAsBytes(response.bodyBytes);
-          final result = await OpenFile.open(file.path);
-          if (result.type != ResultType.done) {
-            _snack('Tidak dapat membuka file: ${result.message}', err: true);
-          }
-        }
+        await _previewBytes(response.bodyBytes, fileName);
       } else {
         final body = response.body.isNotEmpty ? json.decode(response.body) : {};
         _snack(
           (body as Map)['Message'] ??
               body['message'] ??
-              'Gagal mengunduh (${response.statusCode})',
+              'Gagal memuat (${response.statusCode})',
           err: true,
         );
       }
@@ -3265,19 +3600,121 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     }
   }
 
+  Future<void> _previewBytes(List<int> bytes, String fileName) async {
+    final ext = fileName.contains('.')
+        ? fileName.split('.').last.toLowerCase()
+        : '';
+    final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(ext);
+    final isPdf = ext == 'pdf';
+
+    // Gambar → tampil langsung di dalam aplikasi (web + mobile)
+    if (isImage) {
+      await _showImagePreview(Uint8List.fromList(bytes), fileName);
+      return;
+    }
+
+    if (kIsWeb) {
+      // PDF / lainnya di web → buka inline di tab baru (blob), bukan download
+      final mime = isPdf ? 'application/pdf' : 'application/octet-stream';
+      openBytesInBrowser(bytes, fileName, mime);
+      return;
+    }
+
+    // Mobile → buka di viewer sistem (ini "melihat", bukan menyimpan ke unduhan)
+    final tempDir = await getTemporaryDirectory();
+    final f = File('${tempDir.path}/$fileName');
+    await f.writeAsBytes(bytes);
+    final r = await OpenFile.open(f.path);
+    if (r.type != ResultType.done) {
+      _snack('Tidak dapat membuka: ${r.message}', err: true);
+    }
+  }
+
+  // Dialog preview gambar in-app (zoom + pan)
+  Future<void> _showImagePreview(Uint8List bytes, String fileName) async {
+    await showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 5,
+              child: Center(
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Padding(
+                    padding: EdgeInsets.all(40),
+                    child: Text(
+                      'Gambar tidak dapat ditampilkan',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Material(
+                color: Colors.black54,
+                shape: const CircleBorder(),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 10,
+              left: 0,
+              right: 0,
+              child: Text(
+                fileName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // HRDTimeOffDetailModal — REPLACE method _reviewTimeOff yang lama
+
   Future<void> _reviewTimeOff(String status) async {
     FocusScope.of(context).unfocus();
     setState(() => _isProcessing = true);
     try {
-      final response = await TimeOffAdminService.reviewTimeOff(
-        id: widget.item.id,
-        status: status,
-        approvedBy: widget.currentHRDName,
-        rejectionReason: _reviewNotesController.text.trim().isNotEmpty
-            ? _reviewNotesController.text.trim()
-            : null,
-        adminId: widget.currentHRDId,
-      );
+      dynamic response;
+
+      if (widget.item.status.toLowerCase() == 'pending director') {
+        // Direktur review
+        response = await TimeOffService.directorReview(
+          id: widget.item.id,
+          status: status,
+          directorUserId: widget.currentHRDId,
+          rejectionReason: _reviewNotesController.text.trim().isNotEmpty
+              ? _reviewNotesController.text.trim()
+              : null,
+        );
+      } else {
+        // HRD review
+        response = await TimeOffService.hrdReview(
+          id: widget.item.id,
+          status: status,
+          hrdUserId: widget.currentHRDId,
+          rejectionReason: _reviewNotesController.text.trim().isNotEmpty
+              ? _reviewNotesController.text.trim()
+              : null,
+        );
+      }
+
       if (response.success) {
         Navigator.of(context).pop();
         widget.onActionCompleted();
@@ -4025,5 +4462,739 @@ extension AdminTimeOffDataExtension on AdminTimeOffData {
     if (userJob?.contains('Finance') ?? false) return 'Finance';
     if (userJob?.contains('Marketing') ?? false) return 'Marketing';
     return 'Operations';
+  }
+}
+
+class _EmployeeDetailModal extends StatefulWidget {
+  final UserWithTimeOffs user;
+  final String adminId;
+  final Function(UserWithTimeOffs user) onEditQuota;
+
+  const _EmployeeDetailModal({
+    required this.user,
+    required this.adminId,
+    required this.onEditQuota,
+  });
+
+  @override
+  State<_EmployeeDetailModal> createState() => _EmployeeDetailModalState();
+}
+
+class _EmployeeDetailModalState extends State<_EmployeeDetailModal> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _quotas = [];
+  List<Map<String, dynamic>> _history = [];
+  int _selectedYear = DateTime.now().year;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDetail();
+  }
+
+  Future<void> _loadDetail() async {
+    setState(() => _loading = true);
+    final data = await TimeOffAdminService.getEmployeeDetail(
+      adminId: widget.adminId,
+      userId: widget.user.userId,
+      year: _selectedYear,
+    );
+    if (mounted) {
+      setState(() {
+        _quotas = List<Map<String, dynamic>>.from(data['quotas'] ?? []);
+        _history = List<Map<String, dynamic>>.from(data['history'] ?? []);
+        _loading = false;
+      });
+    }
+  }
+
+  String _fmtDate(String? raw) {
+    if (raw == null || raw.isEmpty) return '-';
+    final d = DateTime.tryParse(raw);
+    if (d == null) return raw;
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  Color _statusColor(String s) {
+    switch (s.toLowerCase()) {
+      case 'approved':
+        return const Color(0xFF10B981);
+      case 'rejected':
+        return const Color(0xFFEF4444);
+      case 'pending hrd':
+      case 'pending director':
+      case 'pending':
+        return const Color(0xFFF59E0B);
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  String _statusLabel(String s) {
+    switch (s.toLowerCase()) {
+      case 'approved':
+        return 'Disetujui';
+      case 'rejected':
+        return 'Ditolak';
+      case 'pending hrd':
+        return 'Menunggu HRD';
+      case 'pending director':
+        return 'Menunggu Direktur';
+      case 'pending':
+        return 'Menunggu Review';
+      default:
+        return s;
+    }
+  }
+
+  String _jenisIcon(String jenis) {
+    switch (jenis) {
+      case 'Izin Tahunan':
+        return '🏖️';
+      case 'Sakit':
+        return '🏥';
+      case 'Umrah dan Haji':
+        return '🕋';
+      case 'Izin Datang Terlambat':
+        return '⏰';
+      case 'Izin Lahiran':
+        return '👶';
+      case 'Dinas Luar':
+        return '🧳';
+      case 'Keluarga Meninggal':
+        return '🕯️';
+      default:
+        return '📅';
+    }
+  }
+
+  // Kelompokkan history berdasarkan uses_quota dan jenis
+  Map<String, List<Map<String, dynamic>>> _groupHistory() {
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (final h in _history) {
+      final key = h['jenisTimeOff']?.toString() ?? '-';
+      grouped.putIfAbsent(key, () => []);
+      grouped[key]!.add(h);
+    }
+    return grouped;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.92,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, scroll) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            // Handle
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: const Color(0xFF6366F1).withOpacity(0.1),
+                    child: Text(
+                      widget.user.name.isNotEmpty
+                          ? widget.user.name[0].toUpperCase()
+                          : 'U',
+                      style: const TextStyle(
+                        color: Color(0xFF6366F1),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.user.name,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1F2937),
+                          ),
+                        ),
+                        Text(
+                          '${widget.user.jobPosition ?? widget.user.jobs ?? '-'}'
+                          '${widget.user.department != null ? ' • ${widget.user.department}' : ''}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF6B7280),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Year picker
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF6366F1).withOpacity(0.3),
+                      ),
+                    ),
+                    child: DropdownButton<int>(
+                      value: _selectedYear,
+                      isDense: true,
+                      underline: const SizedBox(),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF6366F1),
+                      ),
+                      items: List.generate(3, (i) {
+                        final y = DateTime.now().year - 1 + i;
+                        return DropdownMenuItem(value: y, child: Text('$y'));
+                      }),
+                      onChanged: (y) {
+                        if (y == null) return;
+                        setState(() => _selectedYear = y);
+                        _loadDetail();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.grey[100],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation(Color(0xFF6366F1)),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      controller: scroll,
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ── KUOTA ──────────────────────────────────
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Kuota Izin $_selectedYear',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1F2937),
+                                ),
+                              ),
+                              TextButton.icon(
+                                onPressed: () {
+                                  widget.onEditQuota(widget.user);
+                                },
+                                icon: const Icon(Icons.tune, size: 14),
+                                label: const Text('Edit Kuota'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF6366F1),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+
+                          _quotas.isEmpty
+                              ? _buildEmptyQuota()
+                              : Column(
+                                  children: _quotas
+                                      .map((q) => _buildQuotaCard(q))
+                                      .toList(),
+                                ),
+
+                          const SizedBox(height: 24),
+
+                          // ── RIWAYAT ────────────────────────────────
+                          Text(
+                            'Riwayat Izin $_selectedYear',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1F2937),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          _history.isEmpty
+                              ? _buildEmptyHistory()
+                              : _buildHistoryGrouped(),
+                        ],
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Getter untuk tahun yang dipilih di dalam build
+  // (workaround karena _selectedYear tidak bisa dipakai langsung di Text widget)
+
+  Widget _buildEmptyQuota() => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.orange[50],
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.orange[200]!),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.warning_amber, color: Colors.orange[700], size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Kuota belum diset untuk tahun $_selectedYear.\nTekan "Edit Kuota" untuk mengatur.',
+            style: TextStyle(fontSize: 13, color: Colors.orange[700]),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildEmptyHistory() => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFFE5E7EB)),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.inbox_outlined, color: Color(0xFF9CA3AF), size: 18),
+        const SizedBox(width: 10),
+        Text(
+          'Belum ada pengajuan izin di tahun $_selectedYear.',
+          style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildQuotaCard(Map<String, dynamic> q) {
+    final qType = q['quotaType']?.toString() ?? '';
+    final qName = q['quotaName']?.toString() ?? qType;
+    final awal = (q['quotaAwal'] as num?)?.toInt() ?? 0;
+    final pakai = (q['quotaTerpakai'] as num?)?.toInt() ?? 0;
+    final sisa = (q['quotaSisa'] as num?)?.toInt() ?? 0;
+    final pct = awal <= 0 ? 0.0 : (pakai / awal).clamp(0.0, 1.0);
+    final low = sisa < 3;
+
+    final Color color;
+    final String icon;
+    switch (qType) {
+      case 'annual':
+        color = const Color(0xFF6366F1);
+        icon = '🏖️';
+        break;
+      case 'birth_leave':
+        color = const Color(0xFF10B981);
+        icon = '👶';
+        break;
+      case 'bereavement':
+        color = const Color(0xFF8B5CF6);
+        icon = '🕯️';
+        break;
+      default:
+        color = const Color(0xFF6B7280);
+        icon = '📅';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: low ? color.withOpacity(0.5) : const Color(0xFFE5E7EB),
+          width: low ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(icon, style: const TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  qName,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+              ),
+              if (low)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Hampir habis',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: pct,
+                    minHeight: 7,
+                    backgroundColor: const Color(0xFFE5E7EB),
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '$pakai/$awal hr',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _quotaMiniStat('Kuota', '$awal hr', const Color(0xFF6B7280)),
+              const SizedBox(width: 12),
+              _quotaMiniStat('Terpakai', '$pakai hr', color),
+              const SizedBox(width: 12),
+              _quotaMiniStat(
+                'Sisa',
+                '$sisa hr',
+                low ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quotaMiniStat(String label, String value, Color color) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        '$label: ',
+        style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+      ),
+      Text(
+        value,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    ],
+  );
+
+  Widget _buildHistoryGrouped() {
+    final grouped = _groupHistory();
+    return Column(
+      children: grouped.entries.map((entry) {
+        final jenis = entry.key;
+        final items = entry.value;
+        final usesQuota = items.first['usesQuota'] == true;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header grup
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      _jenisIcon(jenis),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        jenis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: usesQuota
+                            ? const Color(0xFF6366F1).withOpacity(0.1)
+                            : const Color(0xFF6B7280).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        usesQuota ? 'Pakai Kuota' : 'Non-Kuota',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: usesQuota
+                              ? const Color(0xFF6366F1)
+                              : const Color(0xFF6B7280),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F4F6),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${items.length}x',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF374151),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Item list
+              ...items.asMap().entries.map((e) {
+                final i = e.key;
+                final h = e.value;
+                final mulai = _fmtDate(h['tanggalMulai']?.toString());
+                final selesai = _fmtDate(h['tanggalSelesai']?.toString());
+                final hari = (h['totalHari'] as num?)?.toInt() ?? 0;
+                final status = h['status']?.toString() ?? '';
+                final catatan = h['catatan']?.toString() ?? '';
+                final isLast = i == items.length - 1;
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    border: isLast
+                        ? null
+                        : const Border(
+                            bottom: BorderSide(color: Color(0xFFF3F4F6)),
+                          ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Garis waktu
+                      Column(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: _statusColor(status),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          if (!isLast)
+                            Container(
+                              width: 1,
+                              height: 30,
+                              color: const Color(0xFFE5E7EB),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    mulai == selesai
+                                        ? mulai
+                                        : '$mulai – $selesai',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF1F2937),
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFF6366F1,
+                                    ).withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '$hari hr',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF6366F1),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _statusColor(
+                                      status,
+                                    ).withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    _statusLabel(status),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: _statusColor(status),
+                                    ),
+                                  ),
+                                ),
+                                if (catatan.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      catatan,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      }).toList(),
+    );
   }
 }

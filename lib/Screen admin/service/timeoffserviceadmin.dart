@@ -75,6 +75,84 @@ class TimeOffAdminService {
     }
   }
 
+  // Set kuota semua tipe sekaligus
+  static Future<ApiResponse<bool>> setUserQuotaAll({
+    required String adminId,
+    required String userId,
+    required int year,
+    required int annualDays,
+    required int birthDays,
+    required int bereavDays,
+  }) async {
+    try {
+      final token = await _getToken();
+
+      if (token == null || token.isEmpty) {
+        return ApiResponse<bool>(
+          success: false,
+          message: 'Token tidak ditemukan. Silakan login ulang.',
+          data: false,
+        );
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/timeoff/admin/set-user-quota'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: json.encode({
+              'adminId': adminId,
+              'userId': userId,
+              'year': year,
+              'annualDays': annualDays,
+              'birthDays': birthDays,
+              'bereavDays': bereavDays,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final body = json.decode(response.body);
+
+      final success = body['success'] == true || body['Success'] == true;
+      final message =
+          (body['message'] ?? body['Message'] ?? 'Response tidak valid')
+              .toString();
+
+      if (response.statusCode == 200 && success) {
+        return ApiResponse<bool>(success: true, message: message, data: true);
+      }
+
+      return ApiResponse<bool>(success: false, message: message, data: false);
+    } catch (e) {
+      return ApiResponse<bool>(
+        success: false,
+        message: 'Gagal menyimpan kuota: $e',
+        data: false,
+      );
+    }
+  }
+
+  // Ambil detail karyawan: kuota + riwayat izin
+  static Future<Map<String, dynamic>> getEmployeeDetail({
+    required String adminId,
+    required String userId,
+    required int year,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseURL$adminEndpoint/employee-detail'),
+        headers: await _getHeaders(),
+        body: jsonEncode({'adminId': adminId, 'userId': userId, 'year': year}),
+      );
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      return json;
+    } catch (e) {
+      return {'success': false, 'message': 'Koneksi bermasalah: $e'};
+    }
+  }
+
   // Get all time offs for admin
   static Future<ApiResponse<List<AdminTimeOffData>>> getAllTimeOffs({
     required String adminId,
@@ -242,7 +320,7 @@ class TimeOffAdminService {
     try {
       final url = Uri.parse('$baseURL$adminEndpoint/users');
 
-      final requestBody = AdminStatisticsRequest();
+      final requestBody = AdminStatisticsRequest(adminId: adminId);
 
       final response = await http.post(
         url,
@@ -268,6 +346,52 @@ class TimeOffAdminService {
       }
     } catch (e) {
       return ApiResponse<List<UserWithTimeOffs>>(
+        success: false,
+        message: 'Koneksi bermasalah: ${e.toString()}',
+        data: null,
+      );
+    }
+  }
+
+  static Future<ApiResponse<Map<String, dynamic>>> setUserAnnualQuota({
+    required String adminId,
+    required String userId,
+    required int year,
+    required int quotaDays,
+  }) async {
+    try {
+      final url = Uri.parse('$baseURL$adminEndpoint/set-user-quota');
+
+      final response = await http.post(
+        url,
+        headers: await _getHeaders(),
+        body: jsonEncode({
+          'adminId': adminId,
+          'userId': userId,
+          'year': year,
+          'quotaDays': quotaDays,
+        }),
+      );
+
+      final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return ApiResponse<Map<String, dynamic>>.fromJson(
+          jsonResponse,
+          (data) => data as Map<String, dynamic>? ?? {},
+        );
+      } else {
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          message:
+              jsonResponse['message'] ??
+              jsonResponse['Message'] ??
+              'Gagal menyimpan kuota cuti',
+          data: null,
+        );
+      }
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
         success: false,
         message: 'Koneksi bermasalah: ${e.toString()}',
         data: null,

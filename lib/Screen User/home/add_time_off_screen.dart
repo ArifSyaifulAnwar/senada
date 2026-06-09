@@ -1751,7 +1751,9 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
       initialDate: isStart
           ? (_tanggalMulai ?? DateTime.now())
           : (_tanggalSelesai ?? _tanggalMulai ?? DateTime.now()),
-      firstDate: DateTime.now().subtract(const Duration(days: 7)),
+      firstDate: _isEditMode
+          ? DateTime(2020)
+          : DateTime.now().subtract(const Duration(days: 90)),
       lastDate: DateTime.now().add(const Duration(days: 365)),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(

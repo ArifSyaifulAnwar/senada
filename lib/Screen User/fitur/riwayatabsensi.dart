@@ -4,6 +4,9 @@ import 'package:absensikaryawan/Services/attendance_service.dart';
 import 'package:absensikaryawan/models/attendancemodel.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../Screen HRD/doa_karyawan_screen.dart';
 
 // ── helper ──────────────────────────────────────────────────────────
 bool _isWideScreen(BuildContext context) =>
@@ -20,6 +23,8 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
   final AttendanceService _attendanceService = AttendanceService();
 
   bool isLoading = false;
+  bool _canInputDoa = false;
+  String? _currentUserId;
   String errorMessage = '';
   String selectedTimeRange = '1 Tahun Terakhir';
   DateTimeRange? customDateRange;
@@ -40,10 +45,37 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
   void initState() {
     super.initState();
     _loadInitialData();
+    _loadCurrentUserAndDoaAccess();
   }
 
   Future<void> _loadInitialData() async {
     await _loadAttendanceHistory(refresh: true);
+  }
+
+  Future<void> _loadCurrentUserAndDoaAccess() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = prefs.getString('UserID');
+
+      bool canInput = false;
+
+      if (uid != null && uid.isNotEmpty) {
+        canInput = await DoaService.canInputDoa(uid);
+      }
+
+      if (mounted) {
+        setState(() {
+          _currentUserId = uid;
+          _canInputDoa = canInput;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _canInputDoa = false;
+        });
+      }
+    }
   }
 
   Map<String, DateTime> _calculateDateRange(String timeRange) {
@@ -438,6 +470,37 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
       elevation: 0,
       centerTitle: true,
       actions: [
+        if (_canInputDoa)
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            child: IconButton(
+              tooltip: 'Input Doa',
+              icon: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.volunteer_activism,
+                  color: Color(0xFF10B981),
+                  size: 20,
+                ),
+              ),
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        DoaKaryawanScreen(initialHrdUserId: _currentUserId),
+                  ),
+                );
+
+                await _refreshData();
+              },
+            ),
+          ),
+
         Container(
           margin: const EdgeInsets.only(right: 16),
           child: IconButton(
