@@ -4,7 +4,6 @@
 import 'dart:io' show File, Directory, Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:typed_data';
-
 import 'package:absensikaryawan/Services/time_off_file_service.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
@@ -14,7 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-
+import 'package:absensikaryawan/Services/web_download.dart';
 import 'add_time_off_screen.dart';
 import 'dl_laporan_screen.dart';
 
@@ -500,7 +499,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     }
   }
 
-
   // ── File icon helpers ─────────────────────────────────────────────────────
 
   IconData _getFileIcon(TimeOffFileItem file) {
@@ -639,6 +637,70 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     );
   }
 
+  Future<void> _exportFormulirUser(TimeOffModel timeOff) async {
+    if (timeOff.id == null) {
+      _showSnackBar('ID pengajuan tidak valid', isError: true);
+      return;
+    }
+
+    final status = timeOff.status.toLowerCase();
+
+    if (status != 'approved' && status != 'disetujui') {
+      _showSnackBar(
+        'Formulir hanya bisa diexport setelah pengajuan disetujui',
+        isError: true,
+      );
+      return;
+    }
+
+    try {
+      _showSnackBar('Membuat formulir PDF...', isError: false);
+
+      final res = await TimeOffService.exportTimeOffFormUser(
+        timeOffId: timeOff.id!,
+        userId: widget.userId,
+      );
+
+      if (!res.success || res.data == null) {
+        _showSnackBar(res.message, isError: true);
+        return;
+      }
+
+      final safeJenis = _safeFileName(timeOff.jenisTimeOff);
+      final fileName =
+          'Formulir_${safeJenis}_${widget.userId}_${timeOff.id}.pdf';
+
+      if (kIsWeb) {
+        downloadFileWeb(res.data!, fileName);
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+
+        await file.writeAsBytes(res.data!);
+
+        final result = await OpenFile.open(file.path);
+
+        if (result.type != ResultType.done) {
+          _showSnackBar(
+            'Tidak dapat membuka PDF: ${result.message}',
+            isError: true,
+          );
+          return;
+        }
+      }
+
+      _showSnackBar('Formulir PDF berhasil diexport', isError: false);
+    } catch (e) {
+      _showSnackBar('Gagal export formulir PDF: $e', isError: true);
+    }
+  }
+
+  String _safeFileName(String value) {
+    return value
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '_')
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '');
+  }
   // ── Mobile layout ─────────────────────────────────────────────────────────
 
   Widget _buildMobileLayout() {
@@ -1746,6 +1808,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
             ],
 
             // ── Alasan penolakan ──────────────────────────────────────
+            // ── Alasan penolakan ──────────────────────────────────────
             if (timeOff.status.toLowerCase() == 'rejected' &&
                 timeOff.rejectionReason != null &&
                 timeOff.rejectionReason!.isNotEmpty) ...[
@@ -1792,6 +1855,32 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ],
+
+            // ── Export Formulir ───────────────────────────────────────
+            if (timeOff.status.toLowerCase() == 'approved' ||
+                timeOff.status.toLowerCase() == 'disetujui') ...[
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _exportFormulirUser(timeOff),
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                  label: const Text(
+                    'Export Formulir PDF',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFEF4444),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
               ),
             ],

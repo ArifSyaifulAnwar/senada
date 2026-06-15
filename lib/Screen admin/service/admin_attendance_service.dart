@@ -398,7 +398,7 @@ class AdminAttendanceService {
       final response = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/admin/attendance/notify-belum-absen-wa'),
         body: jsonEncode(request),
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 120));
 
       if (response.statusCode == 200) {
         final jsonData = jsonDecode(response.body) as Map<String, dynamic>;

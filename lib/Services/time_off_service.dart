@@ -1,8 +1,8 @@
-// Services/time_off_service.dart — FULL REPLACE
 // FIX: submitTimeOff & updateTimeOff sekarang bisa kirim file via BYTES
 // (aman untuk web + mobile). Sebelumnya hanya pakai dart:io File yang
 // di-guard !kIsWeb sehingga di web file tidak pernah terkirim.
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
 import 'package:http/http.dart' as http;
@@ -31,6 +31,56 @@ class TimeOffService {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<ApiResponse<Uint8List>> exportTimeOffFormUser({
+    required int timeOffId,
+    required String userId,
+  }) async {
+    try {
+      final token = await _getToken();
+
+      if (token == null || token.isEmpty) {
+        return ApiResponse<Uint8List>(
+          success: false,
+          message: 'Token tidak ditemukan. Silakan login ulang.',
+          data: null,
+        );
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseURL$_base/export-form'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'timeOffId': timeOffId, 'userId': userId}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        return ApiResponse<Uint8List>(
+          success: true,
+          message: 'Formulir berhasil diexport',
+          data: response.bodyBytes,
+        );
+      }
+
+      String msg = 'Gagal export formulir';
+      try {
+        final body = jsonDecode(response.body);
+        msg = (body['message'] ?? body['Message'] ?? msg).toString();
+      } catch (_) {}
+
+      return ApiResponse<Uint8List>(success: false, message: msg, data: null);
+    } catch (e) {
+      return ApiResponse<Uint8List>(
+        success: false,
+        message: 'Koneksi bermasalah: $e',
+        data: null,
+      );
     }
   }
 

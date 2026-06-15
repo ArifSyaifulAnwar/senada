@@ -2661,7 +2661,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                         )
                       else
                         GestureDetector(
-                          onTap: _analyticsData.isEmpty
+                          onTap:
+                              _analyticsData.isEmpty ||
+                                  _loadingAnalytics ||
+                                  isExporting
                               ? null
                               : () => _exportAnalytics(a),
                           child: Container(
@@ -3663,43 +3666,89 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Future<void> _exportAnalytics(Map<String, dynamic> a) async {
     setState(() => isExporting = true);
+
     try {
       final year = DateTime.now().year;
 
+      int toInt(dynamic value) {
+        if (value == null) return 0;
+        if (value is int) return value;
+        if (value is num) return value.toInt();
+        return int.tryParse(value.toString()) ?? 0;
+      }
+
+      double toDouble(dynamic value) {
+        if (value == null) return 0.0;
+        if (value is double) return value;
+        if (value is num) return value.toDouble();
+        return double.tryParse(value.toString()) ?? 0.0;
+      }
+
+      final deptStats = Map<String, int>.from(
+        ((a['deptStats'] as Map?) ?? {}).map(
+          (key, value) => MapEntry(key.toString(), toInt(value)),
+        ),
+      );
+
+      final deptRate = Map<String, double>.from(
+        ((a['deptRate'] as Map?) ?? {}).map(
+          (key, value) => MapEntry(key.toString(), toDouble(value)),
+        ),
+      );
+
+      final performers = (a['performers'] is List)
+          ? List<_PerfData>.from(a['performers'] as List)
+          : <_PerfData>[];
+
       final sb = StringBuffer();
+
       sb.writeln('\uFEFFLAPORAN ANALITIK ABSENSI HRD');
       sb.writeln(
         'Tanggal Export,${DateFormat('dd MMM yyyy HH:mm', 'id_ID').format(DateTime.now())}',
       );
-      sb.writeln('Periode,Tahun $year');
+
+      final periodText = _selectedAnalyticsPeriod == null
+          ? 'Tahun $year'
+          : '${_selectedAnalyticsPeriod!.bulanLabel} (${DateFormat('dd MMM yyyy', 'id_ID').format(_selectedAnalyticsPeriod!.tanggalMulai)} - ${DateFormat('dd MMM yyyy', 'id_ID').format(_selectedAnalyticsPeriod!.tanggalSelesai)})';
+
+      sb.writeln('Periode,$periodText');
       sb.writeln('');
 
       sb.writeln('RINGKASAN');
-      sb.writeln('Total Record,${a['totalRecords']}');
-      sb.writeln('Total Hadir,${a['totalHadir']}');
-      sb.writeln('Tepat Waktu,${a['tepatWaktu']}');
-      sb.writeln('Terlambat,${a['terlambat']}');
-      sb.writeln('Tidak Hadir,${a['tidakHadir']}');
-      sb.writeln('Cuti,${a['cuti']}');
-      final avgMin = (a['avgWorkingMinutes'] as num).toDouble();
+      sb.writeln('Total Record,${toInt(a['totalRecords'])}');
+      sb.writeln('Hari Kerja Berjalan,${toInt(a['effectiveWorkDays'])}');
+      sb.writeln('Total Hadir,${toInt(a['totalHadir'])}');
+      sb.writeln('Tepat Waktu,${toInt(a['tepatWaktu'])}');
+      sb.writeln('Terlambat,${toInt(a['terlambat'])}');
+      sb.writeln('Tidak Hadir,${toInt(a['tidakHadir'])}');
+      sb.writeln('Izin / Cuti,${toInt(a['cuti'])}');
+
+      final avgMin = toDouble(a['avgWorkingMinutes']);
+      final totalOvertimeMinutes = toDouble(a['totalOvertimeMinutes']);
+
       sb.writeln('Rata-rata Jam Kerja,${(avgMin / 60).toStringAsFixed(1)} jam');
       sb.writeln(
-        'Total Lembur,${((a['totalOvertimeMinutes'] as int) / 60).toStringAsFixed(1)} jam',
+        'Total Lembur,${totalOvertimeMinutes.toStringAsFixed(0)} menit',
       );
       sb.writeln('');
 
       sb.writeln('ANALISIS PER DEPARTEMEN');
       sb.writeln('Departemen,Jumlah Record,Tingkat Kehadiran (%)');
-      final ds = a['deptStats'] as Map<String, int>;
-      final dr = a['deptRate'] as Map<String, double>;
-      ds.forEach((dept, count) {
-        final rate = dr[dept] ?? 0;
-        sb.writeln('${_csv(dept)},$count,${rate.toStringAsFixed(1)}');
-      });
+
+      if (deptStats.isEmpty) {
+        sb.writeln('Tidak ada data,0,0.0');
+      } else {
+        deptStats.forEach((dept, count) {
+          final rate = deptRate[dept] ?? 0.0;
+          sb.writeln('${_csv(dept)},$count,${rate.toStringAsFixed(1)}');
+        });
+      }
+
       sb.writeln('');
 
-      final allPerf = List<_PerfData>.from(a['performers'] as List<_PerfData>)
+      final allPerf = performers
         ..sort((x, y) => x.name.toLowerCase().compareTo(y.name.toLowerCase()));
+
       sb.writeln('REKAP PER KARYAWAN (${allPerf.length} orang)');
       sb.writeln(
         'Nama,Departemen,Hari Kerja Berjalan,Hadir,Tepat Waktu,Terlambat,Tidak Hadir,Persentase Kehadiran (%)',
@@ -3707,25 +3756,15 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       for (final p in allPerf) {
         sb.writeln(
-          '${_csv(p.name)},${_csv(p.department ?? "-")},${p.effectiveWorkDays},${p.hadir},${p.tepat},${p.terlambat},${p.tidakHadir},${p.attendancePercent.toStringAsFixed(1)}',
+          '${_csv(p.name)},'
+          '${_csv(p.department ?? "-")},'
+          '${p.effectiveWorkDays},'
+          '${p.hadir},'
+          '${p.tepat},'
+          '${p.terlambat},'
+          '${p.tidakHadir},'
+          '${p.attendancePercent.toStringAsFixed(1)}',
         );
-      }
-      sb.writeln('');
-
-      final daily = (a['dailyHadir'] as Map<String, int>).entries.toList()
-        ..sort((x, y) => x.key.compareTo(y.key));
-      sb.writeln('REKAP HARIAN');
-      sb.writeln('Tanggal,Jumlah Hadir');
-      for (final e in daily) {
-        sb.writeln('${e.key},${e.value}');
-      }
-      sb.writeln('');
-
-      final problematic = a['problematic'] as List<Employee>;
-      sb.writeln('KARYAWAN PERLU PERHATIAN (${problematic.length} orang)');
-      sb.writeln('Nama,Departemen');
-      for (final e in problematic) {
-        sb.writeln('${_csv(e.name)},${_csv(e.department ?? "-")}');
       }
 
       final bytes = Uint8List.fromList(utf8.encode(sb.toString()));
@@ -3734,6 +3773,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       if (kIsWeb) {
         downloadFileWeb(bytes, fileName);
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -3743,7 +3783,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             ),
           );
         }
-        setState(() => isExporting = false);
+
         return;
       }
 
@@ -3752,19 +3792,27 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         final permission = info.version.sdkInt >= 33
             ? Permission.photos
             : Permission.storage;
+
         var status = await permission.status;
-        if (status.isDenied || status.isPermanentlyDenied)
+
+        if (status.isDenied || status.isPermanentlyDenied) {
           status = await permission.request();
+        }
+
         if (!status.isGranted) {
           _showErrorSnackBar('Izin penyimpanan diperlukan untuk export');
-          setState(() => isExporting = false);
           return;
         }
       }
 
       final dir = await getExternalStorageDirectory();
-      if (dir == null) throw Exception('Tidak dapat mengakses direktori');
+
+      if (dir == null) {
+        throw Exception('Tidak dapat mengakses direktori');
+      }
+
       final path = '${dir.path}/$fileName';
+
       File(path)
         ..createSync(recursive: true)
         ..writeAsBytesSync(bytes);
@@ -3787,12 +3835,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             ],
           ),
         );
-        if (open == true) await OpenFile.open(path);
+
+        if (open == true) {
+          await OpenFile.open(path);
+        }
       }
     } catch (e) {
-      if (mounted) _showErrorSnackBar('Gagal export analitik: $e');
+      if (mounted) {
+        _showErrorSnackBar('Gagal export analitik: $e');
+      }
     } finally {
-      if (mounted) setState(() => isExporting = false);
+      if (mounted) {
+        setState(() => isExporting = false);
+      }
     }
   }
   // ── Semua widget lainnya sama persis dengan aslinya ───────────────

@@ -141,15 +141,213 @@ class TimeOffAdminService {
     required int year,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseURL$adminEndpoint/employee-detail'),
-        headers: await _getHeaders(),
-        body: jsonEncode({'adminId': adminId, 'userId': userId, 'year': year}),
-      );
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      return json;
+      final response = await http
+          .post(
+            Uri.parse('$baseURL$adminEndpoint/employee-detail'),
+            headers: await _getHeaders(),
+            body: jsonEncode({
+              'adminId': adminId,
+              'userId': userId,
+
+              // kirim semua versi agar aman dengan model C#
+              'year': year,
+              'tahun': year,
+              'Tahun': year,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.body.isEmpty) {
+        return {
+          'success': false,
+          'message': 'Response kosong dari server',
+          'quotas': [],
+          'history': [],
+        };
+      }
+
+      final root = jsonDecode(response.body) as Map<String, dynamic>;
+
+      final success = root['success'] == true || root['Success'] == true;
+      final message = (root['message'] ?? root['Message'] ?? '').toString();
+
+      final data = root['data'] ?? root['Data'] ?? root;
+
+      List<dynamic> quotas = [];
+      List<dynamic> history = [];
+
+      if (data is Map<String, dynamic>) {
+        quotas =
+            (data['quotas'] ??
+                    data['Quotas'] ??
+                    data['quota'] ??
+                    data['Quota'] ??
+                    [])
+                as List<dynamic>;
+
+        history =
+            (data['history'] ??
+                    data['History'] ??
+                    data['histories'] ??
+                    data['Histories'] ??
+                    [])
+                as List<dynamic>;
+      }
+
+      Map<String, dynamic> normalizeQuota(dynamic e) {
+        final q = e as Map<String, dynamic>;
+        return {
+          'userId': q['userId'] ?? q['UserId'] ?? q['userid'],
+          'tahun': q['tahun'] ?? q['Tahun'],
+          'quotaType': q['quotaType'] ?? q['QuotaType'] ?? q['quota_type'],
+          'quotaName': q['quotaName'] ?? q['QuotaName'] ?? q['quota_name'],
+          'quotaAwal': q['quotaAwal'] ?? q['QuotaAwal'] ?? q['quota_awal'] ?? 0,
+          'quotaTerpakai':
+              q['quotaTerpakai'] ??
+              q['QuotaTerpakai'] ??
+              q['quota_terpakai'] ??
+              0,
+          'quotaSisa': q['quotaSisa'] ?? q['QuotaSisa'] ?? q['quota_sisa'] ?? 0,
+        };
+      }
+
+      Map<String, dynamic> normalizeHistory(dynamic e) {
+        final h = e as Map<String, dynamic>;
+        return {
+          'id': h['id'] ?? h['Id'] ?? 0,
+          'userId': h['userId'] ?? h['UserId'] ?? h['userid'],
+          'jenisTimeOff':
+              h['jenisTimeOff'] ?? h['JenisTimeOff'] ?? h['jenis_timeoff'],
+          'tanggalMulai':
+              h['tanggalMulai'] ?? h['TanggalMulai'] ?? h['tanggal_mulai'],
+          'tanggalSelesai':
+              h['tanggalSelesai'] ??
+              h['TanggalSelesai'] ??
+              h['tanggal_selesai'],
+          'totalHari': h['totalHari'] ?? h['TotalHari'] ?? h['total_hari'] ?? 0,
+          'status': h['status'] ?? h['Status'] ?? '',
+          'createdAt': h['createdAt'] ?? h['CreatedAt'] ?? h['created_at'],
+          'approvedAt': h['approvedAt'] ?? h['ApprovedAt'] ?? h['approved_at'],
+          'usesQuota':
+              h['usesQuota'] ?? h['UsesQuota'] ?? h['uses_quota'] ?? false,
+          'quotaType': h['quotaType'] ?? h['QuotaType'] ?? h['quota_type'],
+          'catatan': h['catatan'] ?? h['Catatan'],
+        };
+      }
+
+      return {
+        'success': success,
+        'message': message,
+        'quotas': quotas.map(normalizeQuota).toList(),
+        'history': history.map(normalizeHistory).toList(),
+      };
     } catch (e) {
-      return {'success': false, 'message': 'Koneksi bermasalah: $e'};
+      return {
+        'success': false,
+        'message': 'Koneksi bermasalah: $e',
+        'quotas': [],
+        'history': [],
+      };
+    }
+  }
+
+  static Future<ApiResponse<Uint8List>> exportTimeOffForm({
+    required int timeOffId,
+    required String adminId,
+  }) async {
+    try {
+      final token = await _getToken();
+
+      if (token == null || token.isEmpty) {
+        return ApiResponse<Uint8List>(
+          success: false,
+          message: 'Token tidak ditemukan. Silakan login ulang.',
+          data: null,
+        );
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseURL$adminEndpoint/export-form'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'timeOffId': timeOffId, 'adminId': adminId}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        return ApiResponse<Uint8List>(
+          success: true,
+          message: 'Formulir berhasil diexport',
+          data: response.bodyBytes,
+        );
+      }
+
+      String msg = 'Gagal export formulir';
+      try {
+        final body = jsonDecode(response.body);
+        msg = (body['message'] ?? body['Message'] ?? msg).toString();
+      } catch (_) {}
+
+      return ApiResponse<Uint8List>(success: false, message: msg, data: null);
+    } catch (e) {
+      return ApiResponse<Uint8List>(
+        success: false,
+        message: 'Koneksi bermasalah: $e',
+        data: null,
+      );
+    }
+  }
+
+  static Future<ApiResponse<Uint8List>> exportTimeOffFormAdmin({
+    required int timeOffId,
+    required String adminId,
+  }) async {
+    try {
+      final token = await _getToken();
+
+      if (token == null || token.isEmpty) {
+        return ApiResponse<Uint8List>(
+          success: false,
+          message: 'Token tidak ditemukan. Silakan login ulang.',
+          data: null,
+        );
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseURL$adminEndpoint/export-form'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'timeOffId': timeOffId, 'adminId': adminId}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        return ApiResponse<Uint8List>(
+          success: true,
+          message: 'Formulir berhasil diexport',
+          data: response.bodyBytes,
+        );
+      }
+
+      String msg = 'Gagal export formulir';
+      try {
+        final body = jsonDecode(response.body);
+        msg = (body['message'] ?? body['Message'] ?? msg).toString();
+      } catch (_) {}
+
+      return ApiResponse<Uint8List>(success: false, message: msg, data: null);
+    } catch (e) {
+      return ApiResponse<Uint8List>(
+        success: false,
+        message: 'Koneksi bermasalah: $e',
+        data: null,
+      );
     }
   }
 

@@ -79,6 +79,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
   final List<String> _statusOptions = [
     'Semua Status',
+    'Pending',
     'Pending HRD',
     'Pending Director',
     'Approved',
@@ -194,10 +195,11 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       userId: user.userId,
       year: year,
     ).then((data) {
-      final quotas = data['quotas'] as List<dynamic>? ?? [];
+      final quotas = List<Map<String, dynamic>>.from(data['quotas'] ?? []);
       for (final q in quotas) {
         final qt = (q['quotaType'] ?? '').toString();
         final qa = (q['quotaAwal'] as num?)?.toInt() ?? 0;
+
         if (qt == 'annual') annualCtrl.text = qa.toString();
         if (qt == 'birth_leave') birthCtrl.text = qa.toString();
         if (qt == 'bereavement') bereavCtrl.text = qa.toString();
@@ -1945,36 +1947,46 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     ),
   );
 
-  Widget _buildStatusFilter() => DropdownButtonFormField<String>(
-    value: _selectedStatus,
-    decoration: InputDecoration(
-      labelText: 'Status',
-      labelStyle: TextStyle(fontSize: _fs(12)),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      isDense: true,
-    ),
-    style: TextStyle(fontSize: _fs(13), color: Colors.black),
-    items: _statusOptions
-        .map(
-          (s) => DropdownMenuItem(
-            value: s == 'Semua Status' ? null : s,
-            child: Text(
-              s == 'Semua Status'
-                  ? s
-                  : TimeOffAdminService.getStatusDisplayName(s),
-              overflow: TextOverflow.ellipsis,
-            ),
+  Widget _buildStatusFilter() {
+    final validValues = _statusOptions
+        .where((s) => s != 'Semua Status')
+        .toSet();
+
+    final safeValue = validValues.contains(_selectedStatus)
+        ? _selectedStatus
+        : null;
+
+    return DropdownButtonFormField<String>(
+      value: safeValue,
+      decoration: InputDecoration(
+        labelText: 'Status',
+        labelStyle: TextStyle(fontSize: _fs(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        isDense: true,
+      ),
+      style: TextStyle(fontSize: _fs(13), color: Colors.black),
+      items: _statusOptions.map((s) {
+        final value = s == 'Semua Status' ? null : s;
+
+        return DropdownMenuItem<String>(
+          value: value,
+          child: Text(
+            s == 'Semua Status'
+                ? s
+                : TimeOffAdminService.getStatusDisplayName(s),
+            overflow: TextOverflow.ellipsis,
           ),
-        )
-        .toList(),
-    onChanged: (v) {
-      setState(() {
-        _selectedStatus = v;
-        _applyFilters();
-      });
-    },
-  );
+        );
+      }).toList(),
+      onChanged: (v) {
+        setState(() {
+          _selectedStatus = v;
+          _applyFilters();
+        });
+      },
+    );
+  }
 
   Widget _buildDepartmentFilter() => DropdownButtonFormField<String>(
     value: _selectedDepartment,
@@ -3248,14 +3260,17 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
             .first
             .key;
 
-  void _navFilter(String filter) {
-    setState(() => _webTabIndex = 1);
-    _tabController.animateTo(1);
+  void _navFilter(String status) {
     setState(() {
-      _selectedStatus = filter == 'all' ? null : filter;
-      _selectedUserId = null;
-      _selectedDepartment = null;
-      _searchController.clear();
+      _webTabIndex = 1;
+      _tabController.animateTo(1);
+
+      if (status.toLowerCase() == 'all') {
+        _selectedStatus = null;
+      } else {
+        _selectedStatus = status;
+      }
+
       _applyFilters();
     });
   }
@@ -3380,6 +3395,55 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     _reviewNotesController.dispose();
     _reviewNotesFocusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _exportFormulirHrd() async {
+    if (widget.item.status.toLowerCase() != 'approved') {
+      _snack(
+        'Formulir hanya bisa diexport setelah pengajuan disetujui',
+        err: true,
+      );
+      return;
+    }
+
+    try {
+      setState(() => _isProcessing = true);
+
+      final res = await TimeOffAdminService.exportTimeOffFormAdmin(
+        timeOffId: widget.item.id,
+        adminId: widget.currentHRDId,
+      );
+
+      if (!res.success || res.data == null) {
+        _snack(res.message, err: true);
+        return;
+      }
+
+      final safeName = widget.item.userName.replaceAll(' ', '_');
+      final safeJenis = widget.item.jenisTimeOff.replaceAll(' ', '_');
+      final fileName =
+          'Formulir_${safeJenis}_${safeName}_${widget.item.id}.pdf'; // ← .pdf
+
+      if (kIsWeb) {
+        downloadFileWeb(res.data!, fileName);
+      } else {
+        // Mobile: buka PDF viewer
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+        await file.writeAsBytes(res.data!);
+        final result = await OpenFile.open(file.path);
+        if (result.type != ResultType.done) {
+          _snack('Tidak dapat membuka PDF: ${result.message}', err: true);
+          return;
+        }
+      }
+
+      _snack('Formulir PDF berhasil diexport', err: false);
+    } catch (e) {
+      _snack('Gagal export formulir: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
   }
 
   Future<String?> _getToken() async {
@@ -4407,12 +4471,48 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
   );
 
   Widget _buildActionButtons() {
-    if (widget.item.status != 'Pending') return const SizedBox();
+    final status = widget.item.status.toLowerCase();
+
+    // Kalau sudah approved, tampilkan tombol export formulir
+    if (status == 'approved' || status == 'disetujui') {
+      return SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _isProcessing ? null : _exportFormulirHrd,
+          icon: const Icon(
+            Icons.picture_as_pdf_rounded,
+            size: 18,
+          ), // ← ganti icon
+          label: const Text(
+            'Export Formulir PDF', // ← ganti label
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFEF4444), // ← merah untuk PDF
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            elevation: 0,
+          ),
+        ),
+      );
+    }
+
+    // Kalau bukan pending, tidak ada tombol action
+    if (status != 'pending' &&
+        status != 'pending hrd' &&
+        status != 'pending director') {
+      return const SizedBox.shrink();
+    }
+
+    // Kalau masih pending, tampilkan tombol tolak/setujui
     return Row(
       children: [
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: () => _reviewTimeOff('Rejected'),
+            onPressed: _isProcessing ? null : () => _reviewTimeOff('Rejected'),
             icon: const Icon(Icons.close, size: 16),
             label: const Text('Tolak'),
             style: OutlinedButton.styleFrom(
@@ -4428,7 +4528,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: () => _reviewTimeOff('Approved'),
+            onPressed: _isProcessing ? null : () => _reviewTimeOff('Approved'),
             icon: const Icon(Icons.check, size: 16),
             label: const Text('Setujui'),
             style: ElevatedButton.styleFrom(
