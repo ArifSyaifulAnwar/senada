@@ -4472,8 +4472,6 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
 
   Widget _buildActionButtons() {
     final status = widget.item.status.toLowerCase();
-
-    // Kalau sudah approved, tampilkan tombol export formulir
     if (status == 'approved' || status == 'disetujui') {
       return SizedBox(
         width: double.infinity,
@@ -4484,7 +4482,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
             size: 18,
           ), // ← ganti icon
           label: const Text(
-            'Export Formulir PDF', // ← ganti label
+            'Export Formulir PDF',
             style: TextStyle(fontWeight: FontWeight.w600),
           ),
           style: ElevatedButton.styleFrom(

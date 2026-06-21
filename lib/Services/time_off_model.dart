@@ -22,7 +22,7 @@ class TimeOffModel {
   final int? fileSize;
   final String? fileType;
 
-  // DL specific
+  // DL specific — existing
   final String? jenisPekerjaan;
   final String? rabType;
   final double? nominalUangKantor;
@@ -35,8 +35,23 @@ class TimeOffModel {
   final String? laporanFileName;
   final String? anggaranFileName;
   final List<ReimbursementItem>? reimbursementItems;
-  final List<TimeOffFileItem>? files; // multi-file
+  final List<TimeOffFileItem>? files;
   final bool? requiresDirectorApproval;
+
+  // DL specific — NEW (Fase Final)
+  final String? headName;
+  final String? headJobPosition;
+  final String? financeUserId;
+  final String? financeName;
+  final String? financeJobPosition;
+  final String? financeApprovalStatus;
+  final String? laporanHeadStatus;
+  final String? laporanHrdStatus;
+  final String? transferFileName;
+  final DateTime? transferUploadedAt;
+  final String? suratTugasPath;
+  final String? formBiayaPath;
+  final String? orgTarget;
 
   const TimeOffModel({
     this.id,
@@ -70,12 +85,23 @@ class TimeOffModel {
     this.reimbursementItems,
     this.files,
     this.requiresDirectorApproval,
+    // NEW
+    this.headName,
+    this.headJobPosition,
+    this.financeUserId,
+    this.financeName,
+    this.financeJobPosition,
+    this.financeApprovalStatus,
+    this.laporanHeadStatus,
+    this.laporanHrdStatus,
+    this.transferFileName,
+    this.transferUploadedAt,
+    this.suratTugasPath,
+    this.formBiayaPath,
+    this.orgTarget,
   });
 
-  // Helper: cek camelCase, PascalCase, dan snake_case sekaligus
   static dynamic _f(Map<String, dynamic> j, String camel, String snake) {
-    // camel = 'tanggalMulai', snake = 'tanggal_mulai'
-    // Juga cek PascalCase: 'TanggalMulai'
     final pascal = camel[0].toUpperCase() + camel.substring(1);
     return j[camel] ?? j[pascal] ?? j[snake];
   }
@@ -104,7 +130,7 @@ class TimeOffModel {
     filePath: _f(json, 'filePath', 'file_path')?.toString(),
     fileSize: (_f(json, 'fileSize', 'file_size') as num?)?.toInt(),
     fileType: _f(json, 'fileType', 'file_type')?.toString(),
-    // DL
+    // DL existing
     jenisPekerjaan: _f(json, 'jenisPekerjaan', 'jenis_pekerjaan')?.toString(),
     rabType: _f(json, 'rabType', 'rab_type')?.toString(),
     nominalUangKantor:
@@ -138,21 +164,67 @@ class TimeOffModel {
       'anggaranFileName',
       'anggaran_file_name',
     )?.toString(),
-    reimbursementItems: json['reimbursementItems'] != null
-        ? (json['reimbursementItems'] as List)
-              .map((e) => ReimbursementItem.fromJson(e as Map<String, dynamic>))
-              .toList()
-        : null,
-    // multi-file: baca dari kolom 'files' (JSON array dari SP)
-    files: json['files'] != null
-        ? (json['files'] as List)
-              .map((e) => TimeOffFileItem.fromJson(e as Map<String, dynamic>))
-              .toList()
-        : null,
+    reimbursementItems: (() {
+      // C# return PascalCase: ReimbursementItems
+      final raw = json['ReimbursementItems'] ?? json['reimbursementItems'];
+      if (raw == null) return null;
+      return (raw as List)
+          .map((e) => ReimbursementItem.fromJson(e as Map<String, dynamic>))
+          .toList();
+    })(),
+    // ── FIX: parse Files dari C# (PascalCase) atau files (camelCase) ──────
+    files: (() {
+      // C# return PascalCase: Files
+      final raw = json['Files'] ?? json['files'];
+      if (raw == null) return null;
+      return (raw as List)
+          .map((e) => TimeOffFileItem.fromJson(e as Map<String, dynamic>))
+          .toList();
+    })(),
     requiresDirectorApproval:
         (_f(json, 'requiresDirectorApproval', 'requires_director_approval')
             as bool?) ??
         false,
+    // DL NEW
+    headName: _f(json, 'headName', 'head_name')?.toString(),
+    headJobPosition: _f(
+      json,
+      'headJobPosition',
+      'head_job_position',
+    )?.toString(),
+    financeUserId: _f(json, 'financeUserId', 'finance_userid')?.toString(),
+    financeName: _f(json, 'financeName', 'finance_name')?.toString(),
+    financeJobPosition: _f(
+      json,
+      'financeJobPosition',
+      'finance_job_position',
+    )?.toString(),
+    financeApprovalStatus: _f(
+      json,
+      'financeApprovalStatus',
+      'finance_approval_status',
+    )?.toString(),
+    laporanHeadStatus: _f(
+      json,
+      'laporanHeadStatus',
+      'laporan_head_status',
+    )?.toString(),
+    laporanHrdStatus: _f(
+      json,
+      'laporanHrdStatus',
+      'laporan_hrd_status',
+    )?.toString(),
+    transferFileName: _f(
+      json,
+      'transferFileName',
+      'transfer_file_name',
+    )?.toString(),
+    transferUploadedAt: _parseDate(
+      _f(json, 'transferUploadedAt', 'transfer_uploaded_at'),
+    ),
+    suratTugasPath: _f(json, 'suratTugasPath', 'surat_tugas_path')?.toString(),
+    formBiayaPath: _f(json, 'formBiayaPath', 'form_biaya_path')?.toString(),
+    orgTarget: _f(json, 'orgTarget', 'org_target')?.toString(),
   );
 
   static DateTime? _parseDate(dynamic val) {
@@ -160,7 +232,6 @@ class TimeOffModel {
     return DateTime.tryParse(val.toString());
   }
 
-  // Non-nullable versi — untuk field wajib ada tanggalnya
   static DateTime _parseDateRequired(dynamic val) {
     if (val == null) return DateTime.now();
     return DateTime.tryParse(val.toString()) ?? DateTime.now();
@@ -170,27 +241,22 @@ class TimeOffModel {
   bool get needsLaporan =>
       isDinasLuar && status == 'Approved' && laporanStatus == null;
   bool get isMenungguManager => status == 'Menunggu Manager';
+  bool get isMenungguOrg => status == 'Menunggu Org';
+  bool get isPendingHrd => status == 'Pending HRD';
+  bool get isPendingDirector => status == 'Pending Director';
+  bool get isPendingFinance => status == 'Pending Finance';
+  bool get isMenungguLaporan => status == 'Menunggu Laporan';
+  bool get isMenungguVerifikasiHead => status == 'Menunggu Verifikasi Head';
+  bool get isMenungguVerifikasiHrd => status == 'Menunggu Verifikasi HRD';
+  bool get isMenungguTransfer => status == 'Menunggu Transfer';
+  bool get isApproved => status == 'Approved';
+  bool get isRejected => status == 'Rejected';
+  bool get requiresDirector => requiresDirectorApproval == true;
 
-  /// Semua file: gabungan files tabel baru + file lama (backward compat)
-  List<TimeOffFileItem> get allFiles {
-    final list = <TimeOffFileItem>[];
-    // file dari tabel baru
-    if (files != null) list.addAll(files!);
-    // file lama (kolom file_name di udt_timeoff) — hanya tampilkan jika belum ada di list baru
-    if (fileName != null && fileName!.isNotEmpty && list.isEmpty) {
-      list.add(
-        TimeOffFileItem(
-          id: 0,
-          timeOffId: id ?? 0,
-          fileName: fileName!,
-          fileSize: fileSize,
-          fileType: fileType,
-          urutan: 1,
-        ),
-      );
-    }
-    return list;
-  }
+  bool get adaBiaya => rabType != null && rabType!.isNotEmpty;
+  bool get hasSuratTugas =>
+      suratTugasPath != null && suratTugasPath!.isNotEmpty;
+  bool get hasFormBiaya => formBiayaPath != null && formBiayaPath!.isNotEmpty;
 
   String get statusLabel {
     switch (status) {
@@ -203,9 +269,17 @@ class TimeOffModel {
       case 'Menunggu Manager':
         return 'Menunggu Manager';
       case 'Menunggu Org':
-        return 'Menunggu Divisi';
+        return 'Menunggu Head Divisi';
       case 'Menunggu Laporan':
-        return 'Menunggu Laporan';
+        return 'Upload Laporan';
+      case 'Pending Finance':
+        return 'Menunggu Finance';
+      case 'Menunggu Verifikasi Head':
+        return 'Verifikasi Head';
+      case 'Menunggu Verifikasi HRD':
+        return 'Verifikasi HRD';
+      case 'Menunggu Transfer':
+        return 'Menunggu Transfer';
       case 'Approved':
         return 'Disetujui';
       case 'Rejected':
@@ -217,12 +291,28 @@ class TimeOffModel {
     }
   }
 
-  // ── Status helpers ────────────────────────────────────────────────────────────
-  bool get isPendingHrd => status == 'Pending HRD';
-  bool get isPendingDirector => status == 'Pending Director';
-  bool get isApproved => status == 'Approved';
-  bool get isRejected => status == 'Rejected';
-  bool get requiresDirector => requiresDirectorApproval == true;
+  List<TimeOffFileItem> get allFiles {
+    final list = <TimeOffFileItem>[];
+
+    // Tambah semua file dari C# (sudah include file lama via fallback di repository)
+    if (files != null) list.addAll(files!);
+
+    // Safety fallback: kalau files null/kosong tapi ada fileName lama
+    if (list.isEmpty && fileName != null && fileName!.isNotEmpty) {
+      list.add(
+        TimeOffFileItem(
+          id: 0,
+          timeOffId: id ?? 0,
+          fileName: fileName!,
+          fileSize: fileSize,
+          fileType: fileType,
+          urutan: 1,
+        ),
+      );
+    }
+
+    return list;
+  }
 }
 
 // ── Reimbursement item ────────────────────────────────────────────────────────
@@ -285,7 +375,9 @@ class TimeOffFileItem {
             (json['fileName'] ?? json['FileName'] ?? json['file_name'] ?? '')
                 as String,
         fileSize:
-            (json['fileSize'] ?? json['FileSize'] ?? json['file_size']) as int?,
+            ((json['fileSize'] ?? json['FileSize'] ?? json['file_size'])
+                    as num?)
+                ?.toInt(),
         fileType: (json['fileType'] ?? json['FileType'] ?? json['file_type'])
             ?.toString(),
         urutan: (json['urutan'] ?? json['Urutan'] ?? 1) as int,
@@ -322,7 +414,6 @@ class TimeOffRequest {
   final DateTime tanggalSelesai;
   final String? catatan;
   final File? receiptFile;
-  // DL
   final String? jenisPekerjaan;
   final String? rabType;
   final double? nominalUangKantor;
@@ -350,7 +441,6 @@ class UpdateTimeOffRequest {
   final DateTime tanggalSelesai;
   final String? catatan;
   final File? receiptFile;
-  // DL
   final String? jenisPekerjaan;
   final String? rabType;
   final double? nominalUangKantor;
@@ -374,12 +464,8 @@ class UpdateTimeOffRequest {
 class DlLaporanRequest {
   final int timeOffId;
   final String userId;
-
-  // Mobile: File path
   final File? laporanFile;
   final File? anggaranFile;
-
-  // Web / all platform: bytes
   final Uint8List? laporanBytes;
   final Uint8List? anggaranBytes;
   final String? laporanFileName;
@@ -397,7 +483,6 @@ class DlLaporanRequest {
   });
 }
 
-/// Upload satu atau lebih file ke time off yang sudah ada
 class UploadTimeOffFilesRequest {
   final int timeOffId;
   final String userId;
@@ -410,7 +495,6 @@ class UploadTimeOffFilesRequest {
   });
 }
 
-/// Hapus satu file dari time off
 class DeleteTimeOffFileRequest {
   final int fileId;
   final int timeOffId;
@@ -449,7 +533,6 @@ class TimeOffListResponse {
   });
 
   factory TimeOffListResponse.fromJson(Map<String, dynamic> json) {
-    // Handle PascalCase, camelCase — .NET biasanya return PascalCase
     final rawList = (json['Data'] ?? json['data']) as List? ?? [];
     return TimeOffListResponse(
       data: rawList

@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/timeoffhrd.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/asset_screen.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/liveattendanceadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
@@ -1182,7 +1183,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     ),
     ServiceIconData(
       icon: Icons.groups_rounded,
-      label: 'Persetujuan Divisi',
+      label: 'Persetujuan',
       color: const Color(0xFF0EA5E9),
       badge: _pendingOrgCount,
       onTap: () async {
@@ -1204,7 +1205,13 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       icon: Icons.inventory,
       label: 'Asset',
       color: const Color(0xFF607D8B),
-      onTap: _showComingSoonDialog,
+      onTap: () {
+        final uid = _profileDisplay?.userId ?? _userID ?? '';
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => AssetScreen(userId: uid)),
+        );
+      },
     ),
   ];
 

@@ -1,6 +1,7 @@
 // Screen User/home/home_screen.dart — FULL REPLACE
 // ignore_for_file: unnecessary_brace_in_string_interps, unused_local_variable, unused_element, unused_field, deprecated_member_use, use_build_context_synchronously
 import 'dart:convert';
+import 'package:absensikaryawan/Screen%20User/fitur/asset_screen.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/liveattendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/notifikasi.dart';
@@ -714,7 +715,7 @@ class _HomePageState extends State<HomeScreen> {
                 .withOpacity(0.2),
             elevation: (_hasCheckedOut || _isWeekendHome) ? 1 : 4,
             text: _isWeekendHome
-                ? 'Hari ${_keteranganHariHome} — Tidak Bisa Absen'
+                ? 'Hari ${_keteranganHariHome} - Tidak Bisa Absen'
                 : _getSliderText(),
             textStyle: TextStyle(
               color: (_hasCheckedOut || _isWeekendHome)
@@ -801,7 +802,7 @@ class _HomePageState extends State<HomeScreen> {
       ),
       _buildServiceIconData(
         Icons.groups_rounded,
-        "Persetujuan Divisi",
+        "Persetujuan",
         const Color(0xFF0EA5E9),
         badge: _pendingOrgCount,
         onTap: () async {
@@ -826,7 +827,13 @@ class _HomePageState extends State<HomeScreen> {
         Icons.inventory,
         "Asset",
         const Color(0xFF607D8B),
-        onTap: () => _showComingSoonDialog(context),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                AssetScreen(userId: _profileDisplay?.userId ?? userID ?? ''),
+          ),
+        ),
       ),
     ];
 
@@ -860,16 +867,14 @@ class _HomePageState extends State<HomeScreen> {
 
           LayoutBuilder(
             builder: (context, constraints) {
-              final width = constraints.maxWidth;
-
               if (isWeb) {
                 return Wrap(
                   spacing: 28,
-                  runSpacing: 16,
+                  runSpacing: 18,
                   children: allServices.map((s) {
                     return SizedBox(
-                      width: 90,
-                      height: 78,
+                      width: 92,
+                      height: 92, // FIX: sebelumnya 78, terlalu pendek
                       child: _buildServiceItemUser(s, isWeb: true),
                     );
                   }).toList(),
@@ -884,7 +889,7 @@ class _HomePageState extends State<HomeScreen> {
                   crossAxisCount: 3,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 14,
-                  childAspectRatio: 1.05,
+                  childAspectRatio: 0.95, // FIX: lebih aman untuk teks 2 baris
                 ),
                 itemBuilder: (context, index) {
                   return _buildServiceItemUser(
@@ -901,16 +906,16 @@ class _HomePageState extends State<HomeScreen> {
   }
 
   Widget _buildServiceItemUser(ServiceIconData s, {required bool isWeb}) {
-    final double iconBoxSize = isWeb ? 48 : 50;
-    final double iconSize = isWeb ? 23 : 24;
-    final double fontSize = isWeb ? 11 : 11;
+    final double iconBoxSize = isWeb ? 46 : 48;
+    final double iconSize = isWeb ? 22 : 23;
+    final double fontSize = isWeb ? 10.5 : 10.5;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: s.onTap,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.max,
         children: [
           Stack(
             clipBehavior: Clip.none,
@@ -953,19 +958,21 @@ class _HomePageState extends State<HomeScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 7),
-          Text(
-            s.label,
-            style: TextStyle(
-              fontSize: fontSize,
-              height: 1.15,
-              fontWeight: FontWeight.w500,
-              color: const Color(0xFF374151),
+          const SizedBox(height: 6),
+          Flexible(
+            child: Text(
+              s.label,
+              style: TextStyle(
+                fontSize: fontSize,
+                height: 1.12,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFF374151),
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              softWrap: true,
             ),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            softWrap: true,
           ),
         ],
       ),

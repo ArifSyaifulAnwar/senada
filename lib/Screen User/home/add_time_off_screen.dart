@@ -1,5 +1,5 @@
 // screens/add_time_off_screen.dart — FULL FINAL
-// ignore_for_file: use_build_context_synchronously, deprecated_member_use, curly_braces_in_flow_control_structures
+// ignore_for_file: avoid_print, use_build_context_synchronously, deprecated_member_use, curly_braces_in_flow_control_structures
 
 import 'dart:io' show File;
 import 'dart:typed_data';
@@ -14,7 +14,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
-
 import '../fitur/ajukanreimbursement.dart';
 
 bool _isWideScreen(BuildContext ctx) => MediaQuery.of(ctx).size.width >= 768;
@@ -199,6 +198,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
 
     setState(() => _isLoading = true);
     try {
+      // ── Build reimbursement items ─────────────────────────────────────────
       final reimburseItems = _selectedRabType == 'reimbursement'
           ? _reimburseRows
                 .where((r) => r.namaCtrl.text.trim().isNotEmpty)
@@ -234,18 +234,24 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           ? _pendingFiles.first
           : null;
 
-      // File path hanya untuk fallback mobile (tidak dipakai kalau bytes ada)
+      List<int>? firstBytes = firstPending?.bytes;
+      String? firstName = firstPending?.name;
+
+      // Mobile fallback: baca dari path kalau bytes null
+      if (firstPending != null && firstBytes == null && !kIsWeb) {
+        try {
+          firstBytes = await File(firstPending.xfile.path).readAsBytes();
+        } catch (_) {}
+      }
+
       File? firstFile;
-      if (firstPending != null && !kIsWeb) {
+      if (firstPending != null && firstBytes == null && !kIsWeb) {
         firstFile = File(firstPending.xfile.path);
       }
 
-      // bytes & nama file pertama (sumber utama yang dikirim ke server)
-      final List<int>? firstBytes = firstPending?.bytes;
-      final String? firstName = firstPending?.name;
-
       int? newTimeOffId;
 
+      // ── Submit atau Update ────────────────────────────────────────────────
       if (_isEditMode) {
         final req = UpdateTimeOffRequest(
           id: widget.editData!.id!,
@@ -302,19 +308,34 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
         await _showSuccessNotif(newTimeOffId.toString());
       }
 
-      // ── File ke-2 dst via multi-file endpoint ─────────────────────────────
-      // Catatan: uploadFiles saat ini pakai dart:io File → mobile saja.
-      // Di web, file ke-2 dst belum terkirim (butuh versi bytes).
+      // ── File ke-2 dst: kirim via BYTES (web + mobile, tanpa guard kIsWeb) ─
       final extraFiles = _isEditMode
           ? _pendingFiles
           : _pendingFiles.skip(1).toList();
-      if (extraFiles.isNotEmpty && !kIsWeb) {
-        final uploadReq = UploadTimeOffFilesRequest(
-          timeOffId: newTimeOffId,
-          userId: widget.userId,
-          files: extraFiles.map((f) => File(f.xfile.path)).toList(),
-        );
-        await TimeOffFileService.uploadFiles(uploadReq);
+
+      if (extraFiles.isNotEmpty) {
+        final fileMaps = <Map<String, dynamic>>[];
+
+        for (final f in extraFiles) {
+          if (f.bytes != null && f.bytes!.isNotEmpty) {
+            // Web & mobile: bytes sudah ada dari saat pick
+            fileMaps.add({'bytes': f.bytes!, 'name': f.name});
+          } else if (!kIsWeb) {
+            // Mobile fallback: baca bytes dari path
+            try {
+              final bytes = await File(f.xfile.path).readAsBytes();
+              fileMaps.add({'bytes': bytes, 'name': f.name});
+            } catch (_) {}
+          }
+        }
+
+        if (fileMaps.isNotEmpty) {
+          await TimeOffFileService.uploadFilesBytes(
+            timeOffId: newTimeOffId,
+            userId: widget.userId,
+            files: fileMaps,
+          );
+        }
       }
 
       Navigator.of(context).pop(true);
@@ -1240,7 +1261,43 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
   }
 
   Widget _buildRabChip(String? value, String label) => GestureDetector(
-    onTap: () => setState(() => _selectedRabType = value),
+    onTap: () => setState(() {
+      _selectedRabType = value;
+
+      if (value == 'reimbursement') {
+        _nominalKantorCtrl.clear();
+
+        if (_reimburseRows.isEmpty) {
+          _reimburseRows.add(
+            _ReimburseRow(
+              namaCtrl: TextEditingController(),
+              nominalCtrl: TextEditingController(),
+              ketCtrl: TextEditingController(),
+            ),
+          );
+        }
+      }
+
+      if (value == 'uang_kantor') {
+        for (final r in _reimburseRows) {
+          r.namaCtrl.dispose();
+          r.nominalCtrl.dispose();
+          r.ketCtrl.dispose();
+        }
+        _reimburseRows.clear();
+      }
+
+      if (value == null) {
+        _nominalKantorCtrl.clear();
+
+        for (final r in _reimburseRows) {
+          r.namaCtrl.dispose();
+          r.nominalCtrl.dispose();
+          r.ketCtrl.dispose();
+        }
+        _reimburseRows.clear();
+      }
+    }),
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(

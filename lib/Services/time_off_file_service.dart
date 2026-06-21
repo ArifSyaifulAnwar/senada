@@ -38,6 +38,73 @@ class TimeOffFileService {
     return {'Authorization': 'bearer $tok'};
   }
 
+  static Future<ApiResponse<List<TimeOffFileItem>>> uploadFilesBytes({
+    required int timeOffId,
+    required String userId,
+    required List<Map<String, dynamic>> files,
+  }) async {
+    try {
+      final url = Uri.parse('$baseURL$_base/upload');
+      final mr = http.MultipartRequest('POST', url);
+      mr.headers.addAll(await _multipartHeaders());
+
+      mr.fields['timeOffId'] = timeOffId.toString();
+      mr.fields['userId'] = userId;
+
+      for (final f in files) {
+        final bytes = f['bytes'] as List<int>;
+        final name = f['name'] as String;
+        mr.files.add(
+          http.MultipartFile.fromBytes(
+            'files',
+            bytes,
+            filename: name,
+            contentType: _mediaTypeFromName(name),
+          ),
+        );
+      }
+
+      final res = await http.Response.fromStream(await mr.send());
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final uploaded = (rawData?['uploaded'] as List? ?? [])
+            .map((e) => TimeOffFileItem.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return ApiResponse(
+          success: true,
+          message: (_get(body, 'message') ?? '') as String,
+          data: uploaded,
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static MediaType _mediaTypeFromName(String name) {
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    switch (ext) {
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      default:
+        return MediaType('application', 'octet-stream');
+    }
+  }
+
   static MediaType _mediaType(String filePath) {
     final ext = p.extension(filePath).toLowerCase();
     switch (ext) {

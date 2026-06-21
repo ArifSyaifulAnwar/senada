@@ -34,6 +34,363 @@ class TimeOffService {
     }
   }
 
+  static Future<ApiResponse<List<int>>> dlDownloadLaporan({
+    required int timeOffId,
+    required String userId,
+    required String fileType, // 'laporan' atau 'anggaran'
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/dl-download-laporan'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'timeOffId': timeOffId,
+          'userId': userId,
+          'fileType': fileType,
+        }),
+      );
+      if (res.statusCode == 200) {
+        return ApiResponse(success: true, message: 'OK', data: res.bodyBytes);
+      }
+      String msg = 'Gagal download laporan';
+      try {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        msg = (_get(body, 'message') ?? msg) as String;
+      } catch (_) {}
+      return ApiResponse(success: false, message: msg);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<List<int>>> dlExportFinal({
+    required int timeOffId,
+    required String userId,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/dl-export-final'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'timeOffId': timeOffId, 'userId': userId}),
+      );
+      if (res.statusCode == 200) {
+        return ApiResponse(success: true, message: 'OK', data: res.bodyBytes);
+      }
+      String msg = 'Gagal export dokumen';
+      try {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        msg = (_get(body, 'message') ?? msg) as String;
+      } catch (_) {}
+      return ApiResponse(success: false, message: msg);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<List<dynamic>>> getReimburseItems(
+    int timeOffId,
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/reimburse-items'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'timeOffId': timeOffId, 'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final raw = _get(body, 'data') as List? ?? [];
+        return ApiResponse(success: true, message: '', data: raw);
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<void>> dlHeadVerify({
+    required int timeOffId,
+    required String headUserId,
+    required String status,
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/dl-head-verify'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': timeOffId,
+          'headUserId': headUserId,
+          'status': status,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<void>> financeReview({
+    required int id,
+    required String status,
+    required String financeUserId,
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/finance-review'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': id,
+          'status': status,
+          'financeUserId': financeUserId,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<List<PendingOrgItem>>> getPendingFinance(
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/pending-finance'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final rawList = rawData?['items'] as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: rawList
+              .map((e) => PendingOrgItem.fromJson(e as Map<String, dynamic>))
+              .toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<void>> dlHrdVerify({
+    required int timeOffId,
+    required String hrdUserId,
+    required String status,
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/dl-hrd-verify'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': timeOffId,
+          'hrdUserId': hrdUserId,
+          'status': status,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<void>> dlUploadTransfer({
+    required int timeOffId,
+    required String financeUserId,
+    required List<int> fileBytes,
+    required String fileName,
+  }) async {
+    try {
+      final url = Uri.parse('$baseURL$_base/dl-upload-transfer');
+      final mr = http.MultipartRequest('POST', url);
+      mr.headers.addAll(await _multipartHeaders());
+      mr.fields['timeOffId'] = timeOffId.toString();
+      mr.fields['financeUserId'] = financeUserId;
+      mr.files.add(
+        http.MultipartFile.fromBytes(
+          'transferFile',
+          fileBytes,
+          filename: fileName,
+          contentType: _mediaTypeFromName(fileName),
+        ),
+      );
+      final res = await http.Response.fromStream(await mr.send());
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  static Future<ApiResponse<List<PendingOrgItem>>> getPendingHeadVerify(
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/pending-head-verify'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final rawList = rawData?['items'] as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: rawList
+              .map((e) => PendingOrgItem.fromJson(e as Map<String, dynamic>))
+              .toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── PENDING HRD VERIFY — list untuk HRD ──────────────────────────────────
+  static Future<ApiResponse<List<PendingOrgItem>>> getPendingHrdVerify(
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/pending-hrd-verify'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final rawList = rawData?['items'] as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: rawList
+              .map((e) => PendingOrgItem.fromJson(e as Map<String, dynamic>))
+              .toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── PENDING TRANSFER — list untuk Finance ────────────────────────────────
+  static Future<ApiResponse<List<PendingOrgItem>>> getPendingTransfer(
+    String userId,
+  ) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/pending-transfer'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      if (res.body.isEmpty) {
+        return ApiResponse(success: false, message: 'Response kosong');
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final rawData = _get(body, 'data') as Map<String, dynamic>?;
+        final rawList = rawData?['items'] as List? ?? [];
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: rawList
+              .map((e) => PendingOrgItem.fromJson(e as Map<String, dynamic>))
+              .toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  // ── DL DOWNLOAD DOC — download Surat Tugas / Form Biaya / Template Laporan
+  static Future<ApiResponse<List<int>>> dlDownloadDoc({
+    required int timeOffId,
+    required String userId,
+    required String
+    docType, // 'surat_tugas' | 'form_biaya' | 'template_laporan'
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/dl-download-doc'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'timeOffId': timeOffId,
+          'userId': userId,
+          'docType': docType,
+        }),
+      );
+      if (res.statusCode == 200) {
+        return ApiResponse(success: true, message: 'OK', data: res.bodyBytes);
+      }
+      String msg = 'Gagal download dokumen';
+      try {
+        final body = jsonDecode(res.body) as Map<String, dynamic>;
+        msg = (_get(body, 'message') ?? msg) as String;
+      } catch (_) {}
+      return ApiResponse(success: false, message: msg);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
   static Future<ApiResponse<Uint8List>> exportTimeOffFormUser({
     required int timeOffId,
     required String userId,
@@ -217,9 +574,24 @@ class TimeOffService {
   }) async {
     try {
       final url = Uri.parse('$baseURL$_base/submit');
+
       final mr = http.MultipartRequest('POST', url);
       mr.headers.addAll(await _multipartHeaders());
 
+      // ── Reimbursement untuk dimasukkan ke request JSON ───────────────
+      // PENTING: ini harus LIST, bukan jsonEncode string.
+      final List<Map<String, dynamic>>? reimbursementList =
+          request.reimbursementItems != null &&
+              request.reimbursementItems!.isNotEmpty
+          ? request.reimbursementItems!.map((e) => e.toJson()).toList()
+          : null;
+
+      // Ini hanya untuk field tambahan form-data, kalau API baca langsung dari form.
+      final String? reimbursementJson = reimbursementList != null
+          ? jsonEncode(reimbursementList)
+          : null;
+
+      // ── Data utama yang dikirim ke API ───────────────────────────────
       final reqData = {
         'userId': request.userId,
         'jenisTimeOff': _normalizeJenis(request.jenisTimeOff),
@@ -229,13 +601,30 @@ class TimeOffService {
         'jenisPekerjaan': request.jenisPekerjaan,
         'rabType': request.rabType,
         'nominalUangKantor': request.nominalUangKantor,
-        'reimbursementItems': request.reimbursementItems
-            ?.map((e) => e.toJson())
-            .toList(),
+
+        // INI YANG DIPERBAIKI:
+        // sebelumnya reimbursementJson, sekarang reimbursementList.
+        'reimbursementItems': reimbursementList,
       };
+
+      // Request utama dikirim sebagai JSON di field "request"
       mr.fields['request'] = jsonEncode(reqData);
 
-      // ── Attach file: prioritas BYTES (web + mobile), fallback File path ──
+      // Field tambahan supaya tetap aman kalau API baca form-data langsung
+      if (request.rabType != null && request.rabType!.trim().isNotEmpty) {
+        mr.fields['rabType'] = request.rabType!.trim();
+      }
+
+      if (request.nominalUangKantor != null) {
+        mr.fields['nominalUangKantor'] = request.nominalUangKantor!
+            .toStringAsFixed(0);
+      }
+
+      if (reimbursementJson != null && reimbursementJson.isNotEmpty) {
+        mr.fields['reimbursementItems'] = reimbursementJson;
+      }
+
+      // ── Attach file: prioritas BYTES untuk web + mobile ─────────────
       if (receiptBytes != null &&
           receiptBytes.isNotEmpty &&
           receiptFileName != null &&
@@ -259,25 +648,40 @@ class TimeOffService {
         );
       }
 
-      final res = await http.Response.fromStream(await mr.send());
+      final streamed = await mr.send();
+      final res = await http.Response.fromStream(streamed);
+
       if (res.body.isEmpty) {
-        return ApiResponse(success: false, message: 'Response kosong');
+        return const ApiResponse(
+          success: false,
+          message: 'Response kosong dari server',
+        );
       }
 
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (res.statusCode == 200 && _get(body, 'success') == true) {
-        return ApiResponse(
-          success: true,
-          message: (_get(body, 'message') ?? '') as String,
-          data: _get(body, 'data') as int?,
-        );
+
+      final success = _get(body, 'success') == true;
+      final message = (_get(body, 'message') ?? 'Terjadi kesalahan').toString();
+
+      if (res.statusCode == 200 && success) {
+        final rawId = _get(body, 'id') ?? _get(body, 'data');
+
+        int? newId;
+        if (rawId is int) {
+          newId = rawId;
+        } else if (rawId != null) {
+          newId = int.tryParse(rawId.toString());
+        }
+
+        return ApiResponse<int>(success: true, message: message, data: newId);
       }
-      return ApiResponse(
-        success: false,
-        message: (_get(body, 'message') ?? 'Terjadi kesalahan') as String,
-      );
+
+      return ApiResponse<int>(success: false, message: message);
     } catch (e) {
-      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+      return ApiResponse<int>(
+        success: false,
+        message: 'Koneksi bermasalah: $e',
+      );
     }
   }
 
@@ -370,8 +774,8 @@ class TimeOffService {
       mr.fields['timeOffId'] = request.timeOffId.toString();
       mr.fields['userId'] = request.userId;
 
-      // ── Laporan file ──────────────────────────────────────────────────────
-      if (request.laporanBytes != null) {
+      // ── Laporan file (WAJIB) ──────────────────────────────────────────────
+      if (request.laporanBytes != null && request.laporanBytes!.isNotEmpty) {
         mr.files.add(
           http.MultipartFile.fromBytes(
             'laporanFile',
@@ -397,8 +801,10 @@ class TimeOffService {
         );
       }
 
-      // ── Anggaran file ─────────────────────────────────────────────────────
-      if (request.anggaranBytes != null) {
+      // ── Anggaran file (OPSIONAL — hanya attach kalau ada) ────────────────
+      // Tidak return error kalau null — validasi wajib sudah di screen Flutter
+      // dan di server SP (hanya wajib kalau rab_type = reimbursement)
+      if (request.anggaranBytes != null && request.anggaranBytes!.isNotEmpty) {
         mr.files.add(
           http.MultipartFile.fromBytes(
             'anggaranFile',
@@ -417,12 +823,8 @@ class TimeOffService {
             contentType: _mediaType(aFile.path),
           ),
         );
-      } else {
-        return ApiResponse(
-          success: false,
-          message: 'File anggaran tidak tersedia',
-        );
       }
+      // Kalau null → tidak di-attach, server terima anggaranFile = NULL (aman)
 
       final res = await http.Response.fromStream(await mr.send());
       final body = jsonDecode(res.body) as Map<String, dynamic>;

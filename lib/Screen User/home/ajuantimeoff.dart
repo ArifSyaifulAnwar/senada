@@ -15,6 +15,7 @@ import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../Services/web_download_web.dart';
 import 'add_time_off_screen.dart';
 import 'dl_laporan_screen.dart';
 
@@ -258,10 +259,15 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         timeOffId,
         widget.userId,
       );
-      if (res.success && res.data != null) {
-        await _openTempFile(Uint8List.fromList(res.data!), fileName);
-      } else {
+      if (!res.success || res.data == null) {
         _showSnackBar(res.message, isError: true);
+        return;
+      }
+      final bytes = Uint8List.fromList(res.data!);
+      if (kIsWeb) {
+        downloadFileWeb(bytes, fileName);
+      } else {
+        await _openTempFile(bytes, fileName);
       }
     } catch (e) {
       _showSnackBar('Gagal membuka preview: $e', isError: true);
@@ -270,10 +276,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
 
   Future<void> _saveAndOpenFile(Uint8List fileBytes, String fileName) async {
     if (kIsWeb) {
-      _showSnackBar(
-        'File tidak dapat disimpan di web. Gunakan tombol Preview.',
-        isError: false,
-      );
+      // Di web: langsung trigger download via browser
+      downloadFileWeb(fileBytes, fileName);
       return;
     }
     try {
@@ -499,7 +503,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         return '📅';
     }
   }
-
 
   // ── File icon helpers ─────────────────────────────────────────────────────
 
@@ -1970,13 +1973,15 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     try {
       _showSnackBar('Mengunduh file...', isError: false);
       final res = await TimeOffService.downloadFile(timeOff.id!, widget.userId);
-      if (res.success && res.data != null) {
-        await _saveAndOpenFile(
-          Uint8List.fromList(res.data!),
-          timeOff.fileName!,
-        );
-      } else {
+      if (!res.success || res.data == null) {
         _showSnackBar(res.message, isError: true);
+        return;
+      }
+      final bytes = Uint8List.fromList(res.data!);
+      if (kIsWeb) {
+        downloadFileWeb(bytes, timeOff.fileName!);
+      } else {
+        await _saveAndOpenFile(bytes, timeOff.fileName!);
       }
     } catch (e) {
       _showSnackBar('Gagal mengunduh: $e', isError: true);
@@ -1991,10 +1996,15 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     try {
       _showSnackBar('Membuka preview...', isError: false);
       final res = await TimeOffService.downloadFile(timeOff.id!, widget.userId);
-      if (res.success && res.data != null) {
-        await _openTempFile(Uint8List.fromList(res.data!), timeOff.fileName!);
-      } else {
+      if (!res.success || res.data == null) {
         _showSnackBar(res.message, isError: true);
+        return;
+      }
+      final bytes = Uint8List.fromList(res.data!);
+      if (kIsWeb) {
+        downloadFileWeb(bytes, timeOff.fileName!);
+      } else {
+        await _openTempFile(bytes, timeOff.fileName!);
       }
     } catch (e) {
       _showSnackBar('Gagal membuka: $e', isError: true);

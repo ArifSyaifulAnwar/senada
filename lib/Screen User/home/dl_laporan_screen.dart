@@ -6,11 +6,14 @@ import 'dart:typed_data';
 
 import 'package:absensikaryawan/Services/time_off_model.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
+import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 
 class DlLaporanScreen extends StatefulWidget {
   final TimeOffModel timeOff;
@@ -27,19 +30,151 @@ class DlLaporanScreen extends StatefulWidget {
 }
 
 class _DlLaporanScreenState extends State<DlLaporanScreen> {
+  // ── State ─────────────────────────────────────────────────────────────────
+  late TimeOffModel _currentTimeOff; // ← data terbaru dari API
+
   _PickedFile? _laporanFile;
   _PickedFile? _anggaranFile;
   bool _isLoading = false;
+  bool _isDownloadingSuratTugas = false;
+  bool _isDownloadingFormBiaya = false;
+  bool _isDownloadingTemplate = false;
+
+  // Gunakan _currentTimeOff bukan widget.timeOff
+  bool get _adaBiaya =>
+      _currentTimeOff.rabType != null && _currentTimeOff.rabType!.isNotEmpty;
+
+  bool get _isReimbursement => _currentTimeOff.rabType == 'reimbursement';
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+    _currentTimeOff = widget.timeOff; // init dulu dari widget
+    _reloadTimeOff(); // reload fresh dari API
+  }
+
+  Future<void> _reloadTimeOff() async {
+    try {
+      final res = await TimeOffService.getMyTimeOff(widget.userId);
+      if (res.success && res.data != null && mounted) {
+        final updated = res.data!.data.firstWhere(
+          (t) => t.id == widget.timeOff.id,
+          orElse: () => widget.timeOff,
+        );
+        setState(() => _currentTimeOff = updated);
+      }
+    } catch (_) {
+      // Gagal reload → tetap pakai widget.timeOff
+    }
+  }
+
+  // ── Download docs ─────────────────────────────────────────────────────────
+
+  Future<void> _downloadSuratTugas() async {
+    setState(() => _isDownloadingSuratTugas = true);
+    try {
+      final res = await TimeOffService.dlDownloadDoc(
+        timeOffId: _currentTimeOff.id!,
+        userId: widget.userId,
+        docType: 'surat_tugas',
+      );
+      if (res.success && res.data != null) {
+        final bytes = Uint8List.fromList(res.data!);
+        final fileName = 'Surat_Tugas_DL_${_currentTimeOff.id}.pdf';
+        if (kIsWeb) {
+          downloadFileWeb(bytes, fileName);
+        } else {
+          await _openFileBytes(bytes, fileName);
+        }
+      } else {
+        _snack(res.message, err: true);
+      }
+    } catch (e) {
+      _snack('Gagal download: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isDownloadingSuratTugas = false);
+    }
+  }
+
+  Future<void> _downloadFormBiaya() async {
+    setState(() => _isDownloadingFormBiaya = true);
+    try {
+      final res = await TimeOffService.dlDownloadDoc(
+        timeOffId: _currentTimeOff.id!,
+        userId: widget.userId,
+        docType: 'form_biaya',
+      );
+      if (res.success && res.data != null) {
+        final bytes = Uint8List.fromList(res.data!);
+        final name = _isReimbursement
+            ? 'Form_Reimbursement_${_currentTimeOff.id}.docx'
+            : 'Form_Uang_Muka_${_currentTimeOff.id}.docx';
+        if (kIsWeb) {
+          downloadFileWeb(bytes, name);
+        } else {
+          await _openFileBytes(bytes, name);
+        }
+      } else {
+        _snack(res.message, err: true);
+      }
+    } catch (e) {
+      _snack('Gagal download: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isDownloadingFormBiaya = false);
+    }
+  }
+
+  Future<void> _downloadTemplateLaporan() async {
+    setState(() => _isDownloadingTemplate = true);
+    try {
+      final res = await TimeOffService.dlDownloadDoc(
+        timeOffId: _currentTimeOff.id ?? 0,
+        userId: widget.userId,
+        docType: 'template_laporan',
+      );
+      if (res.success && res.data != null) {
+        final bytes = Uint8List.fromList(res.data!);
+        final name = 'Laporan_DL_${_currentTimeOff.id}.docx';
+        if (kIsWeb) {
+          downloadFileWeb(bytes, name);
+        } else {
+          await _openFileBytes(bytes, name);
+        }
+      } else {
+        _snack(res.message, err: true);
+      }
+    } catch (e) {
+      _snack('Gagal download template: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isDownloadingTemplate = false);
+    }
+  }
+
+  Future<void> _openFileBytes(Uint8List bytes, String fileName) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+      await OpenFile.open(file.path);
+    } catch (e) {
+      _snack('Gagal membuka file: $e', err: true);
+    }
+  }
 
   // ── File picking ──────────────────────────────────────────────────────────
 
   Future<void> _pickLaporan() async {
-    final f = await _pickAnyFile('laporan kerja');
+    final f = await _pickAnyFile('laporan perjalanan dinas');
     if (f != null) setState(() => _laporanFile = f);
   }
 
   Future<void> _pickAnggaran() async {
-    final f = await _pickAnyFile('anggaran biaya');
+    final label = _isReimbursement
+        ? 'bukti pembayaran (struk/nota/foto)'
+        : 'bukti penggunaan uang kantor';
+    final f = await _pickAnyFile(label);
     if (f != null) setState(() => _anggaranFile = f);
   }
 
@@ -73,7 +208,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
               ),
             ),
             const Divider(),
-            // Kamera hanya di mobile native
             if (!kIsWeb)
               ListTile(
                 leading: Container(
@@ -118,6 +252,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                 'File Dokumen (PDF)',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
+              subtitle: const Text('Bisa gabungkan beberapa struk dalam 1 PDF'),
               onTap: () => Navigator.pop(context, 'document'),
             ),
             const SizedBox(height: 16),
@@ -129,7 +264,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     if (source == null) return null;
 
     try {
-      // ── Kamera (mobile only) ────────────────────────────────────────────
       if (source == 'camera' && !kIsWeb) {
         final img = await ImagePicker().pickImage(
           source: ImageSource.camera,
@@ -147,7 +281,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
         );
       }
 
-      // ── Galeri ──────────────────────────────────────────────────────────
       if (source == 'gallery') {
         final img = await ImagePicker().pickImage(
           source: ImageSource.gallery,
@@ -156,8 +289,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
           imageQuality: 85,
         );
         if (img == null) return null;
-        final bytes = await img
-            .readAsBytes(); // ← readAsBytes support semua platform
+        final bytes = await img.readAsBytes();
         if (!_validateSize(img.name, bytes.length)) return null;
         return _PickedFile(
           name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
@@ -166,12 +298,11 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
         );
       }
 
-      // ── Document (FilePicker) ────────────────────────────────────────────
       final r = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
         allowMultiple: false,
-        withData: true, // ← selalu minta bytes agar support web & mobile
+        withData: true,
       );
       if (r == null || r.files.isEmpty) return null;
       final f = r.files.first;
@@ -203,33 +334,37 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     return true;
   }
 
-  // ── Submit — bekerja di semua platform ───────────────────────────────────
+  // ── Submit ────────────────────────────────────────────────────────────────
 
   Future<void> _submit() async {
     if (_laporanFile == null) {
-      _snack('File laporan wajib diupload', err: true);
+      _snack('File laporan perjalanan dinas wajib diupload', err: true);
       return;
     }
-    if (_anggaranFile == null) {
-      _snack('File anggaran wajib diupload', err: true);
+    if (_adaBiaya && _anggaranFile == null) {
+      _snack(
+        _isReimbursement
+            ? 'Bukti pembayaran wajib diupload untuk Reimbursement'
+            : 'Bukti penggunaan uang kantor wajib diupload',
+        err: true,
+      );
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      // Kirim via bytes (support web & mobile)
       final req = DlLaporanRequest(
-        timeOffId: widget.timeOff.id!,
+        timeOffId: _currentTimeOff.id!,
         userId: widget.userId,
         laporanBytes: _laporanFile!.bytes,
         laporanFileName: _laporanFile!.name,
-        anggaranBytes: _anggaranFile!.bytes,
-        anggaranFileName: _anggaranFile!.name,
+        anggaranBytes: _anggaranFile?.bytes,
+        anggaranFileName: _anggaranFile?.name,
       );
       final res = await TimeOffService.submitDlLaporan(req);
       if (res.success) {
         _snack(
-          'Laporan berhasil disubmit! Status Dinas Luar menjadi Disetujui.',
+          'Laporan berhasil disubmit! Menunggu verifikasi Head Divisi.',
           err: false,
         );
         await Future.delayed(const Duration(milliseconds: 800));
@@ -248,7 +383,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final to = widget.timeOff;
+    final to = _currentTimeOff; // ← pakai _currentTimeOff bukan widget.timeOff
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -286,7 +421,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Info card
+            // ── Info DL ──────────────────────────────────────────────────────
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(20),
@@ -310,9 +445,10 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Pengajuan Dinas Luar kamu sudah disetujui. Upload laporan hasil kerja dan laporan anggaran untuk menyelesaikan proses.',
-                    style: TextStyle(
+                  Text(
+                    'Pastikan kamu sudah mengisi laporan perjalanan dinas.'
+                    '${_adaBiaya ? ' Serta upload bukti pembayaran.' : ''}',
+                    style: const TextStyle(
                       fontSize: 13,
                       color: Colors.white70,
                       height: 1.4,
@@ -327,7 +463,10 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                     ),
                     child: Column(
                       children: [
-                        _infoRow(Icons.work_outline, to.jenisPekerjaan ?? '-'),
+                        _infoRow(
+                          Icons.work_outline,
+                          to.jenisPekerjaan ?? to.orgTarget ?? '-',
+                        ),
                         const SizedBox(height: 6),
                         _infoRow(
                           Icons.calendar_today_rounded,
@@ -344,6 +483,13 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                                 : '🏢 Uang Kantor',
                           ),
                         ],
+                        if (to.headName != null) ...[
+                          const SizedBox(height: 6),
+                          _infoRow(
+                            Icons.person_outline,
+                            'Head: ${to.headName}',
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -353,7 +499,51 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
             const SizedBox(height: 20),
 
-            // Step info
+            // ── Download Surat Tugas ─────────────────────────────────────────
+            _buildDownloadCard(
+              title: 'Surat Tugas',
+              subtitle: 'Download surat tugas yang diterbitkan sistem',
+              icon: Icons.assignment_outlined,
+              color: const Color(0xFF3B82F6),
+              isLoading: _isDownloadingSuratTugas,
+              onTap: _downloadSuratTugas,
+              available: to.hasSuratTugas,
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── Download Form Biaya (hanya kalau ada biaya) ──────────────────
+            if (_adaBiaya) ...[
+              _buildDownloadCard(
+                title: _isReimbursement
+                    ? 'Form Reimbursement'
+                    : 'Form Uang Muka',
+                subtitle: _isReimbursement
+                    ? 'Form sudah terisi otomatis dari detail pengeluaran'
+                    : 'Form uang muka yang telah diajukan',
+                icon: Icons.receipt_long_outlined,
+                color: const Color(0xFF10B981),
+                isLoading: _isDownloadingFormBiaya,
+                onTap: _downloadFormBiaya,
+                available: to.hasFormBiaya,
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // ── Download Template Laporan ─────────────────────────────────────
+            _buildDownloadCard(
+              title: 'Template Laporan Perjalanan',
+              subtitle: 'Download template untuk diisi, lalu upload di bawah',
+              icon: Icons.download_outlined,
+              color: const Color(0xFF6B7280),
+              isLoading: _isDownloadingTemplate,
+              onTap: _downloadTemplateLaporan,
+              available: true,
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── Info step ────────────────────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -365,12 +555,13 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                 children: [
                   Icon(Icons.info_outline, color: Colors.amber[700], size: 18),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Setelah laporan disubmit, status Dinas Luar akan berubah menjadi Disetujui dan absensi akan dicatat.',
+                      'Setelah upload, laporan akan diverifikasi oleh Head Divisi lalu HRD.'
+                      '${_adaBiaya ? ' Finance akan melakukan transfer setelah verifikasi selesai.' : ' Absensi akan tercatat setelah verifikasi selesai.'}',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Color(0xFF92400E),
+                        color: Colors.amber[900],
                         height: 1.4,
                       ),
                     ),
@@ -381,27 +572,36 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
             const SizedBox(height: 24),
 
+            // ── Upload Laporan ───────────────────────────────────────────────
             _buildUploadCard(
-              label: 'Laporan Hasil Kerja',
-              description: 'Upload laporan / hasil pekerjaan selama Dinas Luar',
+              label: 'Laporan Perjalanan Dinas',
+              description: 'Upload laporan yang sudah kamu isi (PDF/JPG/PNG)',
               icon: Icons.description_outlined,
               color: const Color(0xFF3B82F6),
               file: _laporanFile,
               onTap: _pickLaporan,
               onRemove: () => setState(() => _laporanFile = null),
+              isRequired: true,
             ),
 
-            const SizedBox(height: 16),
-
-            _buildUploadCard(
-              label: 'Laporan Anggaran Biaya',
-              description: 'Upload rincian biaya / bukti pengeluaran selama DL',
-              icon: Icons.receipt_long_outlined,
-              color: const Color(0xFF10B981),
-              file: _anggaranFile,
-              onTap: _pickAnggaran,
-              onRemove: () => setState(() => _anggaranFile = null),
-            ),
+            // ── Upload Bukti Pembayaran (kondisional) ────────────────────────
+            if (_adaBiaya) ...[
+              const SizedBox(height: 16),
+              _buildUploadCard(
+                label: _isReimbursement
+                    ? 'Bukti Pembayaran'
+                    : 'Bukti Penggunaan Uang Kantor',
+                description: _isReimbursement
+                    ? 'Struk, nota, invoice — bisa beberapa foto atau 1 PDF gabungan'
+                    : 'Bukti pengeluaran uang yang telah diberikan kantor',
+                icon: Icons.receipt_outlined,
+                color: const Color(0xFF10B981),
+                file: _anggaranFile,
+                onTap: _pickAnggaran,
+                onRemove: () => setState(() => _anggaranFile = null),
+                isRequired: true,
+              ),
+            ],
 
             const SizedBox(height: 32),
 
@@ -463,16 +663,98 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
             const SizedBox(height: 12),
             const Center(
               child: Text(
-                'Pastikan kedua file sudah benar sebelum submit.\nLaporan tidak dapat diubah setelah disubmit.',
+                'Laporan tidak dapat diubah setelah disubmit.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF9CA3AF),
-                  height: 1.5,
-                ),
+                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
               ),
             ),
             const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Widget helpers ────────────────────────────────────────────────────────
+
+  Widget _buildDownloadCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required bool isLoading,
+    required VoidCallback onTap,
+    required bool available,
+  }) {
+    return GestureDetector(
+      onTap: available ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: available ? color.withOpacity(0.4) : Colors.grey[300]!,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: (available ? color : Colors.grey).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                color: available ? color : Colors.grey,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: available ? const Color(0xFF1F2937) : Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    available
+                        ? subtitle
+                        : 'Belum tersedia — tunggu Head Divisi approve',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: available ? Colors.grey[600] : Colors.grey[400],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (isLoading)
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: color),
+              )
+            else if (available)
+              Icon(Icons.download_rounded, color: color, size: 22)
+            else
+              Icon(Icons.lock_outline, color: Colors.grey[400], size: 20),
           ],
         ),
       ),
@@ -487,6 +769,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     required _PickedFile? file,
     required VoidCallback onTap,
     required VoidCallback onRemove,
+    bool isRequired = false,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -498,15 +781,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
               : const Color(0xFFE5E7EB),
           width: file != null ? 2 : 1,
         ),
-        boxShadow: file != null
-            ? [
-                BoxShadow(
-                  color: color.withOpacity(0.08),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : [],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -544,25 +818,27 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                               color: color,
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.red[100],
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              'WAJIB',
-                              style: TextStyle(
-                                fontSize: 9,
-                                color: Colors.red[700],
-                                fontWeight: FontWeight.w700,
+                          if (isRequired) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red[100],
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'WAJIB',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.red[700],
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                       Text(
@@ -598,10 +874,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                       decoration: BoxDecoration(
                         color: const Color(0xFFF9FAFB),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: Colors.red[200]!,
-                          style: BorderStyle.solid,
-                        ),
+                        border: Border.all(color: Colors.red[200]!),
                       ),
                       child: Column(
                         children: [
@@ -776,11 +1049,9 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
 class _PickedFile {
   final String name;
-  final Uint8List? bytes; // ← semua platform pakai bytes
+  final Uint8List? bytes;
   final int size;
-
   const _PickedFile({required this.name, this.bytes, required this.size});
-
   String get ext =>
       name.contains('.') ? name.split('.').last.toLowerCase() : '';
 }
