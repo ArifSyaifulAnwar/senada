@@ -440,60 +440,54 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   }
 
   void _applyFilters() {
-    List<AdminTimeOffData> f = _allTimeOffs;
+    // Pertahankan urutan dari API/SP:
+    // submittedAt / created_at DESC (pengajuan terbaru berada paling atas).
+    // List.from() membuat salinan agar list sumber _allTimeOffs tidak berubah.
+    List<AdminTimeOffData> f = List<AdminTimeOffData>.from(_allTimeOffs);
 
     if (_selectedStatus != null && _selectedStatus != 'Semua Status') {
       f = f.where((i) => i.status == _selectedStatus).toList();
     }
+
     if (_selectedUserId != null) {
       f = f.where((i) => i.userId == _selectedUserId).toList();
     }
+
     if (_selectedDepartment != null &&
         _selectedDepartment != 'Semua Departemen') {
       final ids = _users
           .where((u) => u.department == _selectedDepartment)
           .map((u) => u.userId)
-          .toList();
+          .toSet();
+
       f = f.where((i) => ids.contains(i.userId)).toList();
     }
 
-    // Filter periode kerja — ganti _selectedTimeRange dengan periode kalender
+    // Filter berdasarkan rentang periode kerja. Filter ini tidak mengubah
+    // urutan data yang sudah dikirim API.
     if (_selectedWorkPeriod != null) {
       final start = _selectedWorkPeriod!.tanggalMulai;
       final end = _selectedWorkPeriod!.tanggalSelesai;
+
       f = f.where((i) {
         return !i.tanggalSelesai.isBefore(start) &&
             !i.tanggalMulai.isAfter(end);
       }).toList();
     }
 
-    final kw = _searchController.text.toLowerCase();
-    if (kw.isNotEmpty) {
-      f = f
-          .where(
-            (i) =>
-                i.jenisTimeOff.toLowerCase().contains(kw) ||
-                i.userName.toLowerCase().contains(kw) ||
-                (i.catatan?.toLowerCase().contains(kw) ?? false),
-          )
-          .toList();
+    final keyword = _searchController.text.trim().toLowerCase();
+    if (keyword.isNotEmpty) {
+      f = f.where((i) {
+        return i.jenisTimeOff.toLowerCase().contains(keyword) ||
+            i.userName.toLowerCase().contains(keyword) ||
+            (i.catatan?.toLowerCase().contains(keyword) ?? false);
+      }).toList();
     }
 
-    // Sort: Pending HRD dulu → Pending Director → lainnya
-    f.sort((a, b) {
-      int priority(AdminTimeOffData x) {
-        if (x.isPendingHrd) return 0;
-        if (x.isPendingDirector) return 1;
-        if (x.status.toLowerCase() == 'pending') return 2;
-        return 3;
-      }
-
-      final pa = priority(a);
-      final pb = priority(b);
-      if (pa != pb) return pa.compareTo(pb);
-      return b.daysSinceSubmitted.compareTo(a.daysSinceSubmitted);
-    });
-
+    // Jangan lakukan f.sort() di sini.
+    // API sudah mengirim data sesuai SP: t.created_at DESC, t.id DESC.
+    // Filter where() di atas mempertahankan urutan tersebut.
+    if (!mounted) return;
     setState(() => _filteredTimeOffs = f);
   }
 
@@ -3913,9 +3907,137 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     }
   }
 
+  String _fileNameFromPath(String? path) {
+    final cleanPath = (path ?? '').trim();
+    if (cleanPath.isEmpty) return '';
+
+    return cleanPath.replaceAll('\\', '/').split('/').last.trim();
+  }
+
+  String _fileNameFromContentDisposition(String? contentDisposition) {
+    final value = (contentDisposition ?? '').trim();
+    if (value.isEmpty) return '';
+
+    // RFC 5987: attachment; filename*=UTF-8''Nama%20File.docx
+    final utf8Match = RegExp(
+      r"filename\*\s*=\s*(?:UTF-8'')?([^;]+)",
+      caseSensitive: false,
+    ).firstMatch(value);
+
+    if (utf8Match != null) {
+      final raw = utf8Match.group(1)?.trim().replaceAll('"', '') ?? '';
+      if (raw.isNotEmpty) {
+        try {
+          return Uri.decodeComponent(raw);
+        } catch (_) {
+          return raw;
+        }
+      }
+    }
+
+    // Header standar: attachment; filename="Nama File.docx"
+    final normalMatch = RegExp(
+      r'filename\s*=\s*"?([^";]+)"?',
+      caseSensitive: false,
+    ).firstMatch(value);
+
+    return normalMatch?.group(1)?.trim() ?? '';
+  }
+
+  String _extensionFromContentType(String? contentType) {
+    final mime = (contentType ?? '').toLowerCase();
+
+    if (mime.contains('application/pdf')) return '.pdf';
+
+    if (mime.contains(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )) {
+      return '.docx';
+    }
+
+    if (mime.contains('application/msword')) return '.doc';
+
+    if (mime.contains(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )) {
+      return '.xlsx';
+    }
+
+    if (mime.contains('application/vnd.ms-excel')) return '.xls';
+    if (mime.contains(
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    )) {
+      return '.pptx';
+    }
+    if (mime.contains('application/vnd.ms-powerpoint')) return '.ppt';
+    if (mime.contains('image/jpeg')) return '.jpg';
+    if (mime.contains('image/png')) return '.png';
+    if (mime.contains('image/webp')) return '.webp';
+    if (mime.contains('image/gif')) return '.gif';
+    if (mime.contains('text/plain')) return '.txt';
+    if (mime.contains('application/zip')) return '.zip';
+
+    return '';
+  }
+
+  bool _hasFileExtension(String fileName) {
+    return RegExp(r'\.[A-Za-z0-9]{1,10}$').hasMatch(fileName.trim());
+  }
+
+  String _sanitizeFileName(String fileName) {
+    var result = fileName.trim();
+
+    // Path absolut dari server tidak boleh menjadi nama file browser.
+    result = result.replaceAll('\\', '/').split('/').last;
+    result = result.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
+
+    return result.isEmpty ? 'lampiran' : result;
+  }
+
+  String _resolveDlDownloadFileName({
+    required http.Response response,
+    required String fileType,
+  }) {
+    final headerFileName = _fileNameFromContentDisposition(
+      response.headers['content-disposition'],
+    );
+
+    final modelFileName = fileType == 'laporan'
+        ? (widget.item.laporanFileName ?? '')
+        : (widget.item.anggaranFileName ?? '');
+
+    final modelFilePath = fileType == 'laporan'
+        ? widget.item.laporanFilePath
+        : widget.item.anggaranFilePath;
+
+    // Prioritas wajib: header API -> nama database -> nama dari path database.
+    // Jangan gunakan laporanDisplayFileName karena itu dapat berupa teks UI
+    // "Laporan Dinas Luar (sudah diupload)" tanpa ekstensi file.
+    var fileName = headerFileName.trim();
+    if (fileName.isEmpty) fileName = modelFileName.trim();
+    if (fileName.isEmpty) fileName = _fileNameFromPath(modelFilePath);
+
+    final extension = _extensionFromContentType(
+      response.headers['content-type'],
+    );
+
+    if (fileName.isEmpty) {
+      final prefix = fileType == 'laporan'
+          ? 'Laporan_Dinas_Luar'
+          : 'Anggaran_Dinas_Luar';
+
+      fileName = '${prefix}_${widget.item.id}$extension';
+    } else if (!_hasFileExtension(fileName) && extension.isNotEmpty) {
+      fileName = '$fileName$extension';
+    }
+
+    return _sanitizeFileName(fileName);
+  }
+
   Future<void> _downloadDlFile(String fileType) async {
     setState(() => _isDownloadingDl = true);
-    _snack('Memuat pratinjau...', err: false, dur: 1);
+    _snack('Memuat file...', err: false, dur: 1);
+
     try {
       final token = await _getToken();
       if (token == null) {
@@ -3938,54 +4060,78 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
           )
           .timeout(const Duration(seconds: 30));
 
-      if (response.statusCode == 200) {
-        final fileName = fileType == 'laporan'
-            ? (widget.item.laporanFileName ?? 'laporan.pdf')
-            : (widget.item.anggaranFileName ?? 'anggaran.pdf');
-        await _previewBytes(response.bodyBytes, fileName);
-      } else {
-        final body = response.body.isNotEmpty ? json.decode(response.body) : {};
-        _snack(
-          (body as Map)['Message'] ??
-              body['message'] ??
-              'Gagal memuat (${response.statusCode})',
-          err: true,
-        );
+      if (response.statusCode != 200) {
+        String message = 'Gagal memuat file (${response.statusCode})';
+
+        try {
+          final body = json.decode(response.body) as Map;
+          message = (body['message'] ?? body['Message'] ?? message).toString();
+        } catch (_) {}
+
+        _snack(message, err: true);
+        return;
       }
+
+      final fileName = _resolveDlDownloadFileName(
+        response: response,
+        fileType: fileType,
+      );
+
+      await _previewBytes(
+        response.bodyBytes,
+        fileName,
+        contentType: response.headers['content-type'],
+      );
     } catch (e) {
-      _snack('Error: $e', err: true);
+      _snack('Gagal mengambil laporan: $e', err: true);
     } finally {
       if (mounted) setState(() => _isDownloadingDl = false);
     }
   }
 
-  Future<void> _previewBytes(List<int> bytes, String fileName) async {
-    final ext = fileName.contains('.')
-        ? fileName.split('.').last.toLowerCase()
+  Future<void> _previewBytes(
+    List<int> bytes,
+    String fileName, {
+    String? contentType,
+  }) async {
+    final cleanFileName = _sanitizeFileName(fileName);
+    final extension = cleanFileName.contains('.')
+        ? cleanFileName.split('.').last.toLowerCase()
         : '';
-    final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(ext);
-    final isPdf = ext == 'pdf';
 
-    // Gambar → tampil langsung di dalam aplikasi (web + mobile)
+    final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(extension);
+    final isPdf =
+        extension == 'pdf' ||
+        (contentType ?? '').toLowerCase().contains('application/pdf');
+
+    // Gambar: preview langsung dalam aplikasi.
     if (isImage) {
-      await _showImagePreview(Uint8List.fromList(bytes), fileName);
+      await _showImagePreview(Uint8List.fromList(bytes), cleanFileName);
       return;
     }
 
     if (kIsWeb) {
-      // PDF / lainnya di web → buka inline di tab baru (blob), bukan download
-      final mime = isPdf ? 'application/pdf' : 'application/octet-stream';
-      openBytesInBrowser(bytes, fileName, mime);
+      // PDF dapat dilihat langsung dalam tab browser.
+      if (isPdf) {
+        openBytesInBrowser(bytes, cleanFileName, 'application/pdf');
+        return;
+      }
+
+      // DOCX/XLSX/PPTX/ZIP/dokumen lain tidak dapat dipreview browser secara
+      // stabil. Download langsung dan kirim nama file + ekstensi yang benar.
+      downloadFileWeb(Uint8List.fromList(bytes), cleanFileName);
+      _snack('File "$cleanFileName" berhasil diunduh', err: false);
       return;
     }
 
-    // Mobile → buka di viewer sistem (ini "melihat", bukan menyimpan ke unduhan)
+    // Mobile: simpan sementara lalu buka dengan aplikasi sistem.
     final tempDir = await getTemporaryDirectory();
-    final f = File('${tempDir.path}/$fileName');
-    await f.writeAsBytes(bytes);
-    final r = await OpenFile.open(f.path);
-    if (r.type != ResultType.done) {
-      _snack('Tidak dapat membuka: ${r.message}', err: true);
+    final file = File('${tempDir.path}/$cleanFileName');
+    await file.writeAsBytes(bytes, flush: true);
+
+    final result = await OpenFile.open(file.path);
+    if (result.type != ResultType.done) {
+      _snack('Tidak dapat membuka file: ${result.message}', err: true);
     }
   }
 
@@ -4519,6 +4665,8 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
   }
 
   Widget _buildDlLaporanSection() {
+    // Laporan dinyatakan tersedia bila nama FILE atau PATH file tersedia.
+    // Ini penting untuk data lama / data API yang hanya mengirim path.
     if (!widget.item.hasLaporan) {
       return _buildInfoCard(
         title: 'Laporan Dinas Luar',
@@ -4586,25 +4734,31 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
           ),
           const SizedBox(height: 10),
         ],
-        if (widget.item.laporanFileName != null)
+
+        // Tampilkan laporan bila ada nama/path file. Bila API lama belum
+        // mengirim field tersebut, fallback status workflow tetap menampilkan
+        // laporan yang sudah berhasil diupload oleh user.
+        if (widget.item.hasLaporan)
           _buildDlFileRow(
             label: 'Laporan Hasil Kerja',
-            fileName: widget.item.laporanFileName!,
+            fileName: widget.item.laporanDisplayFileName,
             fileType: 'laporan',
             color: const Color(0xFF3B82F6),
             icon: Icons.description_outlined,
           ),
-        if (widget.item.laporanFileName != null &&
-            widget.item.anggaranFileName != null)
+
+        if (widget.item.hasLaporan && widget.item.hasAnggaranFile)
           const SizedBox(height: 8),
-        if (widget.item.anggaranFileName != null)
+
+        if (widget.item.hasAnggaranFile)
           _buildDlFileRow(
             label: 'Laporan Anggaran',
-            fileName: widget.item.anggaranFileName!,
+            fileName: widget.item.anggaranDisplayFileName,
             fileType: 'anggaran',
             color: const Color(0xFF10B981),
             icon: Icons.receipt_long_outlined,
           ),
+
         if (widget.item.laporanSubmittedAt != null) ...[
           const SizedBox(height: 10),
           Row(

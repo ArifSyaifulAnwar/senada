@@ -34,6 +34,35 @@ class TimeOffService {
     }
   }
 
+  static Future<ApiResponse<void>> submitDlLaporanForm({
+    required int timeOffId,
+    required String userId,
+    required String hasilPerjalanan,
+    required String laporanKepada,
+    required String penyelesaian,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/dl-submit-laporan-form'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'timeOffId': timeOffId,
+          'userId': userId,
+          'hasilPerjalanan': hasilPerjalanan,
+          'laporanKepada': laporanKepada,
+          'penyelesaian': penyelesaian,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      return ApiResponse(
+        success: _get(body, 'success') == true,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
   static Future<ApiResponse<List<int>>> dlDownloadLaporan({
     required int timeOffId,
     required String userId,

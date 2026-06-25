@@ -1,6 +1,6 @@
 // Screen User/fitur/asset_screen.dart — FULL REPLACE
 // Terhubung ke AssetService. Kategori dinamis dari DB. Desain diperbarui.
-// ignore_for_file: deprecated_member_use
+// ignore_for_file:  deprecated_member_use
 import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -116,7 +116,7 @@ class _AssetScreenState extends State<AssetScreen>
   bool _canManageStock = false;
   bool _isHeadHrd = false;
 
-  AssetCategoryModel? _filterKategori; // filter aktif di tab Katalog
+  AssetOfficeModel? _filterOffice; // filter aktif di tab Katalog
   List<AssetOfficeModel> _offices = [];
 
   // Laporan (Head HRD only)
@@ -212,7 +212,7 @@ class _AssetScreenState extends State<AssetScreen>
     setState(() => _isLoadingCatalog = true);
     final res = await AssetService.getCatalog(
       userId: widget.userId,
-      kategoriId: _filterKategori?.id,
+      officeLocationId: _filterOffice?.id, // filter by office
     );
     if (mounted) {
       setState(() {
@@ -613,6 +613,7 @@ class _AssetScreenState extends State<AssetScreen>
         userId: widget.userId,
         catalogItems: _catalogItems,
         categories: _categories,
+        offices: _offices, // ← tambah ini
         onSubmitted: () {
           _loadCatalog();
           _loadMyRequests();
@@ -894,21 +895,37 @@ class _AssetScreenState extends State<AssetScreen>
     );
   }
 
+  List<_CatalogDisplayItem> _mergeByName(List<AssetItemModel> items) {
+    final Map<String, List<AssetItemModel>> grouped = {};
+    for (final item in items) {
+      grouped.putIfAbsent(item.namaBarang, () => []).add(item);
+    }
+    return grouped.entries
+        .map((e) => _CatalogDisplayItem.merged(e.value))
+        .toList();
+  }
+
   // ── TAB 1: Katalog ──────────────────────────────────────────────────────
   Widget _buildCatalogTab() {
+    // Kalau filter office dipilih → tampil normal per item
+    // Kalau "Semua" → merge per namaBarang, gabungkan stok per lokasi
+    final List<_CatalogDisplayItem> displayItems = _filterOffice != null
+        ? _catalogItems.map((i) => _CatalogDisplayItem.single(i)).toList()
+        : _mergeByName(_catalogItems);
+
     return RefreshIndicator(
       onRefresh: _refreshAll,
       child: CustomScrollView(
         slivers: [
-          if (_categories.isNotEmpty)
-            SliverToBoxAdapter(child: _buildCategoryFilterChips()),
+          if (_offices.isNotEmpty)
+            SliverToBoxAdapter(child: _buildOfficeFilterChips()),
           if (_isLoadingCatalog)
             const SliverFillRemaining(
               child: Center(
                 child: CircularProgressIndicator(color: Color(0xFF4F46E5)),
               ),
             )
-          else if (_catalogItems.isEmpty)
+          else if (displayItems.isEmpty)
             SliverFillRemaining(child: _buildEmptyCatalog())
           else
             SliverPadding(
@@ -916,8 +933,6 @@ class _AssetScreenState extends State<AssetScreen>
               sliver: SliverLayoutBuilder(
                 builder: (context, constraints) {
                   final width = constraints.crossAxisExtent;
-                  // Adaptif: makin lebar layar, makin banyak kolom,
-                  // supaya card tidak raksasa di web/tablet.
                   final crossAxisCount = width >= 1100
                       ? 6
                       : width >= 850
@@ -930,11 +945,8 @@ class _AssetScreenState extends State<AssetScreen>
                   const spacing = 12.0;
                   final columnWidth =
                       (width - spacing * (crossAxisCount - 1)) / crossAxisCount;
-                  // Tinggi = gambar persegi (columnWidth) + area teks tetap
-                  // (nama 1 baris + badge stok + padding). Dihitung eksplisit
-                  // supaya tidak overflow di ukuran layar manapun, beda
-                  // dengan childAspectRatio yang gampang meleset.
-                  const textAreaHeight = 62.0;
+                  const textAreaHeight =
+                      72.0; // sedikit lebih tinggi untuk info lokasi
                   final mainAxisExtent = columnWidth + textAreaHeight;
 
                   return SliverGrid(
@@ -945,8 +957,9 @@ class _AssetScreenState extends State<AssetScreen>
                       mainAxisExtent: mainAxisExtent,
                     ),
                     delegate: SliverChildBuilderDelegate(
-                      (context, i) => _buildCatalogGridCard(_catalogItems[i]),
-                      childCount: _catalogItems.length,
+                      (context, i) =>
+                          _buildCatalogGridCardDisplay(displayItems[i]),
+                      childCount: displayItems.length,
                     ),
                   );
                 },
@@ -957,7 +970,7 @@ class _AssetScreenState extends State<AssetScreen>
     );
   }
 
-  Widget _buildCategoryFilterChips() {
+  Widget _buildOfficeFilterChips() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       child: SizedBox(
@@ -965,14 +978,10 @@ class _AssetScreenState extends State<AssetScreen>
         child: ListView(
           scrollDirection: Axis.horizontal,
           children: [
-            _filterChip(
-              null,
-              'Semua',
-              const Color(0xFF4F46E5),
-              Icons.apps_rounded,
-            ),
-            ..._categories.map(
-              (c) => _filterChip(c, c.namaKategori, c.color, c.icon),
+            _officeFilterChip(null, 'Semua', Icons.apps_rounded),
+            ..._offices.map(
+              (o) =>
+                  _officeFilterChip(o, o.officeName, Icons.location_on_rounded),
             ),
           ],
         ),
@@ -980,18 +989,18 @@ class _AssetScreenState extends State<AssetScreen>
     );
   }
 
-  Widget _filterChip(
-    AssetCategoryModel? cat,
+  Widget _officeFilterChip(
+    AssetOfficeModel? office,
     String label,
-    Color color,
     IconData icon,
   ) {
-    final selected = _filterKategori?.id == cat?.id;
+    final selected = _filterOffice?.id == office?.id;
+    const color = Color(0xFF4F46E5);
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: GestureDetector(
         onTap: () {
-          setState(() => _filterKategori = cat);
+          setState(() => _filterOffice = office);
           _loadCatalog();
         },
         child: AnimatedContainer(
@@ -1073,8 +1082,8 @@ class _AssetScreenState extends State<AssetScreen>
     ),
   );
 
-  Widget _buildCatalogGridCard(AssetItemModel item) {
-    final lowStock = item.stok <= 5;
+  Widget _buildCatalogGridCardDisplay(_CatalogDisplayItem display) {
+    final item = display.primary;
     final c = item.categoryColor;
     return Container(
       decoration: BoxDecoration(
@@ -1093,12 +1102,9 @@ class _AssetScreenState extends State<AssetScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Gambar dibatasi rasio tetap (1:1), TIDAK pakai Expanded —
-          // supaya tidak ikut membesar di grid kolom sedikit / layar lebar.
           AspectRatio(
             aspectRatio: 1,
             child: Container(
-              width: double.infinity,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [c.withOpacity(0.18), c.withOpacity(0.06)],
@@ -1128,29 +1134,46 @@ class _AssetScreenState extends State<AssetScreen>
                     height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: lowStock
-                        ? const Color(0xFFFEF2F2)
-                        : const Color(0xFFF0FDF4),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'Stok ${item.stok}',
-                    style: TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                      color: lowStock
-                          ? const Color(0xFFDC2626)
-                          : const Color(0xFF16A34A),
+                const SizedBox(height: 4),
+                // Kalau merged (semua lokasi): tampil per lokasi ringkas
+                if (display.isMerged)
+                  ...display.allItems.map(
+                    (loc) => Text(
+                      '${loc.officeName ?? "-"}: ${loc.stok}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: loc.stok <= 5
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFF16A34A),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: display.isLowStock
+                          ? const Color(0xFFFEF2F2)
+                          : const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Stok ${display.totalStok}',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                        color: display.isLowStock
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFF16A34A),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -2552,12 +2575,14 @@ class _AssetRequestForm extends StatefulWidget {
   final String userId;
   final List<AssetItemModel> catalogItems;
   final List<AssetCategoryModel> categories;
+  final List<AssetOfficeModel> offices;
   final VoidCallback onSubmitted;
 
   const _AssetRequestForm({
     required this.userId,
     required this.catalogItems,
     required this.categories,
+    required this.offices,
     required this.onSubmitted,
   });
 
@@ -2567,6 +2592,7 @@ class _AssetRequestForm extends StatefulWidget {
 
 class _AssetRequestFormState extends State<_AssetRequestForm> {
   AssetCategory _kategori = AssetCategory.dipinjam;
+  AssetOfficeModel? _selectedOffice;
   AssetItemModel? _selectedItem;
   int _jumlah = 1;
   final _catatanCtrl = TextEditingController();
@@ -2578,12 +2604,19 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
     super.dispose();
   }
 
-  // Heuristik: "Diambil (habis pakai)" -> tampilkan kategori bernama mengandung "ATK"
-  // kalau ada; kalau tidak ada, tampilkan semua barang stok kecil. Simplifikasi:
-  // kategori barang sekarang dinamis, jadi filter berdasar nama kategori yang dipilih user.
-  List<AssetItemModel> get _filteredItems => widget.catalogItems;
+  List<AssetItemModel> get _filteredItems => _selectedOffice == null
+      ? []
+      : widget.catalogItems
+            .where((i) => i.officeLocationId == _selectedOffice!.id)
+            .toList();
 
   Future<void> _submit() async {
+    if (_selectedOffice == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pilih lokasi kantor terlebih dahulu')),
+      );
+      return;
+    }
     if (_selectedItem == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Pilih barang terlebih dahulu')),
@@ -2650,7 +2683,7 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
     final c = _kategori.color;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.78,
+      initialChildSize: 0.85,
       minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (_, scrollCtrl) => Container(
@@ -2660,6 +2693,7 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
         ),
         child: Column(
           children: [
+            // Handle
             Container(
               margin: const EdgeInsets.only(top: 12, bottom: 8),
               width: 40,
@@ -2669,6 +2703,7 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
+            // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
               child: Row(
@@ -2699,6 +2734,7 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                 controller: scrollCtrl,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 children: [
+                  // ── Jenis Pengajuan ────────────────────────────────────
                   const Text(
                     'Jenis Pengajuan',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
@@ -2724,20 +2760,97 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                     ],
                   ),
                   const SizedBox(height: 20),
+
+                  // ── Pilih Lokasi Kantor ────────────────────────────────
+                  const Text(
+                    'Lokasi Kantor',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Pilih kantor untuk melihat stok barang yang tersedia.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<AssetOfficeModel>(
+                        value: _selectedOffice,
+                        isExpanded: true,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        hint: Row(
+                          children: [
+                            Icon(
+                              Icons.location_on_outlined,
+                              size: 18,
+                              color: Colors.grey[400],
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Pilih lokasi kantor...',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                        items: widget.offices
+                            .map(
+                              (o) => DropdownMenuItem(
+                                value: o,
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.location_on_rounded,
+                                      size: 16,
+                                      color: Color(0xFF4F46E5),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      o.officeName,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) => setState(() {
+                          _selectedOffice = v;
+                          _selectedItem = null;
+                          _jumlah = 1;
+                        }),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── Pilih Barang ───────────────────────────────────────
                   const Text(
                     'Pilih Barang',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 10),
                   GestureDetector(
-                    onTap: _showItemPicker,
+                    onTap: _selectedOffice == null ? null : _showItemPicker,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
                         vertical: 14,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: _selectedOffice == null
+                            ? const Color(0xFFF1F5F9)
+                            : const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
@@ -2746,19 +2859,27 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                           Icon(
                             Icons.inventory_2_outlined,
                             size: 18,
-                            color: _selectedItem == null ? Colors.grey[400] : c,
+                            color: _selectedOffice == null
+                                ? Colors.grey[300]
+                                : _selectedItem == null
+                                ? Colors.grey[400]
+                                : c,
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              _selectedItem?.namaBarang ??
-                                  'Pilih barang dari katalog',
+                              _selectedOffice == null
+                                  ? 'Pilih lokasi kantor dulu'
+                                  : _selectedItem?.namaBarang ??
+                                        'Pilih barang dari katalog',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: _selectedItem == null
                                     ? FontWeight.w400
                                     : FontWeight.w700,
-                                color: _selectedItem == null
+                                color: _selectedOffice == null
+                                    ? Colors.grey[400]
+                                    : _selectedItem == null
                                     ? Colors.grey[500]
                                     : const Color(0xFF1F2937),
                               ),
@@ -2766,7 +2887,9 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                           ),
                           Icon(
                             Icons.chevron_right_rounded,
-                            color: Colors.grey[400],
+                            color: _selectedOffice == null
+                                ? Colors.grey[300]
+                                : Colors.grey[400],
                           ),
                         ],
                       ),
@@ -2776,13 +2899,28 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                     const SizedBox(height: 4),
                     Padding(
                       padding: const EdgeInsets.only(left: 4),
-                      child: Text(
-                        'Stok tersedia: ${_selectedItem!.stok}',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.location_on_outlined,
+                            size: 12,
+                            color: Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_selectedOffice?.officeName ?? "-"} • Stok tersedia: ${_selectedItem!.stok}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                   const SizedBox(height: 20),
+
+                  // ── Jumlah ─────────────────────────────────────────────
                   const Text(
                     'Jumlah',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
@@ -2811,6 +2949,8 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                     ],
                   ),
                   const SizedBox(height: 20),
+
+                  // ── Catatan ────────────────────────────────────────────
                   const Text(
                     'Catatan / Keperluan',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
@@ -2837,6 +2977,8 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                 ],
               ),
             ),
+
+            // ── Submit Button ──────────────────────────────────────────
             Container(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
               decoration: BoxDecoration(
@@ -2974,13 +3116,44 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-              child: Text(
-                'Pilih Barang',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+              child: Row(
+                children: [
+                  const Text(
+                    'Pilih Barang',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF2FF),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.location_on_rounded,
+                          size: 12,
+                          color: Color(0xFF4F46E5),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _selectedOffice?.officeName ?? '',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF4F46E5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
             const Divider(height: 1),
@@ -2989,7 +3162,7 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                   ? Padding(
                       padding: const EdgeInsets.all(24),
                       child: Text(
-                        'Tidak ada barang tersedia',
+                        'Tidak ada barang di lokasi ini',
                         style: TextStyle(fontSize: 13, color: Colors.grey[500]),
                       ),
                     )
@@ -3000,45 +3173,52 @@ class _AssetRequestFormState extends State<_AssetRequestForm> {
                       itemBuilder: (_, i) {
                         final item = _filteredItems[i];
                         final ic = item.categoryColor;
-                        return ListTile(
-                          leading: Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  ic.withOpacity(0.18),
-                                  ic.withOpacity(0.06),
-                                ],
+                        return Material(
+                          color: Colors.transparent,
+                          child: ListTile(
+                            leading: Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    ic.withOpacity(0.18),
+                                    ic.withOpacity(0.06),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: item.hasGambar
+                                  ? _AssetThumbImage(itemId: item.id)
+                                  : Icon(
+                                      item.categoryIcon,
+                                      color: ic,
+                                      size: 19,
+                                    ),
                             ),
-                            clipBehavior: Clip.antiAlias,
-                            child: item.hasGambar
-                                ? _AssetThumbImage(itemId: item.id)
-                                : Icon(item.categoryIcon, color: ic, size: 19),
-                          ),
-                          title: Text(
-                            item.namaBarang,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
+                            title: Text(
+                              item.namaBarang,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
-                          subtitle: Text(
-                            'Stok: ${item.stok}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey[500],
+                            subtitle: Text(
+                              'Stok: ${item.stok}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[500],
+                              ),
                             ),
+                            onTap: () {
+                              setState(() {
+                                _selectedItem = item;
+                                _jumlah = 1;
+                              });
+                              Navigator.pop(context);
+                            },
                           ),
-                          onTap: () {
-                            setState(() {
-                              _selectedItem = item;
-                              _jumlah = 1;
-                            });
-                            Navigator.pop(context);
-                          },
                         );
                       },
                     ),
@@ -4442,7 +4622,8 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
   final _catatanCtrl = TextEditingController();
   bool _isLoading = true;
   bool _isSaving = false;
-
+  String _searchPic = '';
+  String _searchAdmin = '';
   @override
   void initState() {
     super.initState();
@@ -4518,8 +4699,18 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
     required InventoryEligibleUserModel? selected,
     required ValueChanged<InventoryEligibleUserModel> onSelect,
     required Color color,
+    required String searchQuery,
+    required ValueChanged<String> onSearchChanged,
     String? emptyHint,
   }) {
+    final filtered = searchQuery.isEmpty
+        ? users
+        : users.where((u) {
+            final q = searchQuery.toLowerCase();
+            return u.name.toLowerCase().contains(q) ||
+                (u.jobPosition?.toLowerCase().contains(q) ?? false);
+          }).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4528,6 +4719,38 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 10),
+        // Search field
+        TextField(
+          onChanged: onSearchChanged,
+          decoration: InputDecoration(
+            hintText: 'Cari nama karyawan...',
+            hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: Colors.grey[400],
+            ),
+            filled: true,
+            fillColor: const Color(0xFFF8FAFC),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: color, width: 1.5),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         if (users.isEmpty)
           Container(
             padding: const EdgeInsets.all(14),
@@ -4553,8 +4776,18 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
               ],
             ),
           )
+        else if (filtered.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: Text(
+                'Tidak ditemukan: "$searchQuery"',
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              ),
+            ),
+          )
         else
-          ...users.map((u) {
+          ...filtered.map((u) {
             final isSelected = selected?.userId == u.userId;
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
@@ -4656,6 +4889,9 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
                           selected: _selectedPic,
                           onSelect: (u) => setState(() => _selectedPic = u),
                           color: const Color(0xFF6366F1),
+                          searchQuery: _searchPic,
+                          onSearchChanged: (v) =>
+                              setState(() => _searchPic = v),
                         ),
                         const SizedBox(height: 20),
                         _userPickerList(
@@ -4664,6 +4900,9 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
                           selected: _selectedAdmin,
                           onSelect: (u) => setState(() => _selectedAdmin = u),
                           color: const Color(0xFF0EA5E9),
+                          searchQuery: _searchAdmin,
+                          onSearchChanged: (v) =>
+                              setState(() => _searchAdmin = v),
                           emptyHint:
                               'Belum ada user dengan jabatan Admin Inventaris. Set organization karyawan terkait agar mengandung kata "Inventaris".',
                         ),
@@ -4934,4 +5173,29 @@ class _InventoryHandoverLogSheetState
       ),
     );
   }
+}
+
+class _CatalogDisplayItem {
+  final AssetItemModel primary; // untuk gambar & icon
+  final List<AssetItemModel> allItems; // semua lokasi
+  final bool isMerged;
+
+  _CatalogDisplayItem.single(AssetItemModel item)
+    : primary = item,
+      allItems = [item],
+      isMerged = false;
+
+  _CatalogDisplayItem.merged(List<AssetItemModel> items)
+    : primary = items.first,
+      allItems = items,
+      isMerged = items.length > 1;
+
+  int get totalStok => allItems.fold(0, (s, i) => s + i.stok);
+
+  String get stokLabel {
+    if (!isMerged) return 'Stok ${allItems.first.stok}';
+    return allItems.map((i) => '${i.officeName ?? "-"}: ${i.stok}').join(' • ');
+  }
+
+  bool get isLowStock => totalStok <= 5;
 }

@@ -14,7 +14,7 @@ class TimeOffAdminStatistics {
   final String formattedTotalApproved;
   final String formattedTotalProcessed;
 
-  TimeOffAdminStatistics({
+  const TimeOffAdminStatistics({
     required this.totalSubmissions,
     required this.pendingCount,
     required this.approvedCount,
@@ -28,38 +28,47 @@ class TimeOffAdminStatistics {
     required this.formattedTotalProcessed,
   });
 
+  static int _toInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
   factory TimeOffAdminStatistics.fromJson(Map<String, dynamic> json) {
     return TimeOffAdminStatistics(
-      totalSubmissions:
-          json['TotalSubmissions'] ?? json['totalSubmissions'] ?? 0,
-      pendingCount: json['PendingCount'] ?? json['pendingCount'] ?? 0,
-      approvedCount: json['ApprovedCount'] ?? json['approvedCount'] ?? 0,
-      rejectedCount: json['RejectedCount'] ?? json['rejectedCount'] ?? 0,
-      processedCount: json['ProcessedCount'] ?? json['processedCount'] ?? 0,
-      totalPendingDays:
-          json['TotalPendingDays'] ?? json['totalPendingDays'] ?? 0,
-      totalApprovedDays:
-          json['TotalApprovedDays'] ?? json['totalApprovedDays'] ?? 0,
-      totalProcessedDays:
-          json['TotalProcessedDays'] ?? json['totalProcessedDays'] ?? 0,
+      totalSubmissions: _toInt(
+        json['TotalSubmissions'] ?? json['totalSubmissions'],
+      ),
+      pendingCount: _toInt(json['PendingCount'] ?? json['pendingCount']),
+      approvedCount: _toInt(json['ApprovedCount'] ?? json['approvedCount']),
+      rejectedCount: _toInt(json['RejectedCount'] ?? json['rejectedCount']),
+      processedCount: _toInt(json['ProcessedCount'] ?? json['processedCount']),
+      totalPendingDays: _toInt(
+        json['TotalPendingDays'] ?? json['totalPendingDays'],
+      ),
+      totalApprovedDays: _toInt(
+        json['TotalApprovedDays'] ?? json['totalApprovedDays'],
+      ),
+      totalProcessedDays: _toInt(
+        json['TotalProcessedDays'] ?? json['totalProcessedDays'],
+      ),
       formattedTotalPending:
-          json['FormattedTotalPending'] ??
-          json['formattedTotalPending'] ??
+          (json['FormattedTotalPending'] ?? json['formattedTotalPending'])
+              ?.toString() ??
           '0 hari',
       formattedTotalApproved:
-          json['FormattedTotalApproved'] ??
-          json['formattedTotalApproved'] ??
+          (json['FormattedTotalApproved'] ?? json['formattedTotalApproved'])
+              ?.toString() ??
           '0 hari',
       formattedTotalProcessed:
-          json['FormattedTotalProcessed'] ??
-          json['formattedTotalProcessed'] ??
+          (json['FormattedTotalProcessed'] ?? json['formattedTotalProcessed'])
+              ?.toString() ??
           '0 hari',
     );
   }
 }
 
 class AdminTimeOffData {
-  // ── Field lama (tidak berubah) ─────────────────────────────────
   final int id;
   final String userId;
   final String userName;
@@ -84,20 +93,22 @@ class AdminTimeOffData {
   final int daysSinceSubmitted;
   final bool hasFile;
 
-  // ── Field BARU: DL ─────────────────────────────────────────────
+  // Data Dinas Luar.
   final String? jenisPekerjaan;
   final String? rabType;
   final double? nominalUangKantor;
   final String? orgTarget;
   final String? managerApprovalStatus;
 
-  // ── Field BARU: Laporan DL ─────────────────────────────────────
+  // Data laporan Dinas Luar.
   final String? laporanStatus;
   final DateTime? laporanSubmittedAt;
   final String? laporanFileName;
+  final String? laporanFilePath;
   final String? anggaranFileName;
+  final String? anggaranFilePath;
 
-  AdminTimeOffData({
+  const AdminTimeOffData({
     required this.id,
     required this.userId,
     required this.userName,
@@ -121,116 +132,219 @@ class AdminTimeOffData {
     this.fileType,
     required this.daysSinceSubmitted,
     required this.hasFile,
-    // DL
     this.jenisPekerjaan,
     this.rabType,
     this.nominalUangKantor,
     this.orgTarget,
     this.managerApprovalStatus,
-    // Laporan
     this.laporanStatus,
     this.laporanSubmittedAt,
     this.laporanFileName,
+    this.laporanFilePath,
     this.anggaranFileName,
+    this.anggaranFilePath,
   });
 
-  // Helper: cek PascalCase, camelCase, snake_case
-  static dynamic _f(Map<String, dynamic> j, String pascal, String snake) {
+  // Membaca PascalCase, camelCase, maupun snake_case dari API.
+  static dynamic _f(Map<String, dynamic> json, String pascal, String snake) {
     final camel = pascal[0].toLowerCase() + pascal.substring(1);
-    return j[pascal] ?? j[camel] ?? j[snake];
+    return json[pascal] ?? json[camel] ?? json[snake];
   }
 
-  static DateTime _parseDate(dynamic v) => v == null
-      ? DateTime.now()
-      : DateTime.tryParse(v.toString()) ?? DateTime.now();
+  static String? _toNullableString(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    if (text.isEmpty || text.toLowerCase() == 'null') return null;
+    return text;
+  }
 
-  static DateTime? _parseDateOpt(dynamic v) =>
-      v == null ? null : DateTime.tryParse(v.toString());
+  static int _toInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  static double? _toDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString());
+  }
+
+  static bool _toBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    final text = value?.toString().trim().toLowerCase();
+    return text == 'true' || text == '1' || text == 'yes';
+  }
+
+  static DateTime _parseDateRequired(dynamic value) {
+    if (value == null) return DateTime.now();
+    return DateTime.tryParse(value.toString()) ?? DateTime.now();
+  }
+
+  static DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+    return DateTime.tryParse(value.toString());
+  }
 
   factory AdminTimeOffData.fromJson(Map<String, dynamic> json) {
     return AdminTimeOffData(
-      id: (_f(json, 'Id', 'id') ?? 0) as int,
-      userId: _f(json, 'UserId', 'userid')?.toString() ?? '',
-      userName: _f(json, 'UserName', 'user_name')?.toString() ?? '',
-      userEmail: _f(json, 'UserEmail', 'user_email')?.toString() ?? '',
-      userPhone: _f(json, 'UserPhone', 'user_phone')?.toString(),
-      userJob: _f(json, 'UserJob', 'user_job')?.toString(),
-      jenisTimeOff: _f(json, 'JenisTimeOff', 'jenis_timeoff')?.toString() ?? '',
-      tanggalMulai: _parseDate(_f(json, 'TanggalMulai', 'tanggal_mulai')),
-      tanggalSelesai: _parseDate(_f(json, 'TanggalSelesai', 'tanggal_selesai')),
-      totalHari: (_f(json, 'TotalHari', 'total_hari') as num?)?.toInt() ?? 0,
-      catatan: _f(json, 'Catatan', 'catatan')?.toString(),
-      status: _f(json, 'Status', 'status')?.toString() ?? '',
-      submittedAt: _parseDate(_f(json, 'SubmittedAt', 'created_at')),
-      updatedAt: _parseDate(_f(json, 'UpdatedAt', 'updated_at')),
-      approvedBy: _f(json, 'ApprovedBy', 'approved_by')?.toString(),
-      approvedAt: _parseDateOpt(_f(json, 'ApprovedAt', 'approved_at')),
-      rejectionReason: _f(
-        json,
-        'RejectionReason',
-        'rejection_reason',
-      )?.toString(),
-      filePath: _f(json, 'FilePath', 'file_path')?.toString(),
-      fileName: _f(json, 'FileName', 'file_name')?.toString(),
-      fileSize: (_f(json, 'FileSize', 'file_size') as num?)?.toInt(),
-      fileType: _f(json, 'FileType', 'file_type')?.toString(),
-      daysSinceSubmitted:
-          (_f(json, 'DaysSinceSubmitted', 'days_since_submitted') as num?)
-              ?.toInt() ??
-          0,
-      hasFile: (_f(json, 'HasFile', 'has_file') ?? false) as bool,
-      // DL ← BARU
-      jenisPekerjaan: _f(json, 'JenisPekerjaan', 'jenis_pekerjaan')?.toString(),
-      rabType: _f(json, 'RabType', 'rab_type')?.toString(),
-      nominalUangKantor:
-          (_f(json, 'NominalUangKantor', 'nominal_uang_kantor') as num?)
-              ?.toDouble(),
-      orgTarget: _f(json, 'OrgTarget', 'org_target')?.toString(),
-      managerApprovalStatus: _f(
-        json,
-        'ManagerApprovalStatus',
-        'manager_approval_status',
-      )?.toString(),
-      // Laporan ← BARU
-      laporanStatus: _f(json, 'LaporanStatus', 'laporan_status')?.toString(),
-      laporanSubmittedAt: _parseDateOpt(
+      id: _toInt(_f(json, 'Id', 'id')),
+      userId: _toNullableString(_f(json, 'UserId', 'userid')) ?? '',
+      userName: _toNullableString(_f(json, 'UserName', 'user_name')) ?? '',
+      userEmail: _toNullableString(_f(json, 'UserEmail', 'user_email')) ?? '',
+      userPhone: _toNullableString(_f(json, 'UserPhone', 'user_phone')),
+      userJob: _toNullableString(_f(json, 'UserJob', 'user_job')),
+      jenisTimeOff:
+          _toNullableString(_f(json, 'JenisTimeOff', 'jenis_timeoff')) ?? '',
+      tanggalMulai: _parseDateRequired(
+        _f(json, 'TanggalMulai', 'tanggal_mulai'),
+      ),
+      tanggalSelesai: _parseDateRequired(
+        _f(json, 'TanggalSelesai', 'tanggal_selesai'),
+      ),
+      totalHari: _toInt(_f(json, 'TotalHari', 'total_hari')),
+      catatan: _toNullableString(_f(json, 'Catatan', 'catatan')),
+      status: _toNullableString(_f(json, 'Status', 'status')) ?? '',
+      submittedAt: _parseDateRequired(_f(json, 'SubmittedAt', 'created_at')),
+      updatedAt: _parseDateRequired(_f(json, 'UpdatedAt', 'updated_at')),
+      approvedBy: _toNullableString(_f(json, 'ApprovedBy', 'approved_by')),
+      approvedAt: _parseDate(_f(json, 'ApprovedAt', 'approved_at')),
+      rejectionReason: _toNullableString(
+        _f(json, 'RejectionReason', 'rejection_reason'),
+      ),
+      filePath: _toNullableString(_f(json, 'FilePath', 'file_path')),
+      fileName: _toNullableString(_f(json, 'FileName', 'file_name')),
+      fileSize: _toIntOrNull(_f(json, 'FileSize', 'file_size')),
+      fileType: _toNullableString(_f(json, 'FileType', 'file_type')),
+      daysSinceSubmitted: _toInt(
+        _f(json, 'DaysSinceSubmitted', 'days_since_submitted'),
+      ),
+      hasFile: _toBool(_f(json, 'HasFile', 'has_file')),
+      jenisPekerjaan: _toNullableString(
+        _f(json, 'JenisPekerjaan', 'jenis_pekerjaan'),
+      ),
+      rabType: _toNullableString(_f(json, 'RabType', 'rab_type')),
+      nominalUangKantor: _toDouble(
+        _f(json, 'NominalUangKantor', 'nominal_uang_kantor'),
+      ),
+      orgTarget: _toNullableString(_f(json, 'OrgTarget', 'org_target')),
+      managerApprovalStatus: _toNullableString(
+        _f(json, 'ManagerApprovalStatus', 'manager_approval_status'),
+      ),
+      laporanStatus: _toNullableString(
+        _f(json, 'LaporanStatus', 'laporan_status'),
+      ),
+      laporanSubmittedAt: _parseDate(
         _f(json, 'LaporanSubmittedAt', 'laporan_submitted_at'),
       ),
-      laporanFileName: _f(
-        json,
-        'LaporanFileName',
-        'laporan_file_name',
-      )?.toString(),
-      anggaranFileName: _f(
-        json,
-        'AnggaranFileName',
-        'anggaran_file_name',
-      )?.toString(),
+      laporanFileName: _toNullableString(
+        _f(json, 'LaporanFileName', 'laporan_file_name'),
+      ),
+      // WAJIB: sebelumnya dua field path ini belum dimapping.
+      laporanFilePath: _toNullableString(
+        _f(json, 'LaporanFilePath', 'laporan_file_path'),
+      ),
+      anggaranFileName: _toNullableString(
+        _f(json, 'AnggaranFileName', 'anggaran_file_name'),
+      ),
+      anggaranFilePath: _toNullableString(
+        _f(json, 'AnggaranFilePath', 'anggaran_file_path'),
+      ),
     );
   }
 
-  // ── Getters BARU ───────────────────────────────────────────────
-  bool get isDinasLuar => jenisTimeOff == 'Dinas Luar';
-  bool get hasLaporan => laporanFileName != null || anggaranFileName != null;
-  bool get isPendingHrd => status.toLowerCase() == 'pending hrd';
-  bool get isPendingDirector => status.toLowerCase() == 'pending director';
-  bool get needsReview =>
-      status.toLowerCase() == 'pending hrd' ||
-      status.toLowerCase() == 'pending director' ||
-      status.toLowerCase() == 'pending';
+  static int? _toIntOrNull(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
 
-  // ── Getters lama (dipertahankan) ───────────────────────────────
+  static bool _hasText(String? value) {
+    final text = value?.trim();
+    return text != null && text.isNotEmpty && text.toLowerCase() != 'null';
+  }
+
+  static String _fileNameFromPath(String? path, String fallback) {
+    if (!_hasText(path)) return fallback;
+    final normalized = path!.replaceAll('\\', '/');
+    final name = normalized.split('/').last.trim();
+    return name.isEmpty ? fallback : name;
+  }
+
+  bool get isDinasLuar => jenisTimeOff.trim().toLowerCase() == 'dinas luar';
+
+  bool get hasLaporanFile =>
+      _hasText(laporanFileName) || _hasText(laporanFilePath);
+
+  bool get hasAnggaranFile =>
+      _hasText(anggaranFileName) || _hasText(anggaranFilePath);
+
+  // Beberapa response API lama tidak mengirim laporanFilePath/laporanFileName,
+  // walaupun user sudah berhasil upload. Pada alur Dinas Luar, status di bawah
+  // hanya mungkin terjadi setelah laporan dikirim ke Head/HRD.
+  bool get hasLaporanWorkflowSubmitted {
+    final laporan = (laporanStatus ?? '').trim().toLowerCase();
+    final currentStatus = status.trim().toLowerCase();
+
+    if (laporan == 'submitted' ||
+        laporan == 'approved' ||
+        laporan == 'verified' ||
+        laporan == 'completed') {
+      return true;
+    }
+
+    return currentStatus == 'pending laporan head' ||
+        currentStatus == 'pending laporan hrd' ||
+        currentStatus == 'menunggu verifikasi head' ||
+        currentStatus == 'menunggu verifikasi hrd' ||
+        currentStatus == 'laporan disetujui' ||
+        currentStatus == 'laporan approved';
+  }
+
+  // Laporan dianggap tersedia bila ada nama/path file ATAU status workflow
+  // membuktikan upload laporan sudah berhasil dilakukan.
+  bool get hasLaporan =>
+      hasLaporanFile || hasAnggaranFile || hasLaporanWorkflowSubmitted;
+
+  String get laporanDisplayFileName {
+    if (_hasText(laporanFileName)) return laporanFileName!.trim();
+    return _fileNameFromPath(
+      laporanFilePath,
+      hasLaporanWorkflowSubmitted
+          ? 'Laporan Dinas Luar (sudah diupload)'
+          : 'Laporan Dinas Luar',
+    );
+  }
+
+  String get anggaranDisplayFileName {
+    if (_hasText(anggaranFileName)) return anggaranFileName!.trim();
+    return _fileNameFromPath(anggaranFilePath, 'Laporan Anggaran');
+  }
+
+  bool get isPendingHrd => status.trim().toLowerCase() == 'pending hrd';
+  bool get isPendingDirector =>
+      status.trim().toLowerCase() == 'pending director';
+  bool get needsReview {
+    final normalized = status.trim().toLowerCase();
+    return normalized == 'pending' ||
+        normalized == 'pending hrd' ||
+        normalized == 'pending director';
+  }
+
   String get statusText {
-    switch (status.toLowerCase()) {
-      case 'pending hrd': // ← TAMBAH
-        return 'Menunggu HRD'; // ← TAMBAH
-      case 'pending director': // ← TAMBAH
-        return 'Menunggu Direktur'; // ← TAMBAH
+    switch (status.trim().toLowerCase()) {
+      case 'pending hrd':
+        return 'Menunggu HRD';
+      case 'pending director':
+        return 'Menunggu Direktur';
       case 'pending':
         return 'Menunggu Review';
       case 'approved':
+      case 'disetujui':
         return 'Disetujui';
       case 'rejected':
+      case 'ditolak':
         return 'Ditolak';
       case 'processed':
         return 'Diproses';
@@ -240,51 +354,59 @@ class AdminTimeOffData {
         return 'Menunggu Divisi';
       case 'menunggu laporan':
         return 'Menunggu Laporan';
+      case 'menunggu verifikasi head':
+        return 'Menunggu Verifikasi Head';
+      case 'menunggu verifikasi hrd':
+        return 'Menunggu Verifikasi HRD';
+      case 'pending finance':
+        return 'Menunggu Finance';
       default:
         return status;
     }
   }
 
   Color get statusColorValue {
-    switch (status.toLowerCase()) {
-      case 'pending hrd': // ← TAMBAH
-        return const Color(0xFFF59E0B); // ← TAMBAH
-      case 'pending director': // ← TAMBAH
-        return const Color(0xFF8B5CF6); // ← TAMBAH
+    switch (status.trim().toLowerCase()) {
       case 'pending':
+      case 'pending hrd':
         return const Color(0xFFF59E0B);
+      case 'pending director':
+        return const Color(0xFF8B5CF6);
       case 'approved':
+      case 'disetujui':
         return const Color(0xFF10B981);
       case 'rejected':
+      case 'ditolak':
+      case 'revisi':
         return const Color(0xFFEF4444);
       case 'processed':
         return const Color(0xFF3B82F6);
       case 'menunggu manager':
-        return const Color(0xFF8B5CF6);
+      case 'menunggu verifikasi head':
+      case 'menunggu verifikasi hrd':
+        return const Color(0xFF6366F1);
       case 'menunggu org':
         return const Color(0xFF0EA5E9);
       case 'menunggu laporan':
         return const Color(0xFF7C3AED);
+      case 'pending finance':
+        return const Color(0xFF14B8A6);
       default:
         return const Color(0xFF6B7280);
     }
   }
 
   String get formattedDate {
-    final s =
-        '${tanggalMulai.day.toString().padLeft(2, '0')}/${tanggalMulai.month.toString().padLeft(2, '0')}/${tanggalMulai.year}';
-    if (tanggalMulai.day == tanggalSelesai.day &&
-        tanggalMulai.month == tanggalSelesai.month &&
-        tanggalMulai.year == tanggalSelesai.year) {
-      return s;
-    }
-    final e =
-        '${tanggalSelesai.day.toString().padLeft(2, '0')}/${tanggalSelesai.month.toString().padLeft(2, '0')}/${tanggalSelesai.year}';
-    return '$s - $e';
+    String fmt(DateTime date) =>
+        '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+
+    final start = fmt(tanggalMulai);
+    final end = fmt(tanggalSelesai);
+    return start == end ? start : '$start - $end';
   }
 
   String get urgencyText {
-    if (status.toLowerCase() != 'pending') return '';
+    if (status.trim().toLowerCase() != 'pending') return '';
     if (daysSinceSubmitted > 7) return 'SANGAT URGENT';
     if (daysSinceSubmitted > 3) return 'URGENT';
     return '';
@@ -297,11 +419,13 @@ class AdminTimeOffData {
   }
 
   String get formattedSubmittedDate =>
-      '${submittedAt.day.toString().padLeft(2, '0')}/${submittedAt.month.toString().padLeft(2, '0')}/${submittedAt.year} ${submittedAt.hour.toString().padLeft(2, '0')}:${submittedAt.minute.toString().padLeft(2, '0')}';
+      '${submittedAt.day.toString().padLeft(2, '0')}/${submittedAt.month.toString().padLeft(2, '0')}/${submittedAt.year} '
+      '${submittedAt.hour.toString().padLeft(2, '0')}:${submittedAt.minute.toString().padLeft(2, '0')}';
 
   String get jenisIcon {
     switch (jenisTimeOff) {
       case 'Izin Tahunan':
+      case 'Cuti Tahunan':
         return '🏖️';
       case 'Sakit':
         return '🏥';
@@ -315,8 +439,6 @@ class AdminTimeOffData {
         return '🧳';
       case 'Keluarga Meninggal':
         return '🕯️';
-      case 'Cuti Tahunan':
-        return '🏖️';
       case 'Cuti Khusus':
         return '🎉';
       case 'Izin Pribadi':
@@ -336,11 +458,9 @@ class UserWithTimeOffs {
   final String email;
   final String? phone;
   final String? jobs;
-
   final String? companyName;
   final String? department;
   final String? jobPosition;
-
   final int totalTimeOff;
   final int pendingCount;
   final int approvedCount;
@@ -349,7 +469,10 @@ class UserWithTimeOffs {
   final int totalApprovedDays;
   final int totalRequestedDays;
 
-  UserWithTimeOffs({
+  const UserWithTimeOffs({
+    required this.annualQuota,
+    required this.usedDays,
+    required this.remainingDays,
     required this.userId,
     required this.name,
     required this.email,
@@ -365,66 +488,64 @@ class UserWithTimeOffs {
     required this.processedCount,
     required this.totalApprovedDays,
     required this.totalRequestedDays,
-    required this.annualQuota,
-    required this.usedDays,
-    required this.remainingDays,
   });
 
+  static int _toInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  static String? _toStringOrNull(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    return text.isEmpty || text.toLowerCase() == 'null' ? null : text;
+  }
+
   factory UserWithTimeOffs.fromJson(Map<String, dynamic> json) {
-    int toInt(dynamic value) {
-      if (value == null) return 0;
-      if (value is int) return value;
-      if (value is num) return value.toInt();
-      return int.tryParse(value.toString()) ?? 0;
-    }
-
-    String? toStr(dynamic value) {
-      if (value == null) return null;
-      final text = value.toString().trim();
-      if (text.isEmpty || text.toLowerCase() == 'null') return null;
-      return text;
-    }
-
-    final organization = toStr(
+    final organization = _toStringOrNull(
       json['Organization'] ??
           json['organization'] ??
           json['Department'] ??
           json['department'],
     );
 
-    final jobPosition = toStr(
+    final jobPosition = _toStringOrNull(
       json['JobPosition'] ?? json['jobPosition'] ?? json['job_position'],
     );
 
-    final jobs = toStr(
-      json['Jobs'] ?? json['jobs'] ?? json['Job'] ?? json['job'] ?? jobPosition,
-    );
+    final jobs =
+        _toStringOrNull(
+          json['Jobs'] ?? json['jobs'] ?? json['Job'] ?? json['job'],
+        ) ??
+        jobPosition;
 
     return UserWithTimeOffs(
-      annualQuota: toInt(json['AnnualQuota'] ?? json['annualQuota']),
-      usedDays: toInt(json['UsedDays'] ?? json['usedDays']),
-      remainingDays: toInt(json['RemainingDays'] ?? json['remainingDays']),
-      userId: toStr(json['UserId'] ?? json['userId'] ?? json['userid']) ?? '',
-      name: toStr(json['Name'] ?? json['name']) ?? '',
-      email: toStr(json['Email'] ?? json['email'] ?? json['mail']) ?? '',
-      phone: toStr(json['Phone'] ?? json['phone']),
+      annualQuota: _toInt(json['AnnualQuota'] ?? json['annualQuota']),
+      usedDays: _toInt(json['UsedDays'] ?? json['usedDays']),
+      remainingDays: _toInt(json['RemainingDays'] ?? json['remainingDays']),
+      userId:
+          _toStringOrNull(json['UserId'] ?? json['userId'] ?? json['userid']) ??
+          '',
+      name: _toStringOrNull(json['Name'] ?? json['name']) ?? '',
+      email:
+          _toStringOrNull(json['Email'] ?? json['email'] ?? json['mail']) ?? '',
+      phone: _toStringOrNull(json['Phone'] ?? json['phone']),
       jobs: jobs,
-
-      companyName: toStr(
+      companyName: _toStringOrNull(
         json['CompanyName'] ?? json['companyName'] ?? json['company_name'],
       ),
       department: organization,
       jobPosition: jobPosition,
-
-      totalTimeOff: toInt(json['TotalTimeOff'] ?? json['totalTimeOff']),
-      pendingCount: toInt(json['PendingCount'] ?? json['pendingCount']),
-      approvedCount: toInt(json['ApprovedCount'] ?? json['approvedCount']),
-      rejectedCount: toInt(json['RejectedCount'] ?? json['rejectedCount']),
-      processedCount: toInt(json['ProcessedCount'] ?? json['processedCount']),
-      totalApprovedDays: toInt(
+      totalTimeOff: _toInt(json['TotalTimeOff'] ?? json['totalTimeOff']),
+      pendingCount: _toInt(json['PendingCount'] ?? json['pendingCount']),
+      approvedCount: _toInt(json['ApprovedCount'] ?? json['approvedCount']),
+      rejectedCount: _toInt(json['RejectedCount'] ?? json['rejectedCount']),
+      processedCount: _toInt(json['ProcessedCount'] ?? json['processedCount']),
+      totalApprovedDays: _toInt(
         json['TotalApprovedDays'] ?? json['totalApprovedDays'],
       ),
-      totalRequestedDays: toInt(
+      totalRequestedDays: _toInt(
         json['TotalRequestedDays'] ?? json['totalRequestedDays'],
       ),
     );
@@ -433,14 +554,12 @@ class UserWithTimeOffs {
   String get formattedTotalDays => '$totalApprovedDays hari disetujui';
 }
 
-// ── Request Models (tidak berubah) ─────────────────────────────────────────
-
 class AdminStatisticsRequest {
   final String? adminId;
   final int? year;
   final int? month;
 
-  AdminStatisticsRequest({this.adminId, this.year, this.month});
+  const AdminStatisticsRequest({this.adminId, this.year, this.month});
 
   Map<String, dynamic> toJson() => {
     'adminId': adminId,
@@ -455,13 +574,15 @@ class AdminTimeOffListRequest {
   final String? userId;
   final int? yearFilter;
   final int? monthFilter;
-  AdminTimeOffListRequest({
+
+  const AdminTimeOffListRequest({
     required this.adminId,
     this.status,
     this.userId,
     this.yearFilter,
     this.monthFilter,
   });
+
   Map<String, dynamic> toJson() => {
     'adminId': adminId,
     'status': status,
@@ -477,13 +598,15 @@ class ReviewTimeOffRequest {
   final String approvedBy;
   final String? rejectionReason;
   final String adminId;
-  ReviewTimeOffRequest({
+
+  const ReviewTimeOffRequest({
     required this.id,
     required this.status,
     required this.approvedBy,
     this.rejectionReason,
     required this.adminId,
   });
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'status': status,
@@ -497,11 +620,13 @@ class MarkProcessedRequest {
   final int id;
   final String processedBy;
   final String adminId;
-  MarkProcessedRequest({
+
+  const MarkProcessedRequest({
     required this.id,
     required this.processedBy,
     required this.adminId,
   });
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'processedBy': processedBy,
@@ -509,41 +634,56 @@ class MarkProcessedRequest {
   };
 }
 
-// ── Response Models (tidak berubah) ────────────────────────────────────────
-
 class ApiResponse<T> {
   final bool success;
   final String message;
   final T? data;
-  ApiResponse({required this.success, required this.message, this.data});
+
+  const ApiResponse({required this.success, required this.message, this.data});
+
   factory ApiResponse.fromJson(
     Map<String, dynamic> json,
     T? Function(dynamic)? fromJsonT,
-  ) => ApiResponse<T>(
-    success: json['success'] ?? json['Success'] ?? false,
-    message: json['message'] ?? json['Message'] ?? '',
-    data: json['data'] != null && fromJsonT != null
-        ? fromJsonT(json['data'])
-        : json['Data'] != null && fromJsonT != null
-        ? fromJsonT(json['Data'])
-        : null,
-  );
+  ) {
+    final rawData = json['data'] ?? json['Data'];
+    return ApiResponse<T>(
+      success: (json['success'] ?? json['Success']) == true,
+      message: (json['message'] ?? json['Message'] ?? '').toString(),
+      data: rawData != null && fromJsonT != null ? fromJsonT(rawData) : null,
+    );
+  }
 }
 
 class TimeOffAdminListResponse {
   final List<AdminTimeOffData> data;
-  TimeOffAdminListResponse({required this.data});
-  factory TimeOffAdminListResponse.fromJson(List<dynamic> jsonList) =>
-      TimeOffAdminListResponse(
-        data: jsonList.map((i) => AdminTimeOffData.fromJson(i)).toList(),
-      );
+
+  const TimeOffAdminListResponse({required this.data});
+
+  factory TimeOffAdminListResponse.fromJson(
+    List<dynamic> jsonList,
+  ) => TimeOffAdminListResponse(
+    data: jsonList
+        .map(
+          (item) =>
+              AdminTimeOffData.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList(),
+  );
 }
 
 class UserTimeOffListResponse {
   final List<UserWithTimeOffs> data;
-  UserTimeOffListResponse({required this.data});
-  factory UserTimeOffListResponse.fromJson(List<dynamic> jsonList) =>
-      UserTimeOffListResponse(
-        data: jsonList.map((i) => UserWithTimeOffs.fromJson(i)).toList(),
-      );
+
+  const UserTimeOffListResponse({required this.data});
+
+  factory UserTimeOffListResponse.fromJson(
+    List<dynamic> jsonList,
+  ) => UserTimeOffListResponse(
+    data: jsonList
+        .map(
+          (item) =>
+              UserWithTimeOffs.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList(),
+  );
 }

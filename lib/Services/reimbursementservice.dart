@@ -551,7 +551,7 @@ class ReimbursementService {
     try {
       final headers = await _getHeaders();
 
-      final response = await http.get(
+      final response = await http.post(
         Uri.parse('$baseURL/api/asn/reimbursement/categories'),
         headers: headers,
       );

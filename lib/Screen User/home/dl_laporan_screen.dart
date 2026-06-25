@@ -33,8 +33,10 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
   // ── State ─────────────────────────────────────────────────────────────────
   late TimeOffModel _currentTimeOff; // ← data terbaru dari API
 
-  _PickedFile? _laporanFile;
   _PickedFile? _anggaranFile;
+  final _hasilCtrl = TextEditingController();
+  final _kepadaCtrl = TextEditingController();
+  final _penyelesaianCtrl = TextEditingController();
   bool _isLoading = false;
   bool _isDownloadingSuratTugas = false;
   bool _isDownloadingFormBiaya = false;
@@ -53,6 +55,14 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     super.initState();
     _currentTimeOff = widget.timeOff; // init dulu dari widget
     _reloadTimeOff(); // reload fresh dari API
+  }
+
+  @override
+  void dispose() {
+    _hasilCtrl.dispose();
+    _kepadaCtrl.dispose();
+    _penyelesaianCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _reloadTimeOff() async {
@@ -164,11 +174,6 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
   }
 
   // ── File picking ──────────────────────────────────────────────────────────
-
-  Future<void> _pickLaporan() async {
-    final f = await _pickAnyFile('laporan perjalanan dinas');
-    if (f != null) setState(() => _laporanFile = f);
-  }
 
   Future<void> _pickAnggaran() async {
     final label = _isReimbursement
@@ -336,32 +341,71 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
 
   // ── Submit ────────────────────────────────────────────────────────────────
 
+  // Future<void> _submit() async {
+  //   if (_laporanFile == null) {
+  //     _snack('File laporan perjalanan dinas wajib diupload', err: true);
+  //     return;
+  //   }
+  //   if (_adaBiaya && _anggaranFile == null) {
+  //     _snack(
+  //       _isReimbursement
+  //           ? 'Bukti pembayaran wajib diupload untuk Reimbursement'
+  //           : 'Bukti penggunaan uang kantor wajib diupload',
+  //       err: true,
+  //     );
+  //     return;
+  //   }
+
+  //   setState(() => _isLoading = true);
+  //   try {
+  //     final req = DlLaporanRequest(
+  //       timeOffId: _currentTimeOff.id!,
+  //       userId: widget.userId,
+  //       laporanBytes: _laporanFile!.bytes,
+  //       laporanFileName: _laporanFile!.name,
+  //       anggaranBytes: _anggaranFile?.bytes,
+  //       anggaranFileName: _anggaranFile?.name,
+  //     );
+  //     final res = await TimeOffService.submitDlLaporan(req);
+  //     if (res.success) {
+  //       _snack(
+  //         'Laporan berhasil disubmit! Menunggu verifikasi Head Divisi.',
+  //         err: false,
+  //       );
+  //       await Future.delayed(const Duration(milliseconds: 800));
+  //       if (mounted) Navigator.of(context).pop(true);
+  //     } else {
+  //       _snack(res.message, err: true);
+  //     }
+  //   } catch (e) {
+  //     _snack('Terjadi kesalahan: $e', err: true);
+  //   } finally {
+  //     if (mounted) setState(() => _isLoading = false);
+  //   }
+  // }
   Future<void> _submit() async {
-    if (_laporanFile == null) {
-      _snack('File laporan perjalanan dinas wajib diupload', err: true);
+    if (_hasilCtrl.text.trim().isEmpty) {
+      _snack('Hasil perjalanan dinas wajib diisi', err: true);
       return;
     }
-    if (_adaBiaya && _anggaranFile == null) {
-      _snack(
-        _isReimbursement
-            ? 'Bukti pembayaran wajib diupload untuk Reimbursement'
-            : 'Bukti penggunaan uang kantor wajib diupload',
-        err: true,
-      );
+    if (_kepadaCtrl.text.trim().isEmpty) {
+      _snack('Laporan disampaikan kepada wajib diisi', err: true);
+      return;
+    }
+    if (_penyelesaianCtrl.text.trim().isEmpty) {
+      _snack('Penyelesaian wajib diisi', err: true);
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      final req = DlLaporanRequest(
+      final res = await TimeOffService.submitDlLaporanForm(
         timeOffId: _currentTimeOff.id!,
         userId: widget.userId,
-        laporanBytes: _laporanFile!.bytes,
-        laporanFileName: _laporanFile!.name,
-        anggaranBytes: _anggaranFile?.bytes,
-        anggaranFileName: _anggaranFile?.name,
+        hasilPerjalanan: _hasilCtrl.text.trim(),
+        laporanKepada: _kepadaCtrl.text.trim(),
+        penyelesaian: _penyelesaianCtrl.text.trim(),
       );
-      final res = await TimeOffService.submitDlLaporan(req);
       if (res.success) {
         _snack(
           'Laporan berhasil disubmit! Menunggu verifikasi Head Divisi.',
@@ -573,14 +617,44 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
             const SizedBox(height: 24),
 
             // ── Upload Laporan ───────────────────────────────────────────────
-            _buildUploadCard(
-              label: 'Laporan Perjalanan Dinas',
-              description: 'Upload laporan yang sudah kamu isi (PDF/JPG/PNG)',
-              icon: Icons.description_outlined,
+            // _buildUploadCard(
+            //   label: 'Laporan Perjalanan Dinas',
+            //   description: 'Upload laporan yang sudah kamu isi (PDF/JPG/PNG)',
+            //   icon: Icons.description_outlined,
+            //   color: const Color(0xFF3B82F6),
+            //   file: _laporanFile,
+            //   onTap: _pickLaporan,
+            //   onRemove: () => setState(() => _laporanFile = null),
+            //   isRequired: true,
+            // ),
+            _buildInputCard(
+              label: 'E. Hasil Perjalanan Dinas',
+              hint: 'Deskripsikan hasil/pencapaian selama dinas luar...',
+              controller: _hasilCtrl,
+              icon: Icons.assignment_turned_in_outlined,
               color: const Color(0xFF3B82F6),
-              file: _laporanFile,
-              onTap: _pickLaporan,
-              onRemove: () => setState(() => _laporanFile = null),
+              maxLines: 5,
+              isRequired: true,
+            ),
+            const SizedBox(height: 16),
+            _buildInputCard(
+              label: 'F. Laporan Disampaikan Kepada',
+              hint: 'Contoh: Pimpinan / Head of HRD GA / Direktur...',
+              controller: _kepadaCtrl,
+              icon: Icons.person_outline_rounded,
+              color: const Color(0xFF10B981),
+              maxLines: 2,
+              isRequired: true,
+            ),
+            const SizedBox(height: 16),
+            _buildInputCard(
+              label: 'G. Penyelesaian',
+              hint:
+                  'Deskripsikan tindak lanjut / penyelesaian dari perjalanan dinas...',
+              controller: _penyelesaianCtrl,
+              icon: Icons.checklist_rounded,
+              color: const Color(0xFF7C3AED),
+              maxLines: 4,
               isRequired: true,
             ),
 
@@ -675,6 +749,111 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     );
   }
 
+  Widget _buildInputCard({
+    required String label,
+    required String hint,
+    required TextEditingController controller,
+    required IconData icon,
+    required Color color,
+    int maxLines = 3,
+    bool isRequired = false,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.06),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(13),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: color, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
+                      ),
+                      if (isRequired) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red[100],
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'WAJIB',
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: Colors.red[700],
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: TextField(
+              controller: controller,
+              maxLines: maxLines,
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                filled: true,
+                fillColor: const Color(0xFFF9FAFB),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: color.withOpacity(0.3)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: color, width: 1.5),
+                ),
+                contentPadding: const EdgeInsets.all(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
   // ── Widget helpers ────────────────────────────────────────────────────────
 
   Widget _buildDownloadCard({
