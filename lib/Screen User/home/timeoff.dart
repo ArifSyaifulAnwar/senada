@@ -29,41 +29,46 @@ class TimeOffScreen extends StatefulWidget {
 }
 
 class _TimeOffScreenState extends State<TimeOffScreen> {
+  List<WorkPeriodModel> _workPeriods = [];
+  WorkPeriodModel? _selectedPeriod;
+  bool _isLoadingPeriods = false;
   List<TimeOffModel> _allTimeOffList = [];
   List<TimeOffModel> _filteredTimeOffList = [];
   bool _isLoading = true;
   String _errorMessage = '';
   final ScrollController _scrollController = ScrollController();
 
-  int _selectedYear = DateTime.now().year;
-  int _selectedMonth = DateTime.now().month;
-  bool _isFilterExpanded = false;
-
-  final List<String> _monthNames = [
-    'Semua Bulan',
-    'Januari',
-    'Februari',
-    'Maret',
-    'April',
-    'Mei',
-    'Juni',
-    'Juli',
-    'Agustus',
-    'September',
-    'Oktober',
-    'November',
-    'Desember',
-  ];
+  // Khusus layout web agar sidebar dan konten tidak memakai controller yang sama
+  final ScrollController _webFilterScrollController = ScrollController();
+  final ScrollController _webContentScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _loadTimeOffData();
+    _loadWorkPeriods();
+  }
+
+  Future<void> _loadWorkPeriods() async {
+    setState(() => _isLoadingPeriods = true);
+    final res = await TimeOffService.getWorkPeriods();
+    if (!mounted) return;
+    setState(() {
+      if (res.success && res.data != null && res.data!.isNotEmpty) {
+        _workPeriods = res.data!;
+        // Default: pilih periode terbaru (urutan sudah desc dari SP)
+        _selectedPeriod = _workPeriods.first;
+      }
+      _isLoadingPeriods = false;
+    });
+    await _loadTimeOffData();
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _webFilterScrollController.dispose();
+    _webContentScrollController.dispose();
     super.dispose();
   }
 
@@ -98,52 +103,33 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   void _applyClientSideFilter() {
-    List<TimeOffModel> filtered = _allTimeOffList
-        .where((t) => t.tanggalMulai.year == _selectedYear)
-        .toList();
-    if (_selectedMonth != 0) {
-      filtered = filtered
-          .where((t) => t.tanggalMulai.month == _selectedMonth)
-          .toList();
+    List<TimeOffModel> filtered = _allTimeOffList;
+
+    if (_selectedPeriod != null) {
+      final start = _selectedPeriod!.tanggalMulai;
+      final end = _selectedPeriod!.tanggalSelesai;
+      filtered = filtered.where((t) {
+        // Tampilkan izin yang OVERLAP dengan periode kerja terpilih
+        return !t.tanggalSelesai.isBefore(start) &&
+            !t.tanggalMulai.isAfter(end);
+      }).toList();
     }
+
     filtered.sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
     setState(() => _filteredTimeOffList = filtered);
   }
 
   Future<void> _refreshData() async => _loadTimeOffData();
 
-  void _applyFilter() {
-    setState(() => _isFilterExpanded = false);
-    _applyClientSideFilter();
-  }
-
   void _resetFilter() {
     setState(() {
-      _selectedYear = DateTime.now().year;
-      _selectedMonth = DateTime.now().month;
-      _isFilterExpanded = false;
+      _selectedPeriod = _workPeriods.isNotEmpty ? _workPeriods.first : null;
     });
     _applyClientSideFilter();
   }
 
   String _getFilterDisplayText() {
-    final monthName = _selectedMonth == 0
-        ? 'Semua'
-        : _monthNames[_selectedMonth];
-    return '$monthName $_selectedYear';
-  }
-
-  List<int> _getAvailableYears() {
-    final years = _allTimeOffList
-        .map((t) => t.tanggalMulai.year)
-        .toSet()
-        .toList();
-    years.sort((a, b) => b.compareTo(a));
-    if (years.isEmpty) {
-      final y = DateTime.now().year;
-      return List.generate(5, (i) => y - 2 + i);
-    }
-    return years;
+    return _selectedPeriod?.label ?? 'Semua Periode';
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -671,6 +657,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       case 'rejected':
       case 'ditolak':
         return const Color(0xFFEF4444);
+      case 'revisi': // ← BARU
+        return const Color(0xFFD97706);
       case 'menunggu laporan':
         return const Color(0xFF7C3AED);
       case 'menunggu verifikasi head':
@@ -699,6 +687,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       case 'rejected':
       case 'ditolak':
         return Icons.cancel_rounded;
+      case 'revisi':
+        return Icons.edit_note_rounded;
       case 'menunggu laporan':
         return Icons.upload_file_rounded;
       case 'menunggu verifikasi head':
@@ -882,6 +872,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       onRefresh: _refreshData,
       child: SingleChildScrollView(
         controller: _scrollController,
+        primary: false,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -910,41 +901,56 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               color: Colors.white,
               border: Border(right: BorderSide(color: Colors.grey.shade200)),
             ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Filter Periode',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1F2937),
+            child: Scrollbar(
+              controller: _webFilterScrollController,
+              thumbVisibility: true,
+              interactive: true,
+              child: SingleChildScrollView(
+                controller: _webFilterScrollController,
+                primary: false,
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Filter Periode',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2937),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildWebFilterContent(),
-                  const SizedBox(height: 20),
-                  _buildWebStats(),
-                ],
+                    const SizedBox(height: 16),
+                    _buildWebFilterContent(),
+                    const SizedBox(height: 20),
+                    _buildWebStats(),
+                  ],
+                ),
               ),
             ),
           ),
         ),
+
         Expanded(
-          child: RefreshIndicator(
-            onRefresh: _refreshData,
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildListHeader(),
-                  const SizedBox(height: 16),
-                  _buildListContent(),
-                ],
+          child: Scrollbar(
+            controller: _webContentScrollController,
+            thumbVisibility: true,
+            interactive: true,
+            child: RefreshIndicator(
+              onRefresh: _refreshData,
+              child: SingleChildScrollView(
+                controller: _webContentScrollController,
+                primary: false,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildListHeader(),
+                    const SizedBox(height: 16),
+                    _buildListContent(),
+                  ],
+                ),
               ),
             ),
           ),
@@ -954,12 +960,11 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Widget _buildWebFilterContent() {
-    final availableYears = _getAvailableYears();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Tahun',
+          'Periode Kerja',
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -967,108 +972,121 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              value: availableYears.contains(_selectedYear)
-                  ? _selectedYear
-                  : availableYears.first,
-              isExpanded: true,
-              onChanged: (v) => setState(() => _selectedYear = v!),
-              items: availableYears
-                  .map(
-                    (y) => DropdownMenuItem(
-                      value: y,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text(y.toString()),
+        _isLoadingPeriods
+            ? const Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : _workPeriods.isEmpty
+            ? Text(
+                'Belum ada periode. Tambahkan di Kalender.',
+                style: TextStyle(fontSize: 12, color: Colors.orange[700]),
+              )
+            : Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: _selectedPeriod?.id,
+                    isExpanded: true,
+                    itemHeight: 56,
+                    hint: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'Pilih periode...',
+                        style: TextStyle(fontSize: 13),
                       ),
                     ),
-                  )
-                  .toList(),
-              icon: const Icon(Icons.arrow_drop_down),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'Bulan',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF374151),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              value: _selectedMonth,
-              isExpanded: true,
-              onChanged: (v) => setState(() => _selectedMonth = v!),
-              items: List.generate(
-                _monthNames.length,
-                (i) => DropdownMenuItem(
-                  value: i,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(_monthNames[i]),
+                    selectedItemBuilder: (context) => _workPeriods
+                        .map(
+                          (p) => Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: Text(
+                                p.label,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    items: _workPeriods
+                        .map(
+                          (p) => DropdownMenuItem(
+                            value: p.id,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    p.label,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (p.keterangan?.isNotEmpty == true)
+                                    Text(
+                                      p.keterangan!,
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        color: Colors.grey[500],
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    icon: const Icon(Icons.arrow_drop_down),
+                    onChanged: (selectedId) {
+                      if (selectedId == null) return;
+                      setState(() {
+                        _selectedPeriod = _workPeriods.firstWhere(
+                          (p) => p.id == selectedId,
+                        );
+                      });
+                      _applyClientSideFilter();
+                    },
                   ),
                 ),
-              ).toList(),
-              icon: const Icon(Icons.arrow_drop_down),
-            ),
-          ),
-        ),
+              ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _resetFilter,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF6B7280),
-                  side: const BorderSide(color: Color(0xFFE5E7EB)),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Reset',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                ),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: _resetFilter,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF6B7280),
+              side: const BorderSide(color: Color(0xFFE5E7EB)),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: ElevatedButton(
-                onPressed: _applyFilter,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3B82F6),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Terapkan',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                ),
-              ),
+            child: const Text(
+              'Reset ke Periode Terbaru',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
-          ],
+          ),
         ),
       ],
     );
@@ -1089,6 +1107,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
             'disetujui',
             'rejected',
             'ditolak',
+            'revisi',
           ].contains(t.status.toLowerCase()),
         )
         .length;
@@ -1102,6 +1121,11 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               t.status.toLowerCase() == 'ditolak',
         )
         .length;
+    final revisi =
+        _filteredTimeOffList // ← BARU
+            .where((t) => t.status.toLowerCase() == 'revisi')
+            .length;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1133,6 +1157,11 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           if (laporan > 0) ...[
             const SizedBox(height: 6),
             _buildStatRow('Menunggu Laporan', laporan, const Color(0xFF7C3AED)),
+          ],
+          if (revisi > 0) ...[
+            // ← BARU
+            const SizedBox(height: 6),
+            _buildStatRow('Perlu Revisi', revisi, const Color(0xFFD97706)),
           ],
           const SizedBox(height: 6),
           _buildStatRow('Ditolak', rejected, const Color(0xFFEF4444)),
@@ -1214,7 +1243,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
   }
 
   Widget _buildFilterSection() {
-    final availableYears = _getAvailableYears();
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1228,224 +1256,152 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
-            borderRadius: BorderRadius.vertical(
-              top: const Radius.circular(16),
-              bottom: _isFilterExpanded
-                  ? Radius.zero
-                  : const Radius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3B82F6).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.date_range_rounded,
+                    size: 20,
+                    color: Color(0xFF3B82F6),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'Filter Periode Kerja',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
+            const SizedBox(height: 14),
+            _isLoadingPeriods
+                ? const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : _workPeriods.isEmpty
+                ? Container(
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF3B82F6).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.orange[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.orange[200]!),
                     ),
-                    child: const Icon(
-                      Icons.filter_list_rounded,
-                      size: 20,
-                      color: Color(0xFF3B82F6),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Filter Periode',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1F2937),
-                    ),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _getFilterDisplayText(),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF374151),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    _isFilterExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: const Color(0xFF6B7280),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_isFilterExpanded) ...[
-            const Divider(height: 1, color: Color(0xFFE5E7EB)),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 20,
-                        color: Color(0xFF6B7280),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Tahun:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF374151),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: Colors.orange[700],
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            borderRadius: BorderRadius.circular(8),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Belum ada periode kerja. Tambahkan di menu Kalender terlebih dahulu.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange[700],
+                            ),
                           ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: availableYears.contains(_selectedYear)
-                                  ? _selectedYear
-                                  : availableYears.first,
-                              onChanged: (v) =>
-                                  setState(() => _selectedYear = v!),
-                              items: availableYears
-                                  .map(
-                                    (y) => DropdownMenuItem(
-                                      value: y,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                        ),
-                                        child: Text(y.toString()),
+                        ),
+                      ],
+                    ),
+                  )
+                : Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: _selectedPeriod?.id,
+                        isExpanded: true,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        itemHeight: 56,
+                        hint: const Text(
+                          'Pilih periode...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF9CA3AF),
+                          ),
+                        ),
+                        selectedItemBuilder: (context) => _workPeriods
+                            .map(
+                              (p) => Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  p.label,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        items: _workPeriods
+                            .map(
+                              (p) => DropdownMenuItem(
+                                value: p.id,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      p.label,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                  )
-                                  .toList(),
-                              icon: const Icon(Icons.arrow_drop_down),
-                              isExpanded: true,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.calendar_month_rounded,
-                        size: 20,
-                        color: Color(0xFF6B7280),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Bulan:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF374151),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: _selectedMonth,
-                              onChanged: (v) =>
-                                  setState(() => _selectedMonth = v!),
-                              items: List.generate(
-                                _monthNames.length,
-                                (i) => DropdownMenuItem(
-                                  value: i,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                    ),
-                                    child: Text(_monthNames[i]),
-                                  ),
+                                    if (p.keterangan?.isNotEmpty == true)
+                                      Text(
+                                        p.keterangan!,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: Colors.grey[500],
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ),
+                                  ],
                                 ),
-                              ).toList(),
-                              icon: const Icon(Icons.arrow_drop_down),
-                              isExpanded: true,
-                            ),
-                          ),
-                        ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (selectedId) {
+                          if (selectedId == null) return;
+                          setState(() {
+                            _selectedPeriod = _workPeriods.firstWhere(
+                              (p) => p.id == selectedId,
+                            );
+                          });
+                          _applyClientSideFilter();
+                        },
                       ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _resetFilter,
-                          icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text(
-                            'Reset',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF6B7280),
-                            side: const BorderSide(color: Color(0xFFE5E7EB)),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: _applyFilter,
-                          icon: const Icon(Icons.search_rounded, size: 18),
-                          label: const Text(
-                            'Terapkan Filter',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF3B82F6),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1599,13 +1555,16 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     final isMenungguTransfer = timeOff.status == 'Menunggu Transfer';
     final isPendingFinance = timeOff.status == 'Pending Finance';
     final isMenungguOrg = timeOff.status == 'Menunggu Org';
+    final isRevisi = timeOff.status == 'Revisi'; // ← BARU
     final isApproved =
         timeOff.status.toLowerCase() == 'approved' ||
         timeOff.status.toLowerCase() == 'disetujui';
     final canEditDelete =
         !isDL &&
-        (timeOff.status == 'Pending' || timeOff.status == 'Menunggu Manager');
-    final needsAction = isMenungguLaporan;
+        (timeOff.status == 'Pending' ||
+            timeOff.status == 'Menunggu Manager' ||
+            timeOff.status == 'Revisi'); // ← TAMBAH 'Revisi'
+    final needsAction = isMenungguLaporan || isRevisi; // ← TAMBAH isRevisi
     final accentColor = _colorForStatus(timeOff.status);
 
     return Container(
@@ -1761,8 +1720,14 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ],
             ),
 
-            // Banner DL
-            if (isDL) ...[
+            // Banner Revisi — tampil untuk DL dan non-DL    ← BARU
+            if (isRevisi) ...[
+              const SizedBox(height: 16),
+              _buildRevisionBanner(timeOff),
+            ],
+
+            // Banner DL (hanya untuk DL, bukan Revisi)
+            if (isDL && !isRevisi) ...[
               if (isMenungguLaporan) ...[
                 const SizedBox(height: 16),
                 _buildDlBanner(
@@ -1996,7 +1961,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ),
             ],
 
-            // Alasan penolakan
+            // Alasan penolakan (Rejected final)
             if (timeOff.status.toLowerCase() == 'rejected' &&
                 timeOff.rejectionReason != null &&
                 timeOff.rejectionReason!.isNotEmpty) ...[
@@ -2053,8 +2018,6 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  // DL: export PDF gabungan final (Surat Tugas + Form + Laporan + Lampiran)
-                  // Izin lain: export formulir biasa
                   onPressed: isDL
                       ? () => _exportDlFinal(timeOff)
                       : () => _exportFormulirUser(timeOff),
@@ -2076,7 +2039,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
               ),
             ],
 
-            // Edit / Delete
+            // Edit / Delete (hanya non-DL, status Pending/Revisi)
             if (canEditDelete) ...[
               const SizedBox(height: 16),
               Row(
@@ -2127,6 +2090,151 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       ),
     );
   }
+
+  Widget _buildRevisionBanner(TimeOffModel timeOff) {
+    final isDL = timeOff.isDinasLuar;
+
+    // Tentukan alasan berdasarkan siapa yang reject
+    // Prioritas: hrdRejectionReason → financeRejectionReason → rejectionReason
+    String alasan = '';
+    String penolak = '';
+
+    if (timeOff.hrdRejectionReason?.isNotEmpty == true) {
+      alasan = timeOff.hrdRejectionReason!;
+      penolak = 'HRD';
+    } else if (timeOff.financeRejectionReason?.isNotEmpty == true) {
+      alasan = timeOff.financeRejectionReason!;
+      penolak = 'Finance';
+    } else if (timeOff.rejectionReason?.isNotEmpty == true) {
+      alasan = timeOff.rejectionReason!;
+    }
+
+    final String pesanUtama = penolak.isNotEmpty
+        ? '$penolak meminta revisi:'
+        : 'Pengajuan dikembalikan untuk diperbaiki:';
+
+    final String pesanSub = alasan.isNotEmpty
+        ? alasan
+        : isDL
+        ? 'Perbaiki dokumen atau rincian biaya, lalu ajukan DL baru.'
+        : 'Perbaiki data izin dan ajukan ulang.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFCD34D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header banner
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD97706).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.edit_note_rounded,
+                  size: 16,
+                  color: Color(0xFFD97706),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Pengajuan Dikembalikan — Perlu Revisi',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFD97706),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Alasan
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFDE68A)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  pesanUtama,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF92400E),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  pesanSub,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF78350F),
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Tombol aksi
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => isDL
+                  // DL: ajukan DL baru (tidak bisa edit yang lama)
+                  ? _navigateToFormSubmit(context)
+                  // Non-DL: edit data yang sudah ada lalu resubmit
+                  : _navigateToFormSubmit(context, editData: timeOff),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(
+                isDL ? 'Ajukan DL Baru' : 'Perbaiki & Ajukan Ulang',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD97706),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+
+          // Info tambahan untuk DL
+          if (isDL) ...[
+            const SizedBox(height: 8),
+            const Text(
+              '💡 Pengajuan DL yang direvisi tidak bisa diedit. Kamu perlu membuat pengajuan DL baru.',
+              style: TextStyle(
+                fontSize: 11,
+                color: Color(0xFF92400E),
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  
 
   // ── DL Banner ─────────────────────────────────────────────────────────────
 

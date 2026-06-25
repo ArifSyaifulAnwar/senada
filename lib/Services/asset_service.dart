@@ -6,8 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
 
-// ── ApiResponse generik lokal — tidak bergantung pada time_off_service.dart
-// supaya tidak ada konflik nama/struktur generic class.
 class ApiResponse<T> {
   final bool success;
   final String message;
@@ -355,6 +353,16 @@ class AssetRequestModel {
 
 // ── SERVICE ──────────────────────────────────────────────────────────────────
 class AssetService {
+  static Future<http.Response> _post(
+    String endpoint,
+    Map<String, dynamic> payload,
+  ) {
+    return TokenService.authorizedPost(
+      Uri.parse('$baseURL$_base/$endpoint'),
+      body: jsonEncode(payload),
+    );
+  }
+
   static const String _base = '/api/asset';
 
   /// Panggil sekali sebelum melakukan banyak request paralel, supaya
@@ -386,17 +394,16 @@ class AssetService {
   /// beda dengan canManageStock yang berlaku untuk semua staff HRD).
   static Future<bool> isHeadHrd({required String userId}) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/is-head-hrd'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({'userId': userId}),
-      );
+      final res = await _post('is-head-hrd', {'userId': userId});
+
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
         final success = (_get(body, 'success') ?? false) == true;
         final isHead = (_get(body, 'isHeadHrd') ?? false) == true;
+
         return success && isHead;
       }
+
       return false;
     } catch (_) {
       return false;
@@ -407,17 +414,16 @@ class AssetService {
   /// Sama pola dengan DoaService.canInputDoa.
   static Future<bool> canManageStock({required String userId}) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/can-manage-stock'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({'userId': userId}),
-      );
+      final res = await _post('can-manage-stock', {'userId': userId});
+
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as Map<String, dynamic>;
         final success = (_get(body, 'success') ?? false) == true;
         final canManage = (_get(body, 'canManage') ?? false) == true;
+
         return success && canManage;
       }
+
       return false;
     } catch (_) {
       return false;
@@ -581,17 +587,21 @@ class AssetService {
     required String userId,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/item-toggle-aktif'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({'id': id, 'userId': userId}),
-      );
+      final res = await _post('item-toggle-aktif', {
+        'id': id,
+        'userId': userId,
+      });
+
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;
       final message = (_get(body, 'message') ?? '') as String;
+
       bool? aktif;
       final data = _get(body, 'data');
-      if (data is Map) aktif = data['aktif'] as bool?;
+
+      if (data is Map) {
+        aktif = data['aktif'] as bool?;
+      }
 
       return ApiResponse(success: success, message: message, data: aktif);
     } catch (e) {
@@ -739,21 +749,26 @@ class AssetService {
     int? officeLocationId,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/catalog'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'userId': userId,
-          'kategoriId': kategoriId,
-          'officeLocationId': officeLocationId,
-        }),
-      );
+      final res = await _post('catalog', {
+        'userId': userId,
+        'kategoriId': kategoriId,
+        'officeLocationId': officeLocationId,
+      });
+
+      if (res.statusCode == 401) {
+        return const ApiResponse(
+          success: false,
+          message: 'Sesi tidak dapat diperbarui. Silakan login ulang.',
+        );
+      }
+
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;
       final message = (_get(body, 'message') ?? '') as String;
 
       List<AssetItemModel> items = [];
       final data = _get(body, 'data');
+
       if (data is Map && data['items'] is List) {
         items = (data['items'] as List)
             .map((e) => AssetItemModel.fromJson(e as Map<String, dynamic>))
@@ -937,17 +952,15 @@ class AssetService {
     required String userId,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/my-requests'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({'userId': userId}),
-      );
+      final res = await _post('my-requests', {'userId': userId});
+
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;
       final message = (_get(body, 'message') ?? '') as String;
 
       List<AssetRequestModel> items = [];
       final data = _get(body, 'data');
+
       if (data is Map && data['items'] is List) {
         items = (data['items'] as List)
             .map((e) => AssetRequestModel.fromJson(e as Map<String, dynamic>))

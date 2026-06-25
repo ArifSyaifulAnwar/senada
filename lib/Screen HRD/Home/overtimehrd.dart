@@ -1999,7 +1999,6 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     onChanged: (_) {},
   );
 
-
   Widget _buildUserFilter() {
     final opts = ['Semua User'] + _users.map((u) => u.name).toList();
     String cur = 'Semua User';

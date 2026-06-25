@@ -1,14 +1,12 @@
-// Screen HRD/Home/timeoffhrd.dart — FULL REPLACE
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
-
 import 'dart:convert';
 import 'dart:io' show File;
 import 'dart:typed_data';
-
 import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:absensikaryawan/Screen%20admin/model/timeoffmodeladmin.dart';
 import 'package:absensikaryawan/Screen%20admin/service/timeoffserviceadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:excel/excel.dart' as xl;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -17,6 +15,7 @@ import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../Screen admin/service/web_preview.dart';
+import '../../Services/time_off_model.dart' hide ApiResponse;
 import '../../Services/time_off_service.dart';
 
 bool _isWebLayout(BuildContext context) =>
@@ -31,6 +30,8 @@ class TimeOffHRDScreen extends StatefulWidget {
 
 class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     with SingleTickerProviderStateMixin {
+  List<WorkPeriodModel> _workPeriods = [];
+  WorkPeriodModel? _selectedWorkPeriod; // null = semua periode
   List<AdminTimeOffData> _allTimeOffs = [];
   List<AdminTimeOffData> _filteredTimeOffs = [];
   List<UserWithTimeOffs> _users = [];
@@ -45,7 +46,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   String? _selectedStatus;
   String? _selectedUserId;
   String? _selectedDepartment;
-  String? _selectedTimeRange = 'Bulan Ini';
 
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
@@ -86,13 +86,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     'Rejected',
     'Processed',
   ];
-  final List<String> _timeRangeOptions = [
-    'Hari Ini',
-    'Minggu Ini',
-    'Bulan Ini',
-    'Tahun Ini',
-    'Custom',
-  ];
 
   @override
   void initState() {
@@ -102,7 +95,19 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       if (mounted) setState(() => _webTabIndex = _tabController.index);
     });
     _loadUserData();
+    _loadWorkPeriods();
     _searchController.addListener(_applyFilters);
+  }
+
+  Future<void> _loadWorkPeriods() async {
+    final res = await TimeOffService.getWorkPeriods();
+    if (mounted && res.success && res.data != null) {
+      setState(() {
+        _workPeriods = res.data!;
+        // Default: semua periode (null = tidak filter)
+        _selectedWorkPeriod = null;
+      });
+    }
   }
 
   @override
@@ -393,6 +398,47 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     }
   }
 
+  Widget _buildWorkPeriodFilter() {
+    if (_workPeriods.isEmpty) return const SizedBox.shrink();
+
+    final items = <DropdownMenuItem<int>>[
+      const DropdownMenuItem<int>(
+        value: 0,
+        child: Text('Semua Periode', overflow: TextOverflow.ellipsis),
+      ),
+      ..._workPeriods.map(
+        (p) => DropdownMenuItem<int>(
+          value: p.id,
+          child: Text(p.label, overflow: TextOverflow.ellipsis),
+        ),
+      ),
+    ];
+
+    final currentId = _selectedWorkPeriod?.id ?? 0;
+
+    return DropdownButtonFormField<int>(
+      value: currentId,
+      decoration: InputDecoration(
+        labelText: 'Periode Kerja',
+        labelStyle: TextStyle(fontSize: _fs(12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        isDense: true,
+      ),
+      style: TextStyle(fontSize: _fs(13), color: Colors.black),
+      isExpanded: true,
+      items: items,
+      onChanged: (v) {
+        setState(() {
+          _selectedWorkPeriod = (v == null || v == 0)
+              ? null
+              : _workPeriods.firstWhere((p) => p.id == v);
+          _applyFilters();
+        });
+      },
+    );
+  }
+
   void _applyFilters() {
     List<AdminTimeOffData> f = _allTimeOffs;
 
@@ -410,23 +456,15 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           .toList();
       f = f.where((i) => ids.contains(i.userId)).toList();
     }
-    if (_selectedTimeRange != null) {
-      final now = DateTime.now();
-      DateTime start;
-      switch (_selectedTimeRange) {
-        case 'Hari Ini':
-          start = DateTime(now.year, now.month, now.day);
-          break;
-        case 'Minggu Ini':
-          start = now.subtract(Duration(days: now.weekday - 1));
-          break;
-        case 'Tahun Ini':
-          start = DateTime(now.year, 1, 1);
-          break;
-        default:
-          start = DateTime(now.year, now.month, 1);
-      }
-      f = f.where((i) => i.submittedAt.isAfter(start)).toList();
+
+    // Filter periode kerja — ganti _selectedTimeRange dengan periode kalender
+    if (_selectedWorkPeriod != null) {
+      final start = _selectedWorkPeriod!.tanggalMulai;
+      final end = _selectedWorkPeriod!.tanggalSelesai;
+      f = f.where((i) {
+        return !i.tanggalSelesai.isBefore(start) &&
+            !i.tanggalMulai.isAfter(end);
+      }).toList();
     }
 
     final kw = _searchController.text.toLowerCase();
@@ -442,7 +480,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     }
 
     // Sort: Pending HRD dulu → Pending Director → lainnya
-    // Di dalam grup sama, urutkan dari yang paling lama menunggu
     f.sort((a, b) {
       int priority(AdminTimeOffData x) {
         if (x.isPendingHrd) return 0;
@@ -735,28 +772,42 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     );
   }
 
+  int get _pendingCountLive => _allTimeOffs.where((i) {
+    final s = i.status.toLowerCase();
+    return s == 'pending' ||
+        s == 'pending hrd' ||
+        s == 'pending director' ||
+        s == 'menunggu hrd' ||
+        s == 'menunggu director' ||
+        s == 'menunggu org' ||
+        s == 'menunggu laporan' ||
+        s == 'menunggu verifikasi head' ||
+        s == 'menunggu verifikasi hrd' ||
+        s == 'menunggu transfer' ||
+        s == 'pending finance';
+  }).length;
+
+  int get _approvedCountLive => _allTimeOffs.where((i) {
+    final s = i.status.toLowerCase();
+    return s == 'approved' || s == 'disetujui' || s == 'processed';
+  }).length;
+
+  int get _rejectedCountLive => _allTimeOffs.where((i) {
+    final s = i.status.toLowerCase();
+    return s == 'rejected' || s == 'ditolak';
+  }).length;
+
   Widget _buildWebStatsSummary() {
     final items = [
-      {
-        'label': 'Total',
-        'value': _statistics?.totalSubmissions ?? _allTimeOffs.length,
-        'color': Colors.blue,
-      },
+      {'label': 'Total', 'value': _allTimeOffs.length, 'color': Colors.blue},
       {
         'label': 'Pending',
-        'value': _statistics?.pendingCount ?? 0,
+        // Pakai _pendingCountLive agar akurat
+        'value': _pendingCountLive,
         'color': Colors.orange,
       },
-      {
-        'label': 'Approved',
-        'value': _statistics?.approvedCount ?? 0,
-        'color': Colors.green,
-      },
-      {
-        'label': 'Ditolak',
-        'value': _statistics?.rejectedCount ?? 0,
-        'color': Colors.red,
-      },
+      {'label': 'Approved', 'value': _approvedCountLive, 'color': Colors.green},
+      {'label': 'Ditolak', 'value': _rejectedCountLive, 'color': Colors.red},
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -772,6 +823,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         const SizedBox(height: 8),
         ...items.map((item) {
           final color = item['color'] as Color;
+          final count = item['value'] as int;
           return Container(
             margin: const EdgeInsets.only(bottom: 6),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -798,7 +850,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                   ),
                 ),
                 Text(
-                  '${item['value']}',
+                  '$count',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
@@ -941,11 +993,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 Icons.today,
               ),
               Container(width: 1, height: 36, color: Colors.white24),
-              _buildQuickStat(
-                'Menunggu',
-                '${_statistics?.pendingCount ?? 0}',
-                Icons.pending,
-              ),
+              _buildQuickStat('Menunggu', '$_pendingCountLive', Icons.pending),
             ],
           ),
         ),
@@ -1027,7 +1075,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           children: [
             _buildStatCard(
               title: 'Total Pengajuan',
-              value: stats.totalSubmissions.toString(),
+              value: _allTimeOffs.length.toString(),
               icon: Icons.calendar_month,
               color: const Color(0xFF6366F1),
               trend: '+12%',
@@ -1035,15 +1083,16 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
             ),
             _buildStatCard(
               title: 'Menunggu Review',
-              value: stats.pendingCount.toString(),
+              // Pakai _pendingCountLive agar akurat include semua status
+              value: _pendingCountLive.toString(),
               icon: Icons.pending_actions,
               color: const Color(0xFFF59E0B),
-              urgent: true,
+              urgent: _pendingCountLive > 0,
               onTap: () => _navFilter('Pending'),
             ),
             _buildStatCard(
               title: 'Disetujui',
-              value: stats.approvedCount.toString(),
+              value: _approvedCountLive.toString(),
               icon: Icons.check_circle,
               color: const Color(0xFF10B981),
               trend: '+5%',
@@ -1051,7 +1100,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
             ),
             _buildStatCard(
               title: 'Ditolak',
-              value: stats.rejectedCount.toString(),
+              value: _rejectedCountLive.toString(),
               icon: Icons.cancel,
               color: const Color(0xFFEF4444),
               trend: '-3%',
@@ -1932,7 +1981,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           const SizedBox(height: 8),
           _buildDepartmentFilter(),
           const SizedBox(height: 8),
-          _buildTimeRangeFilter(),
+          _buildWorkPeriodFilter(), // ← ganti _buildTimeRangeFilter()
           const SizedBox(height: 8),
           _buildUserFilter(),
         ] else
@@ -2009,32 +2058,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     onChanged: (v) {
       setState(() {
         _selectedDepartment = v;
-        _applyFilters();
-      });
-    },
-  );
-
-  Widget _buildTimeRangeFilter() => DropdownButtonFormField<String>(
-    value: _selectedTimeRange,
-    decoration: InputDecoration(
-      labelText: 'Periode',
-      labelStyle: TextStyle(fontSize: _fs(12)),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      isDense: true,
-    ),
-    style: TextStyle(fontSize: _fs(13), color: Colors.black),
-    items: _timeRangeOptions
-        .map(
-          (r) => DropdownMenuItem(
-            value: r,
-            child: Text(r, overflow: TextOverflow.ellipsis),
-          ),
-        )
-        .toList(),
-    onChanged: (v) {
-      setState(() {
-        _selectedTimeRange = v;
         _applyFilters();
       });
     },
@@ -2223,70 +2246,204 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
   Future<void> _exportReportData(String reportType) async {
     try {
-      final buffer = StringBuffer();
-      String clean(String? value) =>
-          '"${(value ?? '-').replaceAll('"', '""')}"';
-      String normalizeStatus(String status) => status.trim();
-      bool isPendingLike(String status) {
-        final s = status.toLowerCase();
-        return s == 'pending' || s == 'menunggu laporan' || s == 'menunggu org';
+      final excel = xl.Excel.createExcel();
+
+      // Sheet1 harus dihapus SETELAH ada sheet lain yang dibuat.
+      // Kalau dihapus duluan saat masih satu-satunya sheet, tidak akan
+      // terhapus karena Excel tidak boleh punya 0 sheet.
+      // Penghapusan dilakukan di bawah setelah sheetName dibuat.
+
+      String fileName;
+      String sheetName;
+      final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+
+      // Warna header — biru HRD
+      final headerBg = xl.ExcelColor.fromHexString('#1E3A5F');
+      final headerFg = xl.ExcelColor.fromHexString('#FFFFFF');
+      final altRowBg = xl.ExcelColor.fromHexString('#F0F4F8');
+      final boldStyle = xl.CellStyle(
+        fontColorHex: xl.ExcelColor.fromHexString('#1E3A5F'),
+        bold: true,
+      );
+
+      xl.CellStyle headerStyle() => xl.CellStyle(
+        backgroundColorHex: headerBg,
+        fontColorHex: headerFg,
+        bold: true,
+        horizontalAlign: xl.HorizontalAlign.Center,
+        verticalAlign: xl.VerticalAlign.Center,
+      );
+
+      xl.CellStyle altStyle() => xl.CellStyle(backgroundColorHex: altRowBg);
+
+      // Helper: set header row
+      void setHeaders(xl.Sheet sheet, List<String> headers) {
+        for (int i = 0; i < headers.length; i++) {
+          final cell = sheet.cell(
+            xl.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0),
+          );
+          cell.value = xl.TextCellValue(headers[i]);
+          cell.cellStyle = headerStyle();
+        }
       }
 
-      bool isApprovedLike(String status) {
-        final s = status.toLowerCase();
-        return s == 'approved' || s == 'processed' || s == 'submitted';
+      // Helper: set data row dengan alt-row coloring
+      void setRow(
+        xl.Sheet sheet,
+        int rowIndex,
+        List<xl.CellValue?> values, {
+        bool isAlt = false,
+      }) {
+        for (int i = 0; i < values.length; i++) {
+          final cell = sheet.cell(
+            xl.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: rowIndex),
+          );
+          cell.value = values[i];
+          if (isAlt) cell.cellStyle = altStyle();
+        }
       }
 
-      bool isRejectedLike(String status) => status.toLowerCase() == 'rejected';
+      // Helper: format tanggal
+      String fmtDate(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
+      String fmtMonth(int month) => _getMonthName(month);
+
+      // ── Normalize status ──────────────────────────────────────────────────
+      String normalizeStatus(String s) => s.trim();
+      bool isPendingLike(String s) {
+        final sl = s.toLowerCase();
+        return sl == 'pending' ||
+            sl == 'menunggu laporan' ||
+            sl == 'menunggu org';
+      }
+
+      bool isApprovedLike(String s) {
+        final sl = s.toLowerCase();
+        return sl == 'approved' || sl == 'processed' || sl == 'submitted';
+      }
+
+      bool isRejectedLike(String s) => s.toLowerCase() == 'rejected';
       String getDept(AdminTimeOffData item) =>
           item.userDepartment ?? 'Tidak Ada Departemen';
 
-      String title = 'laporan_timeoff_hrd';
+      // ── Tentukan sheet & data sesuai reportType ───────────────────────────
 
       if (reportType == 'bulanan') {
-        title = 'laporan_bulanan_timeoff_hrd';
-        buffer.writeln(
-          'Bulan,Tahun,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
-        );
-        final Map<String, List<AdminTimeOffData>> grouped = {};
-        for (final item in _allTimeOffs) {
-          final key =
-              '${item.tanggalMulai.year}-${item.tanggalMulai.month.toString().padLeft(2, '0')}';
-          grouped.putIfAbsent(key, () => []);
-          grouped[key]!.add(item);
+        fileName = 'laporan_bulanan_timeoff_hrd_$now.xlsx';
+        sheetName = 'Laporan Bulanan';
+        final sheet = excel[sheetName];
+
+        setHeaders(sheet, [
+          'Periode',
+          'Tgl Mulai Periode',
+          'Tgl Selesai Periode',
+          'Total Pengajuan',
+          'Menunggu',
+          'Approved',
+          'Rejected',
+          'Total Hari',
+        ]);
+
+        int row = 1;
+
+        if (_workPeriods.isNotEmpty) {
+          // ── Grouping berdasarkan periode kerja dari kalender ─────────────
+          // Urutan dari yang paling lama ke terbaru (asc)
+          final sortedPeriods = List<WorkPeriodModel>.from(_workPeriods)
+            ..sort((a, b) => a.tanggalMulai.compareTo(b.tanggalMulai));
+
+          for (final period in sortedPeriods) {
+            // Izin yang tanggalnya OVERLAP dengan periode ini
+            final items = _allTimeOffs.where((x) {
+              return !x.tanggalSelesai.isBefore(period.tanggalMulai) &&
+                  !x.tanggalMulai.isAfter(period.tanggalSelesai);
+            }).toList();
+
+            final menunggu = items
+                .where((x) => isPendingLike(normalizeStatus(x.status)))
+                .length;
+            final approved = items
+                .where((x) => isApprovedLike(normalizeStatus(x.status)))
+                .length;
+            final rejected = items
+                .where((x) => isRejectedLike(normalizeStatus(x.status)))
+                .length;
+            final totalHari = items.fold<int>(0, (s, x) => s + x.totalHari);
+
+            setRow(sheet, row, [
+              xl.TextCellValue(period.label),
+              xl.TextCellValue(fmtDate(period.tanggalMulai)),
+              xl.TextCellValue(fmtDate(period.tanggalSelesai)),
+              xl.IntCellValue(items.length),
+              xl.IntCellValue(menunggu),
+              xl.IntCellValue(approved),
+              xl.IntCellValue(rejected),
+              xl.IntCellValue(totalHari),
+            ], isAlt: row % 2 == 0);
+            row++;
+          }
+        } else {
+          // ── Fallback: grouping bulan/tahun biasa (kalau periode belum diset)
+          final Map<String, List<AdminTimeOffData>> grouped = {};
+          for (final item in _allTimeOffs) {
+            final key =
+                '${item.tanggalMulai.year}-${item.tanggalMulai.month.toString().padLeft(2, '0')}';
+            grouped.putIfAbsent(key, () => []);
+            grouped[key]!.add(item);
+          }
+          final entries = grouped.entries.toList()
+            ..sort((a, b) => a.key.compareTo(b.key));
+
+          for (final e in entries) {
+            final items = e.value;
+            final first = items.first.tanggalMulai;
+            final menunggu = items
+                .where((x) => isPendingLike(normalizeStatus(x.status)))
+                .length;
+            final approved = items
+                .where((x) => isApprovedLike(normalizeStatus(x.status)))
+                .length;
+            final rejected = items
+                .where((x) => isRejectedLike(normalizeStatus(x.status)))
+                .length;
+            final totalHari = items.fold<int>(0, (s, x) => s + x.totalHari);
+
+            final mulai = DateTime(first.year, first.month, 1);
+            final selesai = DateTime(first.year, first.month + 1, 0);
+
+            setRow(sheet, row, [
+              xl.TextCellValue('${fmtMonth(first.month)} ${first.year}'),
+              xl.TextCellValue(fmtDate(mulai)),
+              xl.TextCellValue(fmtDate(selesai)),
+              xl.IntCellValue(items.length),
+              xl.IntCellValue(menunggu),
+              xl.IntCellValue(approved),
+              xl.IntCellValue(rejected),
+              xl.IntCellValue(totalHari),
+            ], isAlt: row % 2 == 0);
+            row++;
+          }
         }
-        final entries = grouped.entries.toList()
-          ..sort((a, b) => a.key.compareTo(b.key));
-        for (final entry in entries) {
-          final items = entry.value;
-          final first = items.first.tanggalMulai;
-          final menunggu = items
-              .where((e) => isPendingLike(normalizeStatus(e.status)))
-              .length;
-          final approved = items
-              .where((e) => isApprovedLike(normalizeStatus(e.status)))
-              .length;
-          final rejected = items
-              .where((e) => isRejectedLike(normalizeStatus(e.status)))
-              .length;
-          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-          buffer.writeln(
-            [
-              clean(_getMonthName(first.month)),
-              clean(first.year.toString()),
-              clean(items.length.toString()),
-              clean(menunggu.toString()),
-              clean(approved.toString()),
-              clean(rejected.toString()),
-              clean(totalHari.toString()),
-            ].join(','),
-          );
+
+        sheet.setColumnWidth(0, 20);
+        sheet.setColumnWidth(1, 18);
+        sheet.setColumnWidth(2, 18);
+        for (int i = 3; i <= 7; i++) {
+          sheet.setColumnWidth(i, 16);
         }
       } else if (reportType == 'tahunan') {
-        title = 'laporan_tahunan_timeoff_hrd';
-        buffer.writeln(
-          'Tahun,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
-        );
+        fileName = 'laporan_tahunan_timeoff_hrd_$now.xlsx';
+        sheetName = 'Laporan Tahunan';
+        final sheet = excel[sheetName];
+
+        setHeaders(sheet, [
+          'Tahun',
+          'Total Pengajuan',
+          'Menunggu',
+          'Approved',
+          'Rejected',
+          'Total Hari',
+        ]);
+
         final Map<int, List<AdminTimeOffData>> grouped = {};
         for (final item in _allTimeOffs) {
           grouped.putIfAbsent(item.tanggalMulai.year, () => []);
@@ -2294,34 +2451,50 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
         final entries = grouped.entries.toList()
           ..sort((a, b) => a.key.compareTo(b.key));
-        for (final entry in entries) {
-          final items = entry.value;
+
+        int row = 1;
+        for (final e in entries) {
+          final items = e.value;
           final menunggu = items
-              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .where((x) => isPendingLike(normalizeStatus(x.status)))
               .length;
           final approved = items
-              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .where((x) => isApprovedLike(normalizeStatus(x.status)))
               .length;
           final rejected = items
-              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .where((x) => isRejectedLike(normalizeStatus(x.status)))
               .length;
-          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-          buffer.writeln(
-            [
-              clean(entry.key.toString()),
-              clean(items.length.toString()),
-              clean(menunggu.toString()),
-              clean(approved.toString()),
-              clean(rejected.toString()),
-              clean(totalHari.toString()),
-            ].join(','),
-          );
+          final totalHari = items.fold<int>(0, (s, x) => s + x.totalHari);
+
+          setRow(sheet, row, [
+            xl.IntCellValue(e.key),
+            xl.IntCellValue(items.length),
+            xl.IntCellValue(menunggu),
+            xl.IntCellValue(approved),
+            xl.IntCellValue(rejected),
+            xl.IntCellValue(totalHari),
+          ], isAlt: row % 2 == 0);
+          row++;
+        }
+
+        sheet.setColumnWidth(0, 10);
+        for (int i = 1; i <= 5; i++) {
+          sheet.setColumnWidth(i, 16);
         }
       } else if (reportType == 'departemen') {
-        title = 'laporan_per_departemen_timeoff_hrd';
-        buffer.writeln(
-          'Departemen,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
-        );
+        fileName = 'laporan_per_departemen_timeoff_hrd_$now.xlsx';
+        sheetName = 'Per Departemen';
+        final sheet = excel[sheetName];
+
+        setHeaders(sheet, [
+          'Departemen',
+          'Total Pengajuan',
+          'Menunggu',
+          'Approved',
+          'Rejected',
+          'Total Hari',
+        ]);
+
         final Map<String, List<AdminTimeOffData>> grouped = {};
         for (final item in _allTimeOffs) {
           final key = getDept(item);
@@ -2330,34 +2503,53 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
         final entries = grouped.entries.toList()
           ..sort((a, b) => b.value.length.compareTo(a.value.length));
-        for (final entry in entries) {
-          final items = entry.value;
+
+        int row = 1;
+        for (final e in entries) {
+          final items = e.value;
           final menunggu = items
-              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .where((x) => isPendingLike(normalizeStatus(x.status)))
               .length;
           final approved = items
-              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .where((x) => isApprovedLike(normalizeStatus(x.status)))
               .length;
           final rejected = items
-              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .where((x) => isRejectedLike(normalizeStatus(x.status)))
               .length;
-          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-          buffer.writeln(
-            [
-              clean(entry.key),
-              clean(items.length.toString()),
-              clean(menunggu.toString()),
-              clean(approved.toString()),
-              clean(rejected.toString()),
-              clean(totalHari.toString()),
-            ].join(','),
-          );
+          final totalHari = items.fold<int>(0, (s, x) => s + x.totalHari);
+
+          setRow(sheet, row, [
+            xl.TextCellValue(e.key),
+            xl.IntCellValue(items.length),
+            xl.IntCellValue(menunggu),
+            xl.IntCellValue(approved),
+            xl.IntCellValue(rejected),
+            xl.IntCellValue(totalHari),
+          ], isAlt: row % 2 == 0);
+          row++;
+        }
+
+        sheet.setColumnWidth(0, 28);
+        for (int i = 1; i <= 5; i++) {
+          sheet.setColumnWidth(i, 16);
         }
       } else if (reportType == 'karyawan') {
-        title = 'laporan_per_karyawan_timeoff_hrd';
-        buffer.writeln(
-          'User ID,Nama,Jabatan,Departemen,Total Pengajuan,Menunggu,Approved,Rejected,Total Hari',
-        );
+        fileName = 'laporan_per_karyawan_timeoff_hrd_$now.xlsx';
+        sheetName = 'Per Karyawan';
+        final sheet = excel[sheetName];
+
+        setHeaders(sheet, [
+          'User ID',
+          'Nama',
+          'Jabatan',
+          'Departemen',
+          'Total Pengajuan',
+          'Menunggu',
+          'Approved',
+          'Rejected',
+          'Total Hari',
+        ]);
+
         final Map<String, List<AdminTimeOffData>> grouped = {};
         for (final item in _allTimeOffs) {
           grouped.putIfAbsent(item.userId, () => []);
@@ -2365,36 +2557,50 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
         final entries = grouped.entries.toList()
           ..sort((a, b) => b.value.length.compareTo(a.value.length));
-        for (final entry in entries) {
-          final items = entry.value;
+
+        int row = 1;
+        for (final e in entries) {
+          final items = e.value;
           final first = items.first;
           final menunggu = items
-              .where((e) => isPendingLike(normalizeStatus(e.status)))
+              .where((x) => isPendingLike(normalizeStatus(x.status)))
               .length;
           final approved = items
-              .where((e) => isApprovedLike(normalizeStatus(e.status)))
+              .where((x) => isApprovedLike(normalizeStatus(x.status)))
               .length;
           final rejected = items
-              .where((e) => isRejectedLike(normalizeStatus(e.status)))
+              .where((x) => isRejectedLike(normalizeStatus(x.status)))
               .length;
-          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-          buffer.writeln(
-            [
-              clean(first.userId),
-              clean(first.userName),
-              clean(first.userJob),
-              clean(first.userDepartment),
-              clean(items.length.toString()),
-              clean(menunggu.toString()),
-              clean(approved.toString()),
-              clean(rejected.toString()),
-              clean(totalHari.toString()),
-            ].join(','),
-          );
+          final totalHari = items.fold<int>(0, (s, x) => s + x.totalHari);
+
+          setRow(sheet, row, [
+            xl.TextCellValue(first.userId),
+            xl.TextCellValue(first.userName),
+            xl.TextCellValue(first.userJob ?? '-'),
+            xl.TextCellValue(first.userDepartment ?? '-'),
+            xl.IntCellValue(items.length),
+            xl.IntCellValue(menunggu),
+            xl.IntCellValue(approved),
+            xl.IntCellValue(rejected),
+            xl.IntCellValue(totalHari),
+          ], isAlt: row % 2 == 0);
+          row++;
+        }
+
+        sheet.setColumnWidth(0, 16);
+        sheet.setColumnWidth(1, 28);
+        sheet.setColumnWidth(2, 22);
+        sheet.setColumnWidth(3, 22);
+        for (int i = 4; i <= 8; i++) {
+          sheet.setColumnWidth(i, 14);
         }
       } else if (reportType == 'tren') {
-        title = 'laporan_tren_cuti_timeoff_hrd';
-        buffer.writeln('Periode,Total Pengajuan,Total Hari');
+        fileName = 'laporan_tren_cuti_timeoff_hrd_$now.xlsx';
+        sheetName = 'Tren Cuti';
+        final sheet = excel[sheetName];
+
+        setHeaders(sheet, ['Periode', 'Total Pengajuan', 'Total Hari']);
+
         final Map<String, List<AdminTimeOffData>> grouped = {};
         for (final item in _allTimeOffs) {
           final key =
@@ -2404,56 +2610,145 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         }
         final entries = grouped.entries.toList()
           ..sort((a, b) => a.key.compareTo(b.key));
-        for (final entry in entries) {
-          final items = entry.value;
-          final totalHari = items.fold<int>(0, (sum, e) => sum + e.totalHari);
-          buffer.writeln(
-            [
-              clean(entry.key),
-              clean(items.length.toString()),
-              clean(totalHari.toString()),
-            ].join(','),
-          );
+
+        int row = 1;
+        for (final e in entries) {
+          final items = e.value;
+          final totalHari = items.fold<int>(0, (s, x) => s + x.totalHari);
+          setRow(sheet, row, [
+            xl.TextCellValue(e.key),
+            xl.IntCellValue(items.length),
+            xl.IntCellValue(totalHari),
+          ], isAlt: row % 2 == 0);
+          row++;
         }
+
+        sheet.setColumnWidth(0, 16);
+        sheet.setColumnWidth(1, 18);
+        sheet.setColumnWidth(2, 14);
       } else {
-        title = 'laporan_detail_timeoff_hrd';
-        buffer.writeln(
-          'ID,User ID,Nama,Jenis Cuti,Tanggal Mulai,Tanggal Selesai,Total Hari,Status,Departemen,Catatan,Laporan Status',
-        );
+        // Detail — semua data dari _filteredTimeOffs
+        fileName = 'laporan_detail_timeoff_hrd_$now.xlsx';
+        sheetName = 'Detail Lengkap';
+        final sheet = excel[sheetName];
+
+        setHeaders(sheet, [
+          'ID',
+          'User ID',
+          'Nama',
+          'Jenis Cuti',
+          'Tgl Mulai',
+          'Tgl Selesai',
+          'Total Hari',
+          'Status',
+          'Departemen',
+          'Jabatan',
+          'Catatan',
+          'Laporan',
+          'Tgl Pengajuan',
+        ]);
+
+        int row = 1;
         for (final item in _filteredTimeOffs) {
-          buffer.writeln(
-            [
-              clean(item.id.toString()),
-              clean(item.userId),
-              clean(item.userName),
-              clean(item.jenisTimeOff),
-              clean(DateFormat('dd/MM/yyyy').format(item.tanggalMulai)),
-              clean(DateFormat('dd/MM/yyyy').format(item.tanggalSelesai)),
-              clean(item.totalHari.toString()),
-              clean(item.statusText),
-              clean(item.userDepartment),
-              clean(item.catatan),
-              clean(item.hasLaporan ? 'Ada Laporan' : 'Tidak Ada Laporan'),
-            ].join(','),
-          );
+          setRow(sheet, row, [
+            xl.IntCellValue(item.id),
+            xl.TextCellValue(item.userId),
+            xl.TextCellValue(item.userName),
+            xl.TextCellValue(item.jenisTimeOff),
+            xl.TextCellValue(fmtDate(item.tanggalMulai)),
+            xl.TextCellValue(fmtDate(item.tanggalSelesai)),
+            xl.IntCellValue(item.totalHari),
+            xl.TextCellValue(item.statusText),
+            xl.TextCellValue(item.userDepartment ?? '-'),
+            xl.TextCellValue(item.userJob ?? '-'),
+            xl.TextCellValue(item.catatan ?? '-'),
+            xl.TextCellValue(item.hasLaporan ? 'Ada Laporan' : '-'),
+            xl.TextCellValue(fmtDate(item.submittedAt)),
+          ], isAlt: row % 2 == 0);
+          row++;
         }
+
+        sheet.setColumnWidth(0, 8);
+        sheet.setColumnWidth(1, 14);
+        sheet.setColumnWidth(2, 26);
+        sheet.setColumnWidth(3, 20);
+        sheet.setColumnWidth(4, 14);
+        sheet.setColumnWidth(5, 14);
+        sheet.setColumnWidth(6, 10);
+        sheet.setColumnWidth(7, 22);
+        sheet.setColumnWidth(8, 20);
+        sheet.setColumnWidth(9, 20);
+        sheet.setColumnWidth(10, 28);
+        sheet.setColumnWidth(11, 14);
+        sheet.setColumnWidth(12, 16);
       }
 
-      final fileName =
-          '${title}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
-      final content = buffer.toString();
+      // ── Tambah sheet Ringkasan di semua report ─────────────────────────────
+      final summarySheet = excel['Ringkasan'];
+      summarySheet.cell(xl.CellIndex.indexByString('A1')).value =
+          xl.TextCellValue('Laporan HRD — $sheetName');
+      summarySheet.cell(xl.CellIndex.indexByString('A1')).cellStyle = boldStyle;
+
+      summarySheet.cell(xl.CellIndex.indexByString('A3')).value =
+          xl.TextCellValue('Dicetak');
+      summarySheet
+          .cell(xl.CellIndex.indexByString('B3'))
+          .value = xl.TextCellValue(
+        DateFormat('dd MMMM yyyy HH:mm', 'id_ID').format(DateTime.now()),
+      );
+
+      summarySheet.cell(xl.CellIndex.indexByString('A4')).value =
+          xl.TextCellValue('Total Data');
+      summarySheet.cell(xl.CellIndex.indexByString('B4')).value =
+          xl.IntCellValue(_allTimeOffs.length);
+
+      summarySheet.cell(xl.CellIndex.indexByString('A5')).value =
+          xl.TextCellValue('Total Karyawan');
+      summarySheet.cell(xl.CellIndex.indexByString('B5')).value =
+          xl.IntCellValue(_users.length);
+
+      summarySheet.cell(xl.CellIndex.indexByString('A6')).value =
+          xl.TextCellValue('Approved');
+      summarySheet.cell(xl.CellIndex.indexByString('B6')).value =
+          xl.IntCellValue(_statistics?.approvedCount ?? 0);
+
+      summarySheet.cell(xl.CellIndex.indexByString('A7')).value =
+          xl.TextCellValue('Pending');
+      summarySheet.cell(xl.CellIndex.indexByString('B7')).value =
+          xl.IntCellValue(_statistics?.pendingCount ?? 0);
+
+      summarySheet.cell(xl.CellIndex.indexByString('A8')).value =
+          xl.TextCellValue('Rejected');
+      summarySheet.cell(xl.CellIndex.indexByString('B8')).value =
+          xl.IntCellValue(_statistics?.rejectedCount ?? 0);
+
+      summarySheet.setColumnWidth(0, 20);
+      summarySheet.setColumnWidth(1, 24);
+
+      // Hapus Sheet1 default sekarang — sudah aman karena sudah ada
+      // sheet data (sheetName) + sheet Ringkasan
+      if (excel.sheets.containsKey('Sheet1')) {
+        excel.delete('Sheet1');
+      }
+
+      final bytes = excel.encode();
+      if (bytes == null || bytes.isEmpty) {
+        _snackErr('Gagal membuat file Excel');
+        return;
+      }
+
+      final fileBytes = Uint8List.fromList(bytes);
 
       if (kIsWeb) {
-        final bytes = Uint8List.fromList(utf8.encode(content));
-        downloadFileWeb(bytes, fileName);
-        _snackOk('Laporan berhasil diunduh');
+        downloadFileWeb(fileBytes, fileName);
+        _snackOk('Laporan Excel berhasil diunduh');
         return;
       }
 
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/$fileName');
-      await file.writeAsString(content);
-      _snackOk('Laporan berhasil dibuat');
+      await file.writeAsBytes(fileBytes);
+      _snackOk('Laporan berhasil dibuat: $fileName');
       await OpenFile.open(file.path);
     } catch (e) {
       _snackErr('Gagal membuat laporan: $e');

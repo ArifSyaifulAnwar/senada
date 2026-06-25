@@ -1,11 +1,17 @@
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
+import 'dart:convert';
+
 import 'package:absensikaryawan/Screen%20User/fitur/ajukanreimbursement.dart';
+import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/detailmodalcontent.dart';
 import 'package:absensikaryawan/Services/reimbursementmodel.dart';
 import 'package:absensikaryawan/Services/reimbursementservice.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../home/halaman_finance_reimbursement.dart';
 
 class HalamanReimbursement extends StatefulWidget {
   const HalamanReimbursement({super.key});
@@ -17,43 +23,22 @@ class HalamanReimbursement extends StatefulWidget {
 class _HalamanReimbursementState extends State<HalamanReimbursement> {
   final ReimbursementService _reimbursementService = ReimbursementService();
 
-  List<ReimbursementData> _allReimbursements = []; // Semua data dari API
-  List<ReimbursementData> _filteredReimbursements =
-      []; // Data yang sudah difilter
+  List<ReimbursementData> _allReimbursements = [];
+  List<ReimbursementData> _filteredReimbursements = [];
   bool _isLoading = true;
   String? _currentUserId;
   String? _selectedStatus;
 
-  // Filter variables
-  int _selectedYear = DateTime.now().year;
-  int _selectedMonth = DateTime.now().month;
+  // ── Finance role check ────────────────────────────────────────────────
+  bool _isHeadFinance = false;
+  bool _isCheckingRole = false;
+
+  // Filter periode mengikuti periode kerja yang dibuat HRD pada Kalender.
+  int _selectedPeriodYear = DateTime.now().year;
+  List<_ReimbursementWorkPeriod> _workPeriods = const [];
+  _ReimbursementWorkPeriod? _selectedWorkPeriod;
+  bool _isLoadingPeriods = false;
   bool _isFilterExpanded = false;
-
-  // final List<String> _statusOptions = [
-  //   'Semua',
-  //   'Draft',
-  //   'Menunggu',
-  //   'Disetujui',
-  //   'Ditolak',
-  //   'Dibayar',
-  // ];
-
-  // Month names
-  final List<String> _monthNames = [
-    'Semua Bulan',
-    'Januari',
-    'Februari',
-    'Maret',
-    'April',
-    'Mei',
-    'Juni',
-    'Juli',
-    'Agustus',
-    'September',
-    'Oktober',
-    'November',
-    'Desember',
-  ];
 
   @override
   void initState() {
@@ -61,69 +46,243 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     _loadUserData();
   }
 
+  // ── Auth token ────────────────────────────────────────────────────────
+  static Future<String?> _getToken() async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseURL/api/auth/token'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          )
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        final d = json.decode(res.body);
+        return d['access_token'] as String?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ── Check Head Finance via API ─────────────────────────────────────────
+  Future<void> _checkIsHeadFinance(String userId) async {
+    if (!mounted) return;
+    setState(() => _isCheckingRole = true);
+    try {
+      final tok = await _getToken();
+      final res = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/is-head-finance'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $tok',
+        },
+        body: json.encode({'userId': userId}),
+      );
+      if (res.statusCode == 200 && mounted) {
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        setState(() => _isHeadFinance = body['isHeadFinance'] == true);
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isCheckingRole = false);
+  }
+
+  // ── Load ──────────────────────────────────────────────────────────────
   Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     _currentUserId = prefs.getString('UserID');
-    if (_currentUserId != null) {
-      await _loadReimbursements();
-    } else {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
 
-  Future<void> _loadReimbursements() async {
     if (_currentUserId == null) {
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    // Ambil periode kerja HRD dulu supaya filter awal langsung mengikuti
+    // kalender/Periode yang dibuat HRD, bukan bulan kalender biasa.
+    await _loadWorkPeriodsForYear(
+      DateTime.now().year,
+      applyFilterAfterLoad: false,
+    );
+
+    await Future.wait([
+      _loadReimbursements(),
+      _checkIsHeadFinance(_currentUserId!),
+    ]);
+  }
+
+  Future<void> _loadReimbursements() async {
+    if (_currentUserId == null) return;
+
+    if (mounted) setState(() => _isLoading = true);
 
     try {
       String? statusFilter;
+
       if (_selectedStatus != null && _selectedStatus != 'Semua') {
         statusFilter = _mapStatusToApi(_selectedStatus!);
       }
 
-      // Ambil semua data tanpa filter periode (filter dilakukan di client)
       final data = await _reimbursementService.getReimbursementList(
         userId: _currentUserId!,
         status: statusFilter,
       );
 
-      if (data.isNotEmpty) {}
-      setState(() {
-        _allReimbursements = data;
-        _applyClientSideFilter(); // Terapkan filter di client
-      });
+      if (!mounted) return;
+
+      setState(() => _allReimbursements = data);
+      _applyClientSideFilter();
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
+      if (!mounted) return;
+
+      setState(() => _isLoading = false);
       _showErrorSnackBar('Gagal memuat data reimbursement: $e');
     }
   }
 
+  Future<void> _loadWorkPeriodsForYear(
+    int year, {
+    bool applyFilterAfterLoad = true,
+  }) async {
+    if (mounted) {
+      setState(() {
+        _isLoadingPeriods = true;
+        _selectedPeriodYear = year;
+      });
+    }
+
+    try {
+      final token = await _getToken();
+
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/period/list'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null && token.trim().isNotEmpty)
+                'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'tahun': year}),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final decoded = response.body.trim().isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body);
+
+      final body = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+
+      final success = body['success'] ?? body['Success'] ?? false;
+      final rawData = body['data'] ?? body['Data'] ?? const [];
+
+      final periods = success == true && rawData is List
+          ? rawData
+                .whereType<Map>()
+                .map(
+                  (item) => _ReimbursementWorkPeriod.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .where(
+                  (item) => !item.tanggalSelesai.isBefore(item.tanggalMulai),
+                )
+                .toList()
+          : <_ReimbursementWorkPeriod>[];
+
+      periods.sort((a, b) => a.tanggalMulai.compareTo(b.tanggalMulai));
+
+      final previousId = _selectedWorkPeriod?.id;
+      _ReimbursementWorkPeriod? selected;
+
+      for (final period in periods) {
+        if (period.id == previousId) {
+          selected = period;
+          break;
+        }
+      }
+
+      selected ??= _getRunningOrNearestPeriod(periods);
+
+      if (!mounted) return;
+
+      setState(() {
+        _workPeriods = periods;
+        _selectedWorkPeriod = selected;
+        _isLoadingPeriods = false;
+      });
+
+      if (applyFilterAfterLoad) {
+        _applyClientSideFilter();
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _workPeriods = const [];
+        _selectedWorkPeriod = null;
+        _isLoadingPeriods = false;
+      });
+
+      if (applyFilterAfterLoad) {
+        _applyClientSideFilter();
+      }
+
+      _showErrorSnackBar('Gagal memuat periode kerja HRD: $e');
+    }
+  }
+
+  _ReimbursementWorkPeriod? _getRunningOrNearestPeriod(
+    List<_ReimbursementWorkPeriod> periods,
+  ) {
+    if (periods.isEmpty) return null;
+
+    final today = _dateOnly(DateTime.now());
+
+    // Prioritaskan periode yang sedang berjalan.
+    for (final period in periods) {
+      if (!today.isBefore(period.tanggalMulai) &&
+          !today.isAfter(period.tanggalSelesai)) {
+        return period;
+      }
+    }
+
+    // Jika belum ada periode aktif, gunakan periode terakhir yang sudah lewat.
+    final passed =
+        periods
+            .where((period) => !period.tanggalSelesai.isAfter(today))
+            .toList()
+          ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
+
+    if (passed.isNotEmpty) return passed.first;
+
+    // Jika semuanya periode mendatang, pilih periode paling awal.
+    return periods.first;
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
   void _applyClientSideFilter() {
-    List<ReimbursementData> filtered = _allReimbursements;
+    List<ReimbursementData> filtered = List.of(_allReimbursements);
+    final period = _selectedWorkPeriod;
 
-    // Filter berdasarkan tahun
-    filtered = filtered.where((reimbursement) {
-      return reimbursement.submittedAt.year == _selectedYear;
-    }).toList();
+    if (period != null) {
+      final start = _dateOnly(period.tanggalMulai);
+      final end = _dateOnly(period.tanggalSelesai);
 
-    // Filter berdasarkan bulan (jika bukan "Semua Bulan")
-    if (_selectedMonth != 0) {
-      filtered = filtered.where((reimbursement) {
-        return reimbursement.submittedAt.month == _selectedMonth;
+      // Tetap memakai submittedAt karena filter lama reimbursement memang
+      // berdasarkan tanggal pengajuan. Bila kelak ingin berdasarkan tanggal
+      // pengeluaran, cukup ganti r.submittedAt menjadi r.expenseDate.
+      filtered = filtered.where((r) {
+        final submittedDate = _dateOnly(r.submittedAt);
+
+        return !submittedDate.isBefore(start) && !submittedDate.isAfter(end);
       }).toList();
     }
 
-    // Urutkan berdasarkan tanggal terbaru
     filtered.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+
+    if (!mounted) return;
 
     setState(() {
       _filteredReimbursements = filtered;
@@ -132,71 +291,66 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
   }
 
   void _applyFilter() {
-    setState(() {
-      _isFilterExpanded = false;
-    });
+    setState(() => _isFilterExpanded = false);
     _applyClientSideFilter();
   }
 
-  void _resetFilter() {
-    setState(() {
-      _selectedYear = DateTime.now().year;
-      _selectedMonth = DateTime.now().month;
-      _isFilterExpanded = false;
-    });
-    _applyClientSideFilter();
+  Future<void> _resetFilter() async {
+    await _loadWorkPeriodsForYear(DateTime.now().year);
+    if (!mounted) return;
+    setState(() => _isFilterExpanded = false);
   }
 
   String _getFilterDisplayText() {
-    final monthName = _selectedMonth == 0
-        ? 'Semua'
-        : _monthNames[_selectedMonth];
-    return '$monthName $_selectedYear';
+    final period = _selectedWorkPeriod;
+
+    if (period == null) {
+      return _isLoadingPeriods
+          ? 'Memuat periode HRD...'
+          : 'Belum ada periode HRD';
+    }
+
+    return period.displayLabel;
   }
 
-  // Mendapatkan tahun yang tersedia dari data
-  List<int> _getAvailableYears() {
-    final years = _allReimbursements
-        .map((reimbursement) => reimbursement.submittedAt.year)
-        .toSet()
-        .toList();
+  String _getPeriodRangeText(_ReimbursementWorkPeriod period) {
+    return '${_formatShortDate(period.tanggalMulai)} – '
+        '${_formatShortDate(period.tanggalSelesai)}';
+  }
 
-    years.sort((a, b) => b.compareTo(a)); // Urutkan dari terbaru
+  String _formatShortDate(DateTime date) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'Mei',
+      'Jun',
+      'Jul',
+      'Agu',
+      'Sep',
+      'Okt',
+      'Nov',
+      'Des',
+    ];
 
-    // Jika tidak ada data, gunakan 5 tahun terakhir
-    if (years.isEmpty) {
-      final currentYear = DateTime.now().year;
-      return List.generate(5, (index) => currentYear - 2 + index);
-    }
+    return '${date.day.toString().padLeft(2, '0')} '
+        '${months[date.month - 1]} ${date.year}';
+  }
+
+  List<int> _getAvailablePeriodYears() {
+    final currentYear = DateTime.now().year;
+
+    final years = <int>{
+      currentYear - 1,
+      currentYear,
+      currentYear + 1,
+      _selectedPeriodYear,
+      ..._workPeriods.map((period) => period.tahun),
+    }.toList()..sort((a, b) => b.compareTo(a));
 
     return years;
   }
-
-  // Map<String, int> _getSummary() {
-  //   int draft = _filteredReimbursements
-  //       .where((e) => e.status.toLowerCase() == "draft")
-  //       .length;
-  //   int pending = _filteredReimbursements
-  //       .where((e) => e.status.toLowerCase() == "pending")
-  //       .length;
-  //   int approved = _filteredReimbursements
-  //       .where((e) => e.status.toLowerCase() == "approved")
-  //       .length;
-  //   int rejected = _filteredReimbursements
-  //       .where((e) => e.status.toLowerCase() == "rejected")
-  //       .length;
-  //   int paid = _filteredReimbursements
-  //       .where((e) => e.status.toLowerCase() == "paid")
-  //       .length;
-
-  //   return {
-  //     'Draft': draft,
-  //     'Menunggu': pending,
-  //     'Disetujui': approved,
-  //     'Ditolak': rejected,
-  //     'Dibayar': paid,
-  //   };
-  // }
 
   String _mapStatusToApi(String displayStatus) {
     switch (displayStatus) {
@@ -245,17 +399,15 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
-        return DetailModalContent(
-          initialItem: item,
-          reimbursementService: _reimbursementService,
-          currentUserId: _currentUserId,
-          getResponsiveFontSize: (context, size) => size,
-          getResponsivePadding: (context, padding) => padding,
-          formatDateTime: _formatDateTime,
-          buildDetailRow: _buildDetailRow,
-        );
-      },
+      builder: (context) => DetailModalContent(
+        initialItem: item,
+        reimbursementService: _reimbursementService,
+        currentUserId: _currentUserId,
+        getResponsiveFontSize: (context, size) => size,
+        getResponsivePadding: (context, padding) => padding,
+        formatDateTime: _formatDateTime,
+        buildDetailRow: _buildDetailRow,
+      ),
     );
   }
 
@@ -288,28 +440,55 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     );
   }
 
-  String _formatDateTime(DateTime dateTime) {
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
-  }
+  String _formatDateTime(DateTime dateTime) =>
+      '${dateTime.day}/${dateTime.month}/${dateTime.year} '
+      '${dateTime.hour.toString().padLeft(2, '0')}:'
+      '${dateTime.minute.toString().padLeft(2, '0')}';
 
   void _navigateToRequestPage() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const HalamanAjukanReimbursement(),
-      ),
+      MaterialPageRoute(builder: (_) => const HalamanAjukanReimbursement()),
     );
-
-    // Refresh data jika ada perubahan
-    if (result == true) {
-      _loadReimbursements();
-    }
+    if (result == true) _loadReimbursements();
   }
 
+  // ── Finance Panel Button ──────────────────────────────────────────────
+  Widget _buildFinancePanelButton() {
+    // Tidak tampil: sedang loading role, atau bukan Head Finance
+    if (_isCheckingRole || !_isHeadFinance) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const HalamanFinanceReimbursement(),
+          ),
+        ),
+        icon: const Icon(Icons.account_balance_wallet_rounded, size: 20),
+        label: const Text(
+          'Panel Finance — Review Reimbursement',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF6366F1),
+          foregroundColor: Colors.white,
+          elevation: 2,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── BUILD ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    //final Map<String, int> count = _getSummary();
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
@@ -367,16 +546,14 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Summary Cards
-                    //_buildSummaryCards(count),
-                    //const SizedBox(height: 24),
+                    // ── Tombol Finance Panel (hanya untuk Head Finance) ──
+                    _buildFinancePanelButton(),
 
-                    // Filter Section
+                    // ── Filter Section ───────────────────────────────────
                     _buildFilterSection(),
-
                     const SizedBox(height: 24),
 
-                    // Section Header
+                    // ── Section Header ───────────────────────────────────
                     Row(
                       children: [
                         Container(
@@ -389,7 +566,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                         ),
                         const SizedBox(width: 12),
                         const Text(
-                          "Riwayat Reimbursement",
+                          'Riwayat Reimbursement',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 18,
@@ -399,7 +576,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                         ),
                         const Spacer(),
                         Text(
-                          "${_filteredReimbursements.length} data",
+                          '${_filteredReimbursements.length} data',
                           style: const TextStyle(
                             fontSize: 14,
                             color: Color(0xFF6B7280),
@@ -408,23 +585,14 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 16),
 
-                    // Status Filter Dropdown
-                    //_buildStatusFilter(),
-                    const SizedBox(height: 16),
-
-                    // Content
+                    // ── Content ──────────────────────────────────────────
                     if (_filteredReimbursements.isEmpty)
                       _buildEmptyState()
                     else
-                      ..._filteredReimbursements.map(
-                        (reimbursement) =>
-                            _buildReimbursementCard(reimbursement),
-                      ),
+                      ..._filteredReimbursements.map(_buildReimbursementCard),
 
-                    // Extra space for FAB
                     const SizedBox(height: 100),
                   ],
                 ),
@@ -460,13 +628,13 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
   }
 
   Widget _buildFilterSection() {
-    final availableYears = _getAvailableYears();
+    final availableYears = _getAvailablePeriodYears();
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -477,13 +645,8 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
       ),
       child: Column(
         children: [
-          // Filter Header
           InkWell(
-            onTap: () {
-              setState(() {
-                _isFilterExpanded = !_isFilterExpanded;
-              });
-            },
+            onTap: () => setState(() => _isFilterExpanded = !_isFilterExpanded),
             borderRadius: BorderRadius.vertical(
               top: const Radius.circular(16),
               bottom: _isFilterExpanded
@@ -501,36 +664,42 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(
-                      Icons.filter_list_rounded,
+                      Icons.date_range_rounded,
                       size: 20,
                       color: Color(0xFF3B82F6),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Text(
-                    'Filter Periode',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1F2937),
+                  const Expanded(
+                    child: Text(
+                      'Periode HRD',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2937),
+                      ),
                     ),
                   ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _getFilterDisplayText(),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF374151),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 190),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F4F6),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _getFilterDisplayText(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF374151),
+                        ),
                       ),
                     ),
                   ),
@@ -543,19 +712,16 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
               ),
             ),
           ),
-
-          // Filter Content
           if (_isFilterExpanded) ...[
             const Divider(height: 1, color: Color(0xFFE5E7EB)),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // Year Selector
                   Row(
                     children: [
                       const Icon(
-                        Icons.calendar_today, // Ganti dengan icon yang tersedia
+                        Icons.calendar_today_rounded,
                         size: 20,
                         color: Color(0xFF6B7280),
                       ),
@@ -577,27 +743,28 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<int>(
-                              value: availableYears.contains(_selectedYear)
-                                  ? _selectedYear
-                                  : (availableYears.isNotEmpty
-                                        ? availableYears.first
-                                        : DateTime.now().year),
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedYear = value!;
-                                });
+                              value: _selectedPeriodYear,
+                              onChanged: (year) async {
+                                if (year == null ||
+                                    year == _selectedPeriodYear) {
+                                  return;
+                                }
+
+                                await _loadWorkPeriodsForYear(year);
                               },
-                              items: availableYears.map((year) {
-                                return DropdownMenuItem(
-                                  value: year,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
+                              items: availableYears
+                                  .map(
+                                    (year) => DropdownMenuItem(
+                                      value: year,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                        ),
+                                        child: Text(year.toString()),
+                                      ),
                                     ),
-                                    child: Text(year.toString()),
-                                  ),
-                                );
-                              }).toList(),
+                                  )
+                                  .toList(),
                               icon: const Icon(Icons.arrow_drop_down),
                               isExpanded: true,
                             ),
@@ -606,20 +773,17 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 16),
-
-                  // Month Selector
                   Row(
                     children: [
                       const Icon(
-                        Icons.calendar_month_rounded,
+                        Icons.event_available_rounded,
                         size: 20,
                         color: Color(0xFF6B7280),
                       ),
                       const SizedBox(width: 12),
                       const Text(
-                        'Bulan:',
+                        'Periode:',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -633,45 +797,131 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                             border: Border.all(color: const Color(0xFFE5E7EB)),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: _selectedMonth,
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedMonth = value!;
-                                });
-                              },
-                              items: List.generate(_monthNames.length, (index) {
-                                return DropdownMenuItem(
-                                  value: index,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
+                          child: _isLoadingPeriods
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     ),
-                                    child: Text(_monthNames[index]),
                                   ),
-                                );
-                              }),
-                              icon: const Icon(Icons.arrow_drop_down),
-                              isExpanded: true,
-                            ),
-                          ),
+                                )
+                              : DropdownButtonHideUnderline(
+                                  child:
+                                      DropdownButton<_ReimbursementWorkPeriod>(
+                                        value: _selectedWorkPeriod,
+                                        hint: const Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                          ),
+                                          child: Text('Belum ada periode HRD'),
+                                        ),
+                                        onChanged: _workPeriods.isEmpty
+                                            ? null
+                                            : (period) {
+                                                if (period == null) return;
+
+                                                setState(
+                                                  () => _selectedWorkPeriod =
+                                                      period,
+                                                );
+                                                _applyClientSideFilter();
+                                              },
+                                        items: _workPeriods
+                                            .map(
+                                              (period) => DropdownMenuItem(
+                                                value: period,
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                      ),
+                                                  child: Text(
+                                                    period.displayLabel,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ),
+                                            )
+                                            .toList(),
+                                        icon: const Icon(Icons.arrow_drop_down),
+                                        isExpanded: true,
+                                      ),
+                                ),
                         ),
                       ),
                     ],
                   ),
-
+                  if (_selectedWorkPeriod != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.info_outline_rounded,
+                            size: 18,
+                            color: Color(0xFF2563EB),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Rentang periode: '
+                              '${_getPeriodRangeText(_selectedWorkPeriod!)}'
+                              '${_selectedWorkPeriod!.keterangan.trim().isEmpty ? '' : '\n${_selectedWorkPeriod!.keterangan.trim()}'}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF1D4ED8),
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else if (!_isLoadingPeriods) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: const Text(
+                        'HRD belum menetapkan periode kerja untuk tahun ini. '
+                        'Data tetap ditampilkan tanpa filter periode.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF92400E),
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
-
-                  // Action Buttons
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _resetFilter,
+                          onPressed: () => _resetFilter(),
                           icon: const Icon(Icons.refresh_rounded, size: 18),
                           label: const Text(
-                            'Reset',
+                            'Periode Berjalan',
                             style: TextStyle(fontWeight: FontWeight.w600),
                           ),
                           style: OutlinedButton.styleFrom(
@@ -688,15 +938,19 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                       Expanded(
                         flex: 2,
                         child: ElevatedButton.icon(
-                          onPressed: _applyFilter,
-                          icon: const Icon(Icons.search_rounded, size: 18),
+                          onPressed: _selectedWorkPeriod == null
+                              ? null
+                              : _applyFilter,
+                          icon: const Icon(Icons.filter_alt_rounded, size: 18),
                           label: const Text(
-                            'Terapkan Filter',
+                            'Terapkan Periode',
                             style: TextStyle(fontWeight: FontWeight.w600),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF3B82F6),
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor: const Color(0xFFE5E7EB),
+                            disabledForegroundColor: const Color(0xFF9CA3AF),
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(
@@ -715,164 +969,6 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
       ),
     );
   }
-
-  // Widget _buildSummaryCards(Map<String, int> count) {
-  //   return Container(
-  //     padding: const EdgeInsets.all(24),
-  //     decoration: BoxDecoration(
-  //       gradient: const LinearGradient(
-  //         colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-  //         begin: Alignment.topLeft,
-  //         end: Alignment.bottomRight,
-  //       ),
-  //       borderRadius: BorderRadius.circular(20),
-  //       boxShadow: [
-  //         BoxShadow(
-  //           color: const Color(0xFF3B82F6).withOpacity(0.3),
-  //           blurRadius: 20,
-  //           offset: const Offset(0, 8),
-  //         ),
-  //       ],
-  //     ),
-  //     child: Column(
-  //       crossAxisAlignment: CrossAxisAlignment.start,
-  //       children: [
-  //         Row(
-  //           children: [
-  //             Container(
-  //               padding: const EdgeInsets.all(12),
-  //               decoration: BoxDecoration(
-  //                 color: Colors.white.withOpacity(0.2),
-  //                 borderRadius: BorderRadius.circular(16),
-  //               ),
-  //               child: const Icon(
-  //                 Icons.access_time_filled_rounded,
-  //                 size: 28,
-  //                 color: Colors.white,
-  //               ),
-  //             ),
-  //             const SizedBox(width: 16),
-  //             Expanded(
-  //               child: Column(
-  //                 crossAxisAlignment: CrossAxisAlignment.start,
-  //                 children: [
-  //                   const Text(
-  //                     "Ringkasan Reimbursement",
-  //                     style: TextStyle(
-  //                       fontSize: 20,
-  //                       fontWeight: FontWeight.w700,
-  //                       color: Colors.white,
-  //                       letterSpacing: -0.3,
-  //                     ),
-  //                   ),
-  //                   const SizedBox(height: 4),
-  //                   Text(
-  //                     _getFilterDisplayText(),
-  //                     style: const TextStyle(
-  //                       fontSize: 14,
-  //                       color: Colors.white70,
-  //                     ),
-  //                   ),
-  //                 ],
-  //               ),
-  //             ),
-  //           ],
-  //         ),
-
-  //         const SizedBox(height: 24),
-
-  //         Row(
-  //           children: [
-  //             Expanded(
-  //               child: _buildSummaryItem(
-  //                 icon: Icons.drafts,
-  //                 color: const Color(0xFF3B82F6),
-  //                 count: count['Draft']!,
-  //                 label: "Draft",
-  //               ),
-  //             ),
-  //             const SizedBox(width: 12),
-  //             Expanded(
-  //               child: _buildSummaryItem(
-  //                 icon: Icons.schedule,
-  //                 color: const Color(0xFFF59E0B),
-  //                 count: count['Menunggu']!,
-  //                 label: "Menunggu",
-  //               ),
-  //             ),
-  //             const SizedBox(width: 12),
-  //             Expanded(
-  //               child: _buildSummaryItem(
-  //                 icon: Icons.check_circle,
-  //                 color: const Color(0xFF10B981),
-  //                 count: count['Disetujui']!,
-  //                 label: "Disetujui",
-  //               ),
-  //             ),
-  //             const SizedBox(width: 12),
-  //             Expanded(
-  //               child: _buildSummaryItem(
-  //                 icon: Icons.cancel,
-  //                 color: const Color(0xFFEF4444),
-  //                 count: count['Ditolak']!,
-  //                 label: "Ditolak",
-  //               ),
-  //             ),
-  //             const SizedBox(width: 12),
-  //             Expanded(
-  //               child: _buildSummaryItem(
-  //                 icon: Icons.attach_money,
-  //                 color: const Color(0xFF3B82F6),
-  //                 count: count['Dibayar']!,
-  //                 label: "Dibayar",
-  //               ),
-  //             ),
-  //           ],
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // Widget _buildSummaryItem({
-  //   required IconData icon,
-  //   required Color color,
-  //   required int count,
-  //   required String label,
-  // }) {
-  //   return Container(
-  //     padding: const EdgeInsets.all(16),
-  //     decoration: BoxDecoration(
-  //       color: Colors.white.withOpacity(0.15),
-  //       borderRadius: BorderRadius.circular(16),
-  //       border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
-  //     ),
-  //     child: Column(
-  //       children: [
-  //         Icon(icon, color: color, size: 24),
-  //         const SizedBox(height: 8),
-  //         Text(
-  //           count.toString(),
-  //           style: const TextStyle(
-  //             fontSize: 20,
-  //             fontWeight: FontWeight.w700,
-  //             color: Colors.white,
-  //           ),
-  //         ),
-  //         const SizedBox(height: 4),
-  //         Text(
-  //           label,
-  //           style: const TextStyle(
-  //             fontSize: 12,
-  //             color: Colors.white70,
-  //             fontWeight: FontWeight.w500,
-  //           ),
-  //           textAlign: TextAlign.center,
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
 
   Widget _buildReimbursementCard(ReimbursementData item) {
     return Card(
@@ -912,7 +1008,8 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      item.statusText,
+                      // Pakai statusLabel agar tampil "Menunggu HRD" / "Menunggu Finance"
+                      item.statusLabel,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -983,17 +1080,13 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
   Widget _buildEmptyState() {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(40),
+        padding: const EdgeInsets.all(40),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.receipt_long_outlined,
-              size: 80,
-              color: Colors.grey,
-            ),
-            const SizedBox(height: 16),
-            const Text(
+          children: const [
+            Icon(Icons.receipt_long_outlined, size: 80, color: Colors.grey),
+            SizedBox(height: 16),
+            Text(
               'Belum Ada Data Reimbursement',
               style: TextStyle(
                 fontSize: 18,
@@ -1001,8 +1094,8 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                 color: Colors.grey,
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
+            SizedBox(height: 8),
+            Text(
               'Mulai dengan membuat reimbursement baru',
               style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
@@ -1010,5 +1103,87 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
         ),
       ),
     );
+  }
+}
+
+class _ReimbursementWorkPeriod {
+  final int id;
+  final int tahun;
+  final int bulan;
+  final DateTime tanggalMulai;
+  final DateTime tanggalSelesai;
+  final String keterangan;
+
+  const _ReimbursementWorkPeriod({
+    required this.id,
+    required this.tahun,
+    required this.bulan,
+    required this.tanggalMulai,
+    required this.tanggalSelesai,
+    required this.keterangan,
+  });
+
+  factory _ReimbursementWorkPeriod.fromJson(Map<String, dynamic> json) {
+    int readInt(String camel, String pascal) {
+      final value = json[camel] ?? json[pascal];
+      if (value is num) return value.toInt();
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    DateTime readDate(List<String> keys) {
+      for (final key in keys) {
+        final raw = json[key];
+        if (raw == null) continue;
+
+        final parsed = DateTime.tryParse(raw.toString());
+        if (parsed != null) {
+          return DateTime(parsed.year, parsed.month, parsed.day);
+        }
+      }
+
+      return DateTime.now();
+    }
+
+    return _ReimbursementWorkPeriod(
+      id: readInt('id', 'Id'),
+      tahun: readInt('tahun', 'Tahun'),
+      bulan: readInt('bulan', 'Bulan'),
+      tanggalMulai: readDate(const [
+        'tanggalMulai',
+        'TanggalMulai',
+        'tanggal_mulai',
+      ]),
+      tanggalSelesai: readDate(const [
+        'tanggalSelesai',
+        'TanggalSelesai',
+        'tanggal_selesai',
+      ]),
+      keterangan: (json['keterangan'] ?? json['Keterangan'] ?? '').toString(),
+    );
+  }
+
+  String get displayLabel {
+    const monthNames = [
+      '',
+      'Januari',
+      'Februari',
+      'Maret',
+      'April',
+      'Mei',
+      'Juni',
+      'Juli',
+      'Agustus',
+      'September',
+      'Oktober',
+      'November',
+      'Desember',
+    ];
+
+    final defaultLabel = bulan >= 1 && bulan <= 12
+        ? 'Periode ${monthNames[bulan]} $tahun'
+        : 'Periode Kerja';
+
+    final note = keterangan.trim();
+    return note.isEmpty ? defaultLabel : note;
   }
 }

@@ -55,17 +55,22 @@ class HrdUpdateEmployeeRequest {
   final String? citizenIdAddress;
   final String? residentialAddress;
   final String? postalCode;
-  final String? department; // → organization
+  final String? department;
   final String? jobPosition;
   final String? employmentStatus;
   final String? joinDate;
   final String? endContractDate;
-  final String? managerUserId; // kirim userid manager, SP resolve name
+  final String? managerUserId;
   final String? branch;
   final String? companyName;
   final String? statusDisplay;
   final List<String>? skills;
   final String? profilePhotoBase64;
+
+  // ── BARU: bank ──────────────────────────────────────────────────────────────
+  final String? bankName;
+  final String? bankAccountNumber;
+  final String? bankAccountName;
 
   const HrdUpdateEmployeeRequest({
     required this.id,
@@ -100,6 +105,10 @@ class HrdUpdateEmployeeRequest {
     this.statusDisplay,
     this.skills,
     this.profilePhotoBase64,
+    // ── BARU ──────────────────────────────────────────────────────────────────
+    this.bankName,
+    this.bankAccountNumber,
+    this.bankAccountName,
   });
 
   Map<String, dynamic> toJson() {
@@ -135,10 +144,15 @@ class HrdUpdateEmployeeRequest {
     add('EmploymentStatus', employmentStatus);
     add('JoinDate', joinDate);
     add('EndContractDate', endContractDate);
-    add('ManagerUserId', managerUserId); // userid, bukan nama
+    add('ManagerUserId', managerUserId);
     add('Branch', branch);
     add('CompanyName', companyName);
     add('StatusDisplay', statusDisplay);
+    // ── BARU ──────────────────────────────────────────────────────────────────
+    add('BankName', bankName);
+    add('BankAccountNumber', bankAccountNumber);
+    add('BankAccountName', bankAccountName);
+
     if (skills != null) data['Skills'] = skills;
     if (profilePhotoBase64 != null && profilePhotoBase64!.isNotEmpty) {
       String p = profilePhotoBase64!;

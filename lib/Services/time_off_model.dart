@@ -52,6 +52,8 @@ class TimeOffModel {
   final String? suratTugasPath;
   final String? formBiayaPath;
   final String? orgTarget;
+  final String? financeRejectionReason;
+  final String? hrdRejectionReason;
 
   const TimeOffModel({
     this.id,
@@ -99,6 +101,8 @@ class TimeOffModel {
     this.suratTugasPath,
     this.formBiayaPath,
     this.orgTarget,
+    this.hrdRejectionReason,
+    this.financeRejectionReason,
   });
 
   static dynamic _f(Map<String, dynamic> j, String camel, String snake) {
@@ -225,6 +229,16 @@ class TimeOffModel {
     suratTugasPath: _f(json, 'suratTugasPath', 'surat_tugas_path')?.toString(),
     formBiayaPath: _f(json, 'formBiayaPath', 'form_biaya_path')?.toString(),
     orgTarget: _f(json, 'orgTarget', 'org_target')?.toString(),
+    hrdRejectionReason: _f(
+      json,
+      'hrdRejectionReason',
+      'hrd_rejection_reason',
+    )?.toString(),
+    financeRejectionReason: _f(
+      json,
+      'financeRejectionReason',
+      'finance_rejection_reason',
+    )?.toString(),
   );
 
   static DateTime? _parseDate(dynamic val) {
@@ -251,6 +265,7 @@ class TimeOffModel {
   bool get isMenungguTransfer => status == 'Menunggu Transfer';
   bool get isApproved => status == 'Approved';
   bool get isRejected => status == 'Rejected';
+  bool get isRevisi => status == 'Revisi';
   bool get requiresDirector => requiresDirectorApproval == true;
 
   bool get adaBiaya => rabType != null && rabType!.isNotEmpty;
@@ -286,6 +301,8 @@ class TimeOffModel {
         return 'Ditolak';
       case 'Processed':
         return 'Diproses';
+      case 'Revisi':
+        return 'Perlu Revisi';
       default:
         return status;
     }
@@ -568,5 +585,56 @@ class AnnualQuota {
     quotaAwal: json['quotaAwal'] as int? ?? 0,
     quotaTerpakai: json['quotaTerpakai'] as int? ?? 0,
     quotaSisa: json['quotaSisa'] as int? ?? 0,
+  );
+}
+
+class WorkPeriodModel {
+  final int id;
+  final int tahun;
+  final int bulan;
+  final DateTime tanggalMulai;
+  final DateTime tanggalSelesai;
+  final String? keterangan;
+
+  const WorkPeriodModel({
+    required this.id,
+    required this.tahun,
+    required this.bulan,
+    required this.tanggalMulai,
+    required this.tanggalSelesai,
+    this.keterangan,
+  });
+
+  String get label {
+    const bulanNames = [
+      '',
+      'Januari',
+      'Februari',
+      'Maret',
+      'April',
+      'Mei',
+      'Juni',
+      'Juli',
+      'Agustus',
+      'September',
+      'Oktober',
+      'November',
+      'Desember',
+    ];
+    final namaBulan = bulan >= 1 && bulan <= 12 ? bulanNames[bulan] : '$bulan';
+    return '$namaBulan $tahun';
+  }
+
+  factory WorkPeriodModel.fromJson(Map<String, dynamic> j) => WorkPeriodModel(
+    id: ((j['id'] ?? j['Id'] ?? 0) as num).toInt(),
+    tahun: ((j['tahun'] ?? j['Tahun'] ?? 0) as num).toInt(),
+    bulan: ((j['bulan'] ?? j['Bulan'] ?? 0) as num).toInt(),
+    tanggalMulai: DateTime.parse(
+      (j['tanggalMulai'] ?? j['TanggalMulai'] ?? '2000-01-01').toString(),
+    ),
+    tanggalSelesai: DateTime.parse(
+      (j['tanggalSelesai'] ?? j['TanggalSelesai'] ?? '2000-01-31').toString(),
+    ),
+    keterangan: (j['keterangan'] ?? j['Keterangan'])?.toString(),
   );
 }

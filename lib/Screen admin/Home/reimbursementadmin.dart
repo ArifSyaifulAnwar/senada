@@ -39,7 +39,6 @@ class _HalamanAdminReimbursementState extends State<HalamanAdminReimbursement>
     'rejected',
     'paid',
   ];
-
   @override
   void initState() {
     super.initState();
@@ -1523,12 +1522,550 @@ class AdminReimbursementDetailModal extends StatefulWidget {
 class _AdminReimbursementDetailModalState
     extends State<AdminReimbursementDetailModal> {
   final TextEditingController _reviewNotesController = TextEditingController();
+
   bool _isProcessing = false;
+
+  // Bukti dimuat melalui POST. Jangan gunakan Image.network di modal ini,
+  // karena Image.network selalu mengirim GET dan API receipt memakai POST.
+  AdminReimbursementAttachment? _receiptAttachment;
+  AdminReimbursementAttachment? _paymentProofAttachment;
+  bool _isLoadingReceipt = false;
+  bool _isLoadingPaymentProof = false;
+  String? _receiptError;
+  String? _paymentProofError;
+
+  bool _hasPaymentProof() {
+    return widget.item.hasPaymentProof ||
+        (widget.item.paymentProofFilename?.trim().isNotEmpty == true);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    if (widget.item.hasReceipt) {
+      _loadReceiptAttachment();
+    }
+
+    if (_hasPaymentProof()) {
+      _loadPaymentProofAttachment();
+    }
+  }
 
   @override
   void dispose() {
     _reviewNotesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadReceiptAttachment() async {
+    if (_isLoadingReceipt) return;
+
+    setState(() {
+      _isLoadingReceipt = true;
+      _receiptError = null;
+    });
+
+    try {
+      final attachment = await widget.adminService.getAdminReceiptAttachment(
+        reimbursementId: widget.item.id,
+        viewerUserId: widget.currentAdminId,
+        fallbackFileName: widget.item.receiptFilename,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _receiptAttachment = attachment;
+        _isLoadingReceipt = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _receiptAttachment = null;
+        _isLoadingReceipt = false;
+        _receiptError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _loadPaymentProofAttachment() async {
+    if (_isLoadingPaymentProof) return;
+
+    setState(() {
+      _isLoadingPaymentProof = true;
+      _paymentProofError = null;
+    });
+
+    try {
+      final attachment = await widget.adminService
+          .getAdminPaymentProofAttachment(
+            reimbursementId: widget.item.id,
+            viewerUserId: widget.currentAdminId,
+            fallbackFileName: widget.item.paymentProofFilename,
+          );
+
+      if (!mounted) return;
+
+      setState(() {
+        _paymentProofAttachment = attachment;
+        _isLoadingPaymentProof = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _paymentProofAttachment = null;
+        _isLoadingPaymentProof = false;
+        _paymentProofError = e.toString();
+      });
+    }
+  }
+
+  void _showReceiptPreview() {
+    final attachment = _receiptAttachment;
+
+    if (attachment == null || !attachment.isImage) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920, maxHeight: 760),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.receipt_long_outlined,
+                        color: Color(0xFF3B82F6),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          attachment.fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: Container(
+                    width: double.infinity,
+                    color: const Color(0xFFF8FAFC),
+                    padding: const EdgeInsets.all(12),
+                    child: InteractiveViewer(
+                      minScale: 0.6,
+                      maxScale: 5,
+                      child: Center(
+                        child: Image.memory(
+                          attachment.bytes,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => const Text(
+                            'Gambar bukti tidak dapat ditampilkan.',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPaymentProofPreview() {
+    final attachment = _paymentProofAttachment;
+
+    if (attachment == null || !attachment.isImage) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920, maxHeight: 760),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.account_balance_rounded,
+                        color: Color(0xFF16A34A),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          attachment.fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: Container(
+                    width: double.infinity,
+                    color: const Color(0xFFF0FDF4),
+                    padding: const EdgeInsets.all(12),
+                    child: InteractiveViewer(
+                      minScale: 0.6,
+                      maxScale: 5,
+                      child: Center(
+                        child: Image.memory(
+                          attachment.bytes,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => const Text(
+                            'Gambar bukti transfer tidak dapat ditampilkan.',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPaymentProofViewer() {
+    if (_isLoadingPaymentProof) {
+      return Container(
+        width: double.infinity,
+        height: 220,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          border: Border.all(color: const Color(0xFFBBF7D0)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final attachment = _paymentProofAttachment;
+
+    if (attachment == null) {
+      return Container(
+        width: double.infinity,
+        height: 220,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          border: Border.all(color: const Color(0xFFBBF7D0)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.account_balance_outlined,
+                size: 46,
+                color: Color(0xFF64748B),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _paymentProofError ??
+                    'Bukti transfer Finance tidak dapat dimuat.',
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _loadPaymentProofAttachment,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Muat Ulang'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!attachment.isImage) {
+      return Container(
+        width: double.infinity,
+        height: 220,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          border: Border.all(color: const Color(0xFFBBF7D0)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              attachment.extension == 'pdf'
+                  ? Icons.picture_as_pdf_outlined
+                  : Icons.insert_drive_file_outlined,
+              size: 58,
+              color: attachment.extension == 'pdf'
+                  ? const Color(0xFFEF4444)
+                  : const Color(0xFF16A34A),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              attachment.fileName,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF374151),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'File bukti transfer berhasil dimuat.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      height: 220,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFBBF7D0)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(6),
+              child: Image.memory(
+                attachment.bytes,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Text('Gambar bukti transfer tidak dapat ditampilkan.'),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: ElevatedButton.icon(
+                onPressed: _showPaymentProofPreview,
+                icon: const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('Preview'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF15803D),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReceiptViewer() {
+    if (_isLoadingReceipt) {
+      return Container(
+        width: double.infinity,
+        height: 220,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final attachment = _receiptAttachment;
+
+    if (attachment == null) {
+      return Container(
+        width: double.infinity,
+        height: 220,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.broken_image_outlined,
+                size: 46,
+                color: Color(0xFF94A3B8),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _receiptError ?? 'Bukti pembayaran tidak dapat dimuat.',
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _loadReceiptAttachment,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Muat Ulang'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!attachment.isImage) {
+      return Container(
+        width: double.infinity,
+        height: 220,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              attachment.extension == 'pdf'
+                  ? Icons.picture_as_pdf_outlined
+                  : Icons.insert_drive_file_outlined,
+              size: 58,
+              color: attachment.extension == 'pdf'
+                  ? const Color(0xFFEF4444)
+                  : const Color(0xFF3B82F6),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              attachment.fileName,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF374151),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'File berhasil dimuat. Format file bukan gambar.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      height: 220,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(6),
+              child: Image.memory(
+                attachment.bytes,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Text('Gambar bukti tidak dapat ditampilkan.'),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: ElevatedButton.icon(
+                onPressed: _showReceiptPreview,
+                icon: const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('Preview'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black87,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _reviewReimbursement(String status) async {
@@ -1712,10 +2249,12 @@ class _AdminReimbursementDetailModalState
                   // User Information
                   _buildInfoSection('Informasi Pengaju', [
                     _buildDetailRow('Nama', widget.item.userName),
-                    _buildDetailRow('Email', widget.item.userEmail),
-                    if (widget.item.userPhone != null)
+                    _buildDetailRow('Email', widget.item.userEmail ?? '-'),
+                    if (widget.item.userPhone != null &&
+                        widget.item.userPhone!.trim().isNotEmpty)
                       _buildDetailRow('Telepon', widget.item.userPhone!),
-                    if (widget.item.userJob != null)
+                    if (widget.item.userJob != null &&
+                        widget.item.userJob!.trim().isNotEmpty)
                       _buildDetailRow('Pekerjaan', widget.item.userJob!),
                   ]),
 
@@ -1744,7 +2283,8 @@ class _AdminReimbursementDetailModalState
 
                   const SizedBox(height: 20),
 
-                  // Receipt
+                  // Bukti pembayaran user diambil melalui POST lalu
+                  // dirender dari response bytes menggunakan Image.memory.
                   if (widget.item.hasReceipt) ...[
                     _buildInfoSection('Bukti Pembayaran', [
                       _buildDetailRow(
@@ -1752,52 +2292,7 @@ class _AdminReimbursementDetailModalState
                         widget.item.receiptFilename ?? 'receipt',
                       ),
                       const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        height: 200,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: const Color(0xFFE5E7EB)),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: FutureBuilder<Map<String, String>>(
-                            future: widget.adminService.getAdminHeaders(),
-                            builder: (context, snapshot) {
-                              if (snapshot.hasData) {
-                                return Image.network(
-                                  widget.adminService.getAdminReceiptImageUrl(
-                                    widget.item.id,
-                                  ),
-                                  headers: snapshot.data!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Center(
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.error,
-                                            size: 48,
-                                            color: Colors.grey,
-                                          ),
-                                          SizedBox(height: 8),
-                                          Text('Gagal memuat gambar'),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                );
-                              } else {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                              }
-                            },
-                          ),
-                        ),
-                      ),
+                      _buildReceiptViewer(),
                     ]),
                     const SizedBox(height: 20),
                   ],
@@ -1833,6 +2328,38 @@ class _AdminReimbursementDetailModalState
                         'Tanggal Pembayaran',
                         _formatDateTime(widget.item.paidAt!),
                       ),
+                    ]),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // Bukti transfer yang diunggah Head Finance.
+                  if (_hasPaymentProof()) ...[
+                    _buildInfoSection('Bukti Transfer Finance', [
+                      _buildDetailRow(
+                        'File',
+                        widget.item.paymentProofFilename ??
+                            'bukti_transfer_finance',
+                      ),
+                      if (widget.item.paymentProofUploadedBy
+                              ?.trim()
+                              .isNotEmpty ==
+                          true)
+                        _buildDetailRow(
+                          'Diupload oleh',
+                          widget.item.paymentProofUploadedBy!,
+                        ),
+                      if (widget.item.paymentProofUploadedAt != null)
+                        _buildDetailRow(
+                          'Tanggal Upload',
+                          _formatDateTime(widget.item.paymentProofUploadedAt!),
+                        ),
+                      if (widget.item.paymentNotes?.trim().isNotEmpty == true)
+                        _buildDetailRow(
+                          'Catatan Finance',
+                          widget.item.paymentNotes!.trim(),
+                        ),
+                      const SizedBox(height: 12),
+                      _buildPaymentProofViewer(),
                     ]),
                     const SizedBox(height: 20),
                   ],

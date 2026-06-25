@@ -777,9 +777,9 @@ class _OvertimeFormScreenState extends State<OvertimeFormScreen> {
         final date = await showDatePicker(
           context: context,
           initialDate: _selectedDate ?? now,
-          firstDate: isEditing
-              ? _selectedDate ?? now.subtract(const Duration(days: 30))
-              : now.subtract(const Duration(days: 7)),
+          // Pengajuan lembur dapat dibuat untuk tanggal sebelumnya.
+          // Tidak lagi dibatasi hanya 7 hari ke belakang.
+          firstDate: DateTime(2024, 1, 1),
           lastDate: now.add(const Duration(days: 30)),
           builder: (context, child) {
             return Theme(

@@ -2,7 +2,6 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
 import 'dart:convert';
-import 'dart:io';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/reimbursementmodel.dart';
 import 'package:absensikaryawan/Services/reimbursementservice.dart';
@@ -36,7 +35,7 @@ class _HalamanAjukanReimbursementState
 
   String _selectedCategory = '';
   List<ReimbursementCategory> _categories = [];
-  XFile? _selectedImage;
+  SelectedReimbursementFile? _selectedReceipt;
   bool _isSubmitting = false;
   bool _isLoadingCategories = true;
   String? _currentUserId;
@@ -324,7 +323,7 @@ class _HalamanAjukanReimbursementState
       return;
     }
 
-    if (_selectedImage == null) {
+    if (_selectedReceipt == null) {
       _showErrorSnackBar('Harap upload bukti pembayaran');
       return;
     }
@@ -361,7 +360,9 @@ class _HalamanAjukanReimbursementState
         description: _keteranganController.text.trim().isEmpty
             ? null
             : _keteranganController.text.trim(),
-        receiptFile: File(_selectedImage!.path),
+        receiptBytes: _selectedReceipt!.bytes,
+        receiptFileName: _selectedReceipt!.fileName,
+        receiptContentType: _selectedReceipt!.mimeType,
         status: 'pending',
       );
 
@@ -607,7 +608,8 @@ class _HalamanAjukanReimbursementState
 
   Future<void> _pickFromGallery() async {
     try {
-      final ImagePicker picker = ImagePicker();
+      final picker = ImagePicker();
+
       final XFile? image = await picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: 1920,
@@ -615,9 +617,16 @@ class _HalamanAjukanReimbursementState
         imageQuality: 85,
       );
 
-      if (image != null) {
-        await _validateAndSetFile(image);
-      }
+      if (image == null) return;
+
+      final bytes = await image.readAsBytes();
+
+      await _validateAndSetBytes(
+        bytes: bytes,
+        fileName: image.name.isNotEmpty
+            ? image.name
+            : 'bukti_galeri_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
     } catch (e) {
       _showErrorSnackBar('Gagal memilih foto dari galeri: $e');
     }
@@ -625,7 +634,8 @@ class _HalamanAjukanReimbursementState
 
   Future<void> _pickFromCamera() async {
     try {
-      final ImagePicker picker = ImagePicker();
+      final picker = ImagePicker();
+
       final XFile? image = await picker.pickImage(
         source: ImageSource.camera,
         maxWidth: 1920,
@@ -633,9 +643,16 @@ class _HalamanAjukanReimbursementState
         imageQuality: 85,
       );
 
-      if (image != null) {
-        await _validateAndSetFile(image);
-      }
+      if (image == null) return;
+
+      final bytes = await image.readAsBytes();
+
+      await _validateAndSetBytes(
+        bytes: bytes,
+        fileName: image.name.isNotEmpty
+            ? image.name
+            : 'bukti_kamera_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
     } catch (e) {
       _showErrorSnackBar('Gagal mengambil foto dari kamera: $e');
     }
@@ -647,40 +664,49 @@ class _HalamanAjukanReimbursementState
         type: FileType.custom,
         allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
         allowMultiple: false,
+        withData: true,
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.first;
+      if (result == null || result.files.isEmpty) return;
 
-        if (file.path != null) {
-          final xFile = XFile(file.path!);
-          await _validateAndSetFile(xFile);
+      final file = result.files.first;
+      final bytes = file.bytes;
 
-          final String fileExtension = file.extension?.toLowerCase() ?? '';
-          if (fileExtension == 'pdf') {
-          } else {}
-        } else {}
+      if (bytes == null || bytes.isEmpty) {
+        _showErrorSnackBar('File tidak dapat dibaca. Silakan pilih ulang.');
+        return;
       }
+
+      await _validateAndSetBytes(bytes: bytes, fileName: file.name);
     } catch (e) {
       _showErrorSnackBar('Gagal memilih file: $e');
     }
   }
 
-  Future<void> _validateAndSetFile(XFile file) async {
+  Future<void> _validateAndSetBytes({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
     try {
-      final fileData = File(file.path);
-      final fileSize = await fileData.length();
-      const maxSize = 10 * 1024 * 1024; // 10MB
+      const maxSize = 10 * 1024 * 1024;
 
-      if (fileSize > maxSize) {
+      if (bytes.isEmpty) {
+        _showErrorSnackBar('File kosong atau tidak dapat dibaca.');
+        return;
+      }
+
+      if (bytes.length > maxSize) {
         _showErrorSnackBar('Ukuran file terlalu besar. Maksimal 10MB.');
         return;
       }
 
-      final allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf'];
-      final fileExtension = file.path.split('.').last.toLowerCase();
+      final extension = fileName.contains('.')
+          ? fileName.split('.').last.toLowerCase()
+          : '';
 
-      if (!allowedExtensions.contains(fileExtension)) {
+      const allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf'];
+
+      if (!allowedExtensions.contains(extension)) {
         _showErrorSnackBar(
           'Format file tidak didukung. Gunakan JPG, PNG, atau PDF.',
         );
@@ -688,7 +714,11 @@ class _HalamanAjukanReimbursementState
       }
 
       setState(() {
-        _selectedImage = file;
+        _selectedReceipt = SelectedReimbursementFile(
+          bytes: bytes,
+          fileName: fileName,
+          extension: extension,
+        );
       });
     } catch (e) {
       _showErrorSnackBar('Gagal memproses file: $e');
@@ -697,8 +727,9 @@ class _HalamanAjukanReimbursementState
 
   void _removeFile() {
     setState(() {
-      _selectedImage = null;
+      _selectedReceipt = null;
     });
+
     _showSuccessSnackBar('File berhasil dihapus. Silakan pilih file baru.');
   }
 
@@ -741,7 +772,7 @@ class _HalamanAjukanReimbursementState
 
   bool _isFormValid() {
     return _formKey.currentState?.validate() == true &&
-        _selectedImage != null &&
+        _selectedReceipt != null &&
         _selectedDate != null &&
         _selectedCategory.isNotEmpty;
   }
@@ -903,7 +934,7 @@ class _HalamanAjukanReimbursementState
   }
 
   Widget _buildFilePreview() {
-    if (_selectedImage == null) {
+    if (_selectedReceipt == null) {
       return GestureDetector(
         onTap: () => _showFileSourceOptions(context),
         child: Container(
@@ -944,9 +975,9 @@ class _HalamanAjukanReimbursementState
       );
     }
 
-    final String fileName = _selectedImage!.path.split('/').last;
-    final String fileExtension = fileName.split('.').last.toLowerCase();
-    final bool isImage = ['jpg', 'jpeg', 'png'].contains(fileExtension);
+    final String fileName = _selectedReceipt!.fileName;
+    final String fileExtension = _selectedReceipt!.extension;
+    final bool isImage = _selectedReceipt!.isImage;
 
     return Container(
       margin: EdgeInsets.only(bottom: _getResponsivePadding(context, 16)),
@@ -1085,58 +1116,43 @@ class _HalamanAjukanReimbursementState
   }
 
   Widget _buildFileSizeInfo() {
-    return FutureBuilder<int>(
-      future: File(_selectedImage!.path).length(),
-      builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          final size = snapshot.data!;
-          final sizeInMB = size / (1024 * 1024);
-          return Container(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: sizeInMB < 5 ? Colors.green[100] : Colors.orange[100],
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '${sizeInMB.toStringAsFixed(1)} MB',
-              style: TextStyle(
-                fontSize: _getResponsiveFontSize(context, 10),
-                color: sizeInMB < 5 ? Colors.green[700] : Colors.orange[700],
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          );
-        }
-        return Container(
-          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.grey[200],
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            'Loading...',
-            style: TextStyle(
-              fontSize: _getResponsiveFontSize(context, 10),
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        );
-      },
+    if (_selectedReceipt == null) {
+      return const SizedBox.shrink();
+    }
+
+    final sizeInMb = _selectedReceipt!.size / (1024 * 1024);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: sizeInMb < 5 ? Colors.green[100] : Colors.orange[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '${sizeInMb.toStringAsFixed(1)} MB',
+        style: TextStyle(
+          fontSize: _getResponsiveFontSize(context, 10),
+          color: sizeInMb < 5 ? Colors.green[700] : Colors.orange[700],
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
   Widget _buildImagePreviewContent() {
-    return ClipRRect(
-      borderRadius: BorderRadius.zero,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: FileImage(File(_selectedImage!.path)),
-            fit: BoxFit.cover,
-          ),
-        ),
+    if (_selectedReceipt == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      color: Colors.grey[100],
+      child: Image.memory(
+        _selectedReceipt!.bytes,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          return const Center(child: Text('Gambar tidak dapat ditampilkan.'));
+        },
       ),
     );
   }
@@ -1241,10 +1257,9 @@ class _HalamanAjukanReimbursementState
   // }
 
   String _getFileInfo() {
-    if (_selectedImage == null) return '';
+    if (_selectedReceipt == null) return '';
 
-    final String fileName = _selectedImage!.path.split('/').last;
-    final String fileExtension = fileName.split('.').last.toLowerCase();
+    final String fileExtension = _selectedReceipt!.extension;
 
     switch (fileExtension) {
       case 'pdf':
@@ -1608,7 +1623,7 @@ class _HalamanAjukanReimbursementState
                           //   ],
                           // ),
                           // SizedBox(height: 16),
-                          if (_selectedImage != null)
+                          if (_selectedReceipt != null)
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
@@ -1782,3 +1797,34 @@ class NumberInputFormatter extends TextInputFormatter {
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+
+class SelectedReimbursementFile {
+  final Uint8List bytes;
+  final String fileName;
+  final String extension;
+
+  const SelectedReimbursementFile({
+    required this.bytes,
+    required this.fileName,
+    required this.extension,
+  });
+
+  int get size => bytes.length;
+
+  bool get isImage =>
+      extension == 'jpg' || extension == 'jpeg' || extension == 'png';
+
+  String get mimeType {
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'pdf':
+        return 'application/pdf';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+}

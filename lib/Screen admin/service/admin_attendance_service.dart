@@ -287,6 +287,12 @@ class AdminAttendanceService {
     }
   }
 
+  /// Mengambil periode yang benar-benar aktif berdasarkan rentang tanggal.
+  ///
+  /// Jangan memilih hanya dari field `bulan`, karena periode berikutnya bisa
+  /// mulai sebelum pergantian bulan kalender. Contoh:
+  /// Periode Juli dapat dimulai pada 25 Juni, sedangkan Periode Juni telah
+  /// berakhir pada 24 Juni.
   Future<ApiResponse<DateTimeRange>> getCurrentWorkPeriod() async {
     try {
       final adminUserId = await _getUserId();
@@ -298,76 +304,92 @@ class AdminAttendanceService {
       }
 
       final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
 
       final response = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/calendar/period/list'),
         body: jsonEncode({'tahun': now.year}),
       );
 
-      if (response.statusCode == 200) {
-        final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
-
-        final success =
-            jsonData['Success'] == true || jsonData['success'] == true;
-        if (!success) {
-          return ApiResponse<DateTimeRange>(
-            success: false,
-            message:
-                jsonData['Message'] ??
-                jsonData['message'] ??
-                'Gagal mengambil periode kerja',
-          );
-        }
-
-        final data = jsonData['Data'] ?? jsonData['data'] ?? [];
-
-        if (data is List) {
-          final currentMonth = now.month;
-
-          Map<String, dynamic>? item;
-          for (final x in data) {
-            if (x is Map<String, dynamic>) {
-              final bulan = x['Bulan'] ?? x['bulan'];
-              if (bulan == currentMonth) {
-                item = x;
-                break;
-              }
-            }
-          }
-
-          if (item != null) {
-            final startStr =
-                item['TanggalMulai'] ??
-                item['tanggalMulai'] ??
-                item['tanggal_mulai'];
-
-            final endStr =
-                item['TanggalSelesai'] ??
-                item['tanggalSelesai'] ??
-                item['tanggal_selesai'];
-
-            final start = DateTime.tryParse(startStr?.toString() ?? '');
-            final end = DateTime.tryParse(endStr?.toString() ?? '');
-
-            if (start != null && end != null) {
-              return ApiResponse<DateTimeRange>(
-                success: true,
-                message: 'Periode kerja ditemukan',
-                data: DateTimeRange(start: start, end: end),
-              );
-            }
-          }
-        }
-
+      if (response.statusCode != 200) {
         return ApiResponse<DateTimeRange>(
           success: false,
-          message: 'Periode bulan berjalan belum disetting',
+          message: 'Server error (${response.statusCode})',
+        );
+      }
+
+      final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
+      final success =
+          jsonData['Success'] == true || jsonData['success'] == true;
+
+      if (!success) {
+        return ApiResponse<DateTimeRange>(
+          success: false,
+          message:
+              jsonData['Message'] ??
+              jsonData['message'] ??
+              'Gagal mengambil periode kerja',
+        );
+      }
+
+      final rawData = jsonData['Data'] ?? jsonData['data'] ?? [];
+      if (rawData is! List) {
+        return ApiResponse<DateTimeRange>(
+          success: false,
+          message: 'Format periode kerja tidak valid.',
+        );
+      }
+
+      final ranges = <DateTimeRange>[];
+
+      for (final row in rawData) {
+        if (row is! Map<String, dynamic>) continue;
+
+        final startRaw =
+            row['TanggalMulai'] ?? row['tanggalMulai'] ?? row['tanggal_mulai'];
+        final endRaw =
+            row['TanggalSelesai'] ??
+            row['tanggalSelesai'] ??
+            row['tanggal_selesai'];
+
+        final parsedStart = DateTime.tryParse(startRaw?.toString() ?? '');
+        final parsedEnd = DateTime.tryParse(endRaw?.toString() ?? '');
+
+        if (parsedStart == null || parsedEnd == null) continue;
+
+        final start = DateTime(
+          parsedStart.year,
+          parsedStart.month,
+          parsedStart.day,
+        );
+        final end = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
+
+        if (end.isBefore(start)) continue;
+
+        ranges.add(DateTimeRange(start: start, end: end));
+      }
+
+      // Ambil periode yang mencakup hari ini, bukan sekadar `bulan == now.month`.
+      final activeRanges =
+          ranges
+              .where(
+                (range) =>
+                    !today.isBefore(range.start) && !today.isAfter(range.end),
+              )
+              .toList()
+            ..sort((a, b) => b.start.compareTo(a.start));
+
+      if (activeRanges.isNotEmpty) {
+        return ApiResponse<DateTimeRange>(
+          success: true,
+          message: 'Periode kerja aktif ditemukan',
+          data: activeRanges.first,
         );
       }
 
       return ApiResponse<DateTimeRange>(
         success: false,
-        message: 'Server error (${response.statusCode})',
+        message: 'Tidak ada periode kerja aktif untuk hari ini.',
       );
     } catch (e) {
       return ApiResponse<DateTimeRange>(

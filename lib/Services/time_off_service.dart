@@ -1067,4 +1067,27 @@ class TimeOffService {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
+
+  static Future<ApiResponse<List<WorkPeriodModel>>> getWorkPeriods() async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL/api/timeoff/work-periods'),
+        headers: await _jsonHeaders(),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (_get(body, 'success') == true) {
+        final data = _get(body, 'data') as Map<String, dynamic>?;
+        final list = (data?['periods'] as List? ?? [])
+            .map((e) => WorkPeriodModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return ApiResponse(success: true, message: '', data: list);
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? '') as String,
+      );
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
 }

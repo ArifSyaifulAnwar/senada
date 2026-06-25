@@ -115,7 +115,7 @@ class ExcelExportService {
     // Dibuat sampai K karena summary punya kolom tambahan.
     sheet.merge(
       ex.CellIndex.indexByString('A1'),
-      ex.CellIndex.indexByString('K1'),
+      ex.CellIndex.indexByString('N1'),
     );
 
     // ── Row 2: Periode + Dicetak ───────────────────────────────────
@@ -140,16 +140,16 @@ class ExcelExportService {
     sheet.cell(ex.CellIndex.indexByString('A2')).cellStyle = subInfoStyle;
     sheet.merge(
       ex.CellIndex.indexByString('A2'),
-      ex.CellIndex.indexByString('F2'),
+      ex.CellIndex.indexByString('G2'),
     );
 
-    sheet.cell(ex.CellIndex.indexByString('G2')).value = ex.TextCellValue(
+    sheet.cell(ex.CellIndex.indexByString('H2')).value = ex.TextCellValue(
       printDate,
     );
-    sheet.cell(ex.CellIndex.indexByString('G2')).cellStyle = subInfoStyle;
+    sheet.cell(ex.CellIndex.indexByString('H2')).cellStyle = subInfoStyle;
     sheet.merge(
-      ex.CellIndex.indexByString('G2'),
-      ex.CellIndex.indexByString('K2'),
+      ex.CellIndex.indexByString('H2'),
+      ex.CellIndex.indexByString('N2'),
     );
 
     // ── Row 3: Spacer ───────────────────────────────────────────────
@@ -196,7 +196,10 @@ class ExcelExportService {
     sheet.setColumnWidth(7, 24); // Status
     sheet.setColumnWidth(8, 12); // Doa
     sheet.setColumnWidth(9, 16); // Persentase
-    sheet.setColumnWidth(10, 14); // Lembur summary
+    sheet.setColumnWidth(10, 16); // Cuti Tahunan / Persentase
+    sheet.setColumnWidth(11, 14); // Izin Sakit / Doa
+    sheet.setColumnWidth(12, 14); // Izin Lainnya / Doa
+    sheet.setColumnWidth(13, 14); // Dinas Luar / Lembur summary
 
     sheet.setRowHeight(0, 28);
     sheet.setRowHeight(1, 18);
@@ -226,7 +229,10 @@ class ExcelExportService {
     int grandTotal = 0;
     int grandTepat = 0;
     int grandTerlambat = 0;
-    int grandCuti = 0;
+    int grandCutiTahunan = 0;
+    int grandIzinSakit = 0;
+    int grandIzinLainnya = 0;
+    int grandDinasLuar = 0;
     int grandTidakHadir = 0;
     int grandIkutDoa = 0;
     int grandTidakDoa = 0;
@@ -237,30 +243,22 @@ class ExcelExportService {
 
       for (int i = 0; i < rows.length; i++) {
         final d = rows[i];
-
         final rowBg = no % 2 == 1 ? whiteBg : altRowBg;
-
         final baseStyle = makeStyle(bgColor: rowBg);
         final centerStyle = makeStyle(
           bgColor: rowBg,
           hAlign: ex.HorizontalAlign.Center,
         );
-
         final statusStyle = _statusCellStyle(d.displayStatus, rowBg, borderHex);
-
         final tanggalKey =
             '${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}_${d.userId.toLowerCase()}';
-
         final doaVal = doaMap?[tanggalKey] ?? '';
         final doaStyle = _doaCellStyle(doaVal, rowBg, borderHex);
-
         final ovtMin = d.overtimeMinutes;
         final hasOvt = ovtMin != null && ovtMin > 0 && ovtMin < 1440;
-
         final lemburText = hasOvt
             ? '${(ovtMin / 60).toStringAsFixed(1)} jam'
             : '-';
-
         final lemburStyle = _lemburCellStyle(ovtMin, rowBg, borderHex);
 
         setCell(
@@ -269,82 +267,73 @@ class ExcelExportService {
           value: ex.IntCellValue(no),
           style: centerStyle,
         );
-
         setCell(
           col: 1,
           row: rowIndex,
           value: ex.TextCellValue(d.userName),
           style: baseStyle,
         );
-
         setCell(
           col: 2,
           row: rowIndex,
           value: ex.TextCellValue(d.department ?? '-'),
           style: baseStyle,
         );
-
         setCell(
           col: 3,
           row: rowIndex,
           value: ex.TextCellValue(_formatDate(d.attendanceDate)),
           style: centerStyle,
         );
-
         setCell(
           col: 4,
           row: rowIndex,
           value: ex.TextCellValue(d.formattedCheckIn),
           style: centerStyle,
         );
-
         setCell(
           col: 5,
           row: rowIndex,
           value: ex.TextCellValue(d.formattedCheckOut),
           style: centerStyle,
         );
-
         setCell(
           col: 6,
           row: rowIndex,
           value: ex.TextCellValue(lemburText),
           style: lemburStyle,
         );
-
         setCell(
           col: 7,
           row: rowIndex,
           value: ex.TextCellValue(d.displayStatus),
           style: statusStyle,
         );
-
         setCell(
           col: 8,
           row: rowIndex,
           value: ex.TextCellValue(doaVal),
           style: doaStyle,
         );
-
         rowIndex++;
         no++;
       }
 
       final counts = _countStatus(rows, doaMap);
-
       grandTotal += counts['total']!;
       grandTepat += counts['tepat']!;
       grandTerlambat += counts['terlambat']!;
-      grandCuti += counts['cuti']!;
+      grandCutiTahunan += counts['cutiTahunan']!;
+      grandIzinSakit += counts['izinSakit']!;
+      grandIzinLainnya += counts['izinLainnya']!;
+      grandDinasLuar += counts['dinasLuar']!;
       grandTidakHadir += counts['tidakHadir']!;
       grandIkutDoa += counts['ikutDoa']!;
       grandTidakDoa += counts['tidakDoa']!;
       grandLemburMinutes += counts['lemburMinutes']!;
 
-      // ── Summary per karyawan ─────────────────────────────────────
       if (isMultiHari) {
         rowIndex++;
-
         final summaryLabelStyle = makeStyle(
           bgColor: headerBg,
           fontColor: headerFg,
@@ -352,7 +341,6 @@ class ExcelExportService {
           fontSize: 9,
           hAlign: ex.HorizontalAlign.Center,
         );
-
         final namaStyle = makeStyle(
           bgColor: '#F2F3F4',
           bold: true,
@@ -360,25 +348,28 @@ class ExcelExportService {
           hAlign: ex.HorizontalAlign.Center,
         );
 
-        setCell(
-          col: 0,
-          row: rowIndex,
-          value: ex.TextCellValue(''),
-          style: summaryLabelStyle,
-        );
-
-        final summaryLabels = [
+        const summaryLabels = [
           'Total Data',
-          'Total Hari Kerja',
+          'Hari Kerja',
           'Tepat Waktu',
           'Terlambat',
-          'Cuti / Izin',
+          'Cuti Tahunan',
+          'Izin Sakit',
+          'Izin Lainnya',
+          'Dinas Luar',
           'Tidak Hadir',
           'Persentase',
           'Ikut Doa',
           'Tidak Doa',
+          'Lembur (jam)',
         ];
 
+        setCell(
+          col: 0,
+          row: rowIndex,
+          value: ex.TextCellValue('REKAP'),
+          style: summaryLabelStyle,
+        );
         for (int col = 0; col < summaryLabels.length; col++) {
           setCell(
             col: col + 1,
@@ -387,56 +378,66 @@ class ExcelExportService {
             style: summaryLabelStyle,
           );
         }
-
-        setCell(
-          col: 10,
-          row: rowIndex,
-          value: ex.TextCellValue('Lembur (jam)'),
-          style: summaryLabelStyle,
-        );
-
         sheet.setRowHeight(rowIndex, 18);
         rowIndex++;
 
-        final hadir = counts['tepat']! + counts['terlambat']!;
+        // ((Tepat Waktu + Dinas Luar) - (Terlambat + Cuti + Izin + Tidak Hadir)) / Hari Kerja x 100%
+        final nilaiKehadiran =
+            counts['tepat']! +
+            counts['dinasLuar']! -
+            counts['terlambat']! -
+            counts['cutiTahunan']! -
+            counts['izinSakit']! -
+            counts['izinLainnya']! -
+            counts['tidakHadir']!;
         final persenKehadiran = totalHariKerja > 0
-            ? (hadir / totalHariKerja) * 100
+            ? (nilaiKehadiran / totalHariKerja) * 100
             : 0.0;
 
-        final summaryValColors = [
-          '#EBF5FB', // Total Data
-          '#EBF5FB', // Total Hari Kerja
-          '#D5F5E3', // Tepat Waktu
-          '#FDEBD0', // Terlambat
-          '#D6EAF8', // Cuti / Izin
-          '#FADBD8', // Tidak Hadir
-          '#D5F5E3', // Persentase
-          '#D5F5E3', // Ikut Doa
-          '#FADBD8', // Tidak Doa
+        final summaryValues = <dynamic>[
+          counts['total']!,
+          totalHariKerja,
+          counts['tepat']!,
+          counts['terlambat']!,
+          counts['cutiTahunan']!,
+          counts['izinSakit']!,
+          counts['izinLainnya']!,
+          counts['dinasLuar']!,
+          counts['tidakHadir']!,
+          '${persenKehadiran.toStringAsFixed(1)}%',
+          counts['ikutDoa']!,
+          counts['tidakDoa']!,
+          (counts['lemburMinutes']! / 60).toStringAsFixed(1),
         ];
-
-        final summaryFontColors = [
+        const summaryValColors = [
+          '#EBF5FB',
+          '#EBF5FB',
+          '#D5F5E3',
+          '#FDEBD0',
+          '#D6EAF8',
+          '#F5EEF8',
+          '#FDEDEC',
+          '#E8F8F5',
+          '#FADBD8',
+          '#D5F5E3',
+          '#D5F5E3',
+          '#FADBD8',
+          '#FCF3CF',
+        ];
+        const summaryFontColors = [
           '#1E3A5F',
           '#1E3A5F',
           '#1E8449',
           '#784212',
           '#154360',
+          '#6C3483',
+          '#922B21',
+          '#117864',
           '#7B241C',
           '#1E8449',
           '#1E8449',
           '#7B241C',
-        ];
-
-        final summaryValues = [
-          counts['total']!,
-          totalHariKerja,
-          counts['tepat']!,
-          counts['terlambat']!,
-          counts['cuti']!,
-          counts['tidakHadir']!,
-          '${persenKehadiran.toStringAsFixed(1)}%',
-          counts['ikutDoa']!,
-          counts['tidakDoa']!,
+          '#B9770E',
         ];
 
         setCell(
@@ -445,7 +446,6 @@ class ExcelExportService {
           value: ex.TextCellValue(rows[0].userName),
           style: namaStyle,
         );
-
         for (int col = 0; col < summaryValues.length; col++) {
           setDynamicCell(
             col: col + 1,
@@ -455,38 +455,18 @@ class ExcelExportService {
               bgColor: summaryValColors[col],
               fontColor: summaryFontColors[col],
               bold: true,
-              fontSize: 11,
+              fontSize: 10,
               hAlign: ex.HorizontalAlign.Center,
             ),
           );
         }
-
-        final lemburJamGrp = double.parse(
-          (counts['lemburMinutes']! / 60).toStringAsFixed(1),
-        );
-
-        setCell(
-          col: 10,
-          row: rowIndex,
-          value: ex.DoubleCellValue(lemburJamGrp),
-          style: makeStyle(
-            bgColor: '#FCF3CF',
-            fontColor: '#B9770E',
-            bold: true,
-            fontSize: 11,
-            hAlign: ex.HorizontalAlign.Center,
-          ),
-        );
-
         sheet.setRowHeight(rowIndex, 22);
-        rowIndex++;
-        rowIndex++;
+        rowIndex += 2;
       }
     }
 
     // ── Grand Total ─────────────────────────────────────────────────
     rowIndex++;
-
     final grandLabelStyle = makeStyle(
       bgColor: '#1A252F',
       fontColor: headerFg,
@@ -494,28 +474,27 @@ class ExcelExportService {
       fontSize: 10,
       hAlign: ex.HorizontalAlign.Center,
     );
-
-    final grandTotalLabel = isMultiHari ? 'GRAND TOTAL' : 'TOTAL';
-
-    setCell(
-      col: 0,
-      row: rowIndex,
-      value: ex.TextCellValue(grandTotalLabel),
-      style: grandLabelStyle,
-    );
-
-    final grandLabels = [
+    const grandLabels = [
       'Total Data',
-      'Total Hari Kerja',
+      'Hari Kerja',
       'Tepat Waktu',
       'Terlambat',
-      'Cuti / Izin',
+      'Cuti Tahunan',
+      'Izin Sakit',
+      'Izin Lainnya',
+      'Dinas Luar',
       'Tidak Hadir',
       'Persentase',
       'Ikut Doa',
       'Tidak Doa',
+      'Lembur (jam)',
     ];
-
+    setCell(
+      col: 0,
+      row: rowIndex,
+      value: ex.TextCellValue(isMultiHari ? 'GRAND TOTAL' : 'TOTAL'),
+      style: grandLabelStyle,
+    );
     for (int col = 0; col < grandLabels.length; col++) {
       setCell(
         col: col + 1,
@@ -524,61 +503,67 @@ class ExcelExportService {
         style: grandLabelStyle,
       );
     }
-
-    setCell(
-      col: 10,
-      row: rowIndex,
-      value: ex.TextCellValue('Lembur (jam)'),
-      style: grandLabelStyle,
-    );
-
     sheet.setRowHeight(rowIndex, 18);
     rowIndex++;
 
     final totalKaryawan = grouped.length;
     final totalHariKerjaGrand = totalHariKerja * totalKaryawan;
-    final grandHadir = grandTepat + grandTerlambat;
-
+    final grandNilaiKehadiran =
+        grandTepat +
+        grandDinasLuar -
+        grandTerlambat -
+        grandCutiTahunan -
+        grandIzinSakit -
+        grandIzinLainnya -
+        grandTidakHadir;
     final grandPersenKehadiran = totalHariKerjaGrand > 0
-        ? (grandHadir / totalHariKerjaGrand) * 100
+        ? (grandNilaiKehadiran / totalHariKerjaGrand) * 100
         : 0.0;
-
-    final grandValues = [
+    final grandValues = <dynamic>[
       grandTotal,
       totalHariKerjaGrand,
       grandTepat,
       grandTerlambat,
-      grandCuti,
+      grandCutiTahunan,
+      grandIzinSakit,
+      grandIzinLainnya,
+      grandDinasLuar,
       grandTidakHadir,
       '${grandPersenKehadiran.toStringAsFixed(1)}%',
       grandIkutDoa,
       grandTidakDoa,
+      (grandLemburMinutes / 60).toStringAsFixed(1),
     ];
-
-    final grandColors = [
+    const grandColors = [
       '#D6DBDF',
       '#D6DBDF',
       '#D5F5E3',
       '#FDEBD0',
       '#D6EAF8',
+      '#F5EEF8',
+      '#FDEDEC',
+      '#E8F8F5',
       '#FADBD8',
       '#D5F5E3',
       '#D5F5E3',
       '#FADBD8',
+      '#FCF3CF',
     ];
-
-    final grandFonts = [
+    const grandFonts = [
       '#1A252F',
       '#1A252F',
       '#1E8449',
       '#784212',
       '#154360',
+      '#6C3483',
+      '#922B21',
+      '#117864',
       '#7B241C',
       '#1E8449',
       '#1E8449',
       '#7B241C',
+      '#B9770E',
     ];
-
     setCell(
       col: 0,
       row: rowIndex,
@@ -590,7 +575,6 @@ class ExcelExportService {
         hAlign: ex.HorizontalAlign.Center,
       ),
     );
-
     for (int col = 0; col < grandValues.length; col++) {
       setDynamicCell(
         col: col + 1,
@@ -600,29 +584,11 @@ class ExcelExportService {
           bgColor: grandColors[col],
           fontColor: grandFonts[col],
           bold: true,
-          fontSize: 13,
+          fontSize: 12,
           hAlign: ex.HorizontalAlign.Center,
         ),
       );
     }
-
-    final gLemburJam = double.parse(
-      (grandLemburMinutes / 60).toStringAsFixed(1),
-    );
-
-    setCell(
-      col: 10,
-      row: rowIndex,
-      value: ex.DoubleCellValue(gLemburJam),
-      style: makeStyle(
-        bgColor: '#FCF3CF',
-        fontColor: '#B9770E',
-        bold: true,
-        fontSize: 13,
-        hAlign: ex.HorizontalAlign.Center,
-      ),
-    );
-
     sheet.setRowHeight(rowIndex, 26);
 
     final encoded = excel.encode();
@@ -634,84 +600,116 @@ class ExcelExportService {
     return Uint8List.fromList(encoded);
   }
 
-  // ── Hitung status + doa + lembur per karyawan ─────────────────────
+  // ── Hitung status detail + doa + lembur per karyawan ───────────
   static Map<String, int> _countStatus(
     List<AdminAttendanceData> rows,
     Map<String, String>? doaMap,
   ) {
     int tepat = 0;
     int terlambat = 0;
-    int cuti = 0;
+    int cutiTahunan = 0;
+    int izinSakit = 0;
+    int izinLainnya = 0;
+    int dinasLuar = 0;
     int tidakHadir = 0;
     int ikutDoa = 0;
     int tidakDoa = 0;
     int lemburMinutes = 0;
 
     for (final d in rows) {
-      final s = d.displayStatus.toLowerCase();
-      final checkInStatus = d.checkInStatus.toLowerCase();
+      final status = d.displayStatus.toLowerCase();
+      final checkIn = d.checkInStatus.toLowerCase();
+      final checkOut = d.checkOutStatus.toLowerCase();
       final notes = d.notes.toLowerCase();
 
-      final isTepat = s.contains('tepat') || checkInStatus.contains('on_time');
-
-      final isTerlambat =
-          s.contains('terlambat') ||
-          checkInStatus.contains('late') ||
-          checkInStatus.contains('very_late');
-
-      final isCuti =
-          s.contains('cuti') ||
-          s.contains('izin') ||
-          s.contains('sakit') ||
-          s.contains('dinas') ||
-          s.contains('timeoff') ||
-          s.contains('leave') ||
-          checkInStatus.contains('cuti') ||
-          checkInStatus.contains('izin') ||
-          checkInStatus.contains('leave') ||
-          notes.contains('cuti') ||
-          notes.contains('izin') ||
-          notes.contains('sakit') ||
-          notes.contains('dinas');
-
+      final isDinasLuar =
+          status.contains('dinas luar') ||
+          checkIn.contains('dinas luar') ||
+          checkOut.contains('dinas luar') ||
+          notes.contains('dinas luar') ||
+          checkIn.trim() == 'dl';
+      final isCutiTahunan =
+          status.contains('cuti tahunan') ||
+          status == 'cuti' ||
+          checkIn.contains('cuti tahunan') ||
+          checkIn.contains('izin tahunan') ||
+          notes.contains('cuti tahunan') ||
+          notes.contains('izin tahunan');
+      final isIzinSakit =
+          status.contains('izin sakit') ||
+          status == 'sakit' ||
+          checkIn.contains('izin sakit') ||
+          checkIn == 'sakit' ||
+          notes.contains('izin sakit') ||
+          notes.contains('sakit');
       final isTidakHadir =
-          s.contains('tidak hadir') ||
-          s.contains('absent') ||
-          s.contains('tidak absen');
+          status.contains('tidak hadir') ||
+          status.contains('tidak absen') ||
+          status.contains('absent') ||
+          status.contains('alpha') ||
+          checkIn.contains('tidak hadir') ||
+          checkIn.contains('tidak absen') ||
+          checkIn.contains('absent');
+      final isTerlambat =
+          status.contains('terlambat') ||
+          checkIn.contains('late') ||
+          checkIn.contains('very_late');
+      final isTepat = status.contains('tepat') || checkIn.contains('on_time');
+      final isIzinLainnya =
+          !isDinasLuar &&
+          !isCutiTahunan &&
+          !isIzinSakit &&
+          (status.startsWith('izin') ||
+              status.contains('umrah') ||
+              status.contains('haji') ||
+              status.contains('lahiran') ||
+              status.contains('meninggal') ||
+              checkIn.contains('izin') ||
+              checkIn.contains('umrah') ||
+              checkIn.contains('haji') ||
+              checkIn.contains('lahiran') ||
+              checkIn.contains('meninggal') ||
+              notes.contains('izin') ||
+              notes.contains('umrah') ||
+              notes.contains('haji') ||
+              notes.contains('lahiran') ||
+              notes.contains('meninggal'));
 
-      if (isTepat) {
-        tepat++;
-      } else if (isTerlambat) {
-        terlambat++;
-      } else if (isCuti) {
-        cuti++;
+      // Satu baris hanya boleh masuk satu kategori.
+      if (isDinasLuar) {
+        dinasLuar++;
+      } else if (isCutiTahunan) {
+        cutiTahunan++;
+      } else if (isIzinSakit) {
+        izinSakit++;
+      } else if (isIzinLainnya) {
+        izinLainnya++;
       } else if (isTidakHadir) {
         tidakHadir++;
+      } else if (isTerlambat) {
+        terlambat++;
+      } else if (isTepat) {
+        tepat++;
       }
 
       final ovt = d.overtimeMinutes;
-
-      if (ovt != null && ovt > 0 && ovt < 1440) {
-        lemburMinutes += ovt;
-      }
+      if (ovt != null && ovt > 0 && ovt < 1440) lemburMinutes += ovt;
 
       final tanggalKey =
           '${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}_${d.userId.toLowerCase()}';
-
       final doaVal = doaMap?[tanggalKey]?.toLowerCase() ?? '';
-
-      if (doaVal == 'ikut') {
-        ikutDoa++;
-      } else if (doaVal == 'tidak') {
-        tidakDoa++;
-      }
+      if (doaVal == 'ikut') ikutDoa++;
+      if (doaVal == 'tidak') tidakDoa++;
     }
 
     return {
       'total': rows.length,
       'tepat': tepat,
       'terlambat': terlambat,
-      'cuti': cuti,
+      'cutiTahunan': cutiTahunan,
+      'izinSakit': izinSakit,
+      'izinLainnya': izinLainnya,
+      'dinasLuar': dinasLuar,
       'tidakHadir': tidakHadir,
       'ikutDoa': ikutDoa,
       'tidakDoa': tidakDoa,

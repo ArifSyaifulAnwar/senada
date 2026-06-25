@@ -64,6 +64,9 @@ class EmployeeData {
   final int? workingPeriodYear;
   final int? workingPeriodMonth;
   final int? workingPeriodDay;
+  final String? bankName;
+  final String? bankAccountNumber;
+  final String? bankAccountName;
 
   EmployeeData({
     required this.id,
@@ -107,6 +110,9 @@ class EmployeeData {
     this.workingPeriodYear,
     this.workingPeriodMonth,
     this.workingPeriodDay,
+    this.bankName,
+    this.bankAccountNumber,
+    this.bankAccountName,
   });
 }
 

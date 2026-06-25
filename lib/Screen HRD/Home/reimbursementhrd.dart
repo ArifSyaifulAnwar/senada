@@ -7,6 +7,9 @@ import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.d
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+bool _isReimbursementWebLayout(BuildContext context) =>
+    MediaQuery.of(context).size.width >= 768;
+
 class HalamanHRDReimbursement extends StatefulWidget {
   const HalamanHRDReimbursement({super.key});
 
@@ -32,10 +35,12 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  int _webTabIndex = 0;
 
   final List<String> _statusOptions = [
     'Semua Status',
     'Pending',
+    'Pending_Finance',
     'Approved',
     'Rejected',
     'Paid',
@@ -44,7 +49,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() => _webTabIndex = _tabController.index);
+    });
     _loadUserData();
     _searchController.addListener(_onSearchChanged);
   }
@@ -367,65 +375,11 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
   @override
   Widget build(BuildContext context) {
+    final isWeb = _isReimbursementWebLayout(context);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: Text(
-          'HRD Reimbursement',
-          style: TextStyle(
-            fontSize: _getResponsiveFontSize(context, 20),
-            fontWeight: FontWeight.w700,
-            color: Colors.black87,
-            letterSpacing: 0.3,
-          ),
-          overflow: TextOverflow.ellipsis,
-        ),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Colors.white,
-        leading: Container(
-          margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios,
-              color: Colors.black87,
-              size: 18,
-            ),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.black87, size: 18),
-              onPressed: _isLoading
-                  ? null
-                  : _refreshData, // PERBAIKAN: Disable saat loading
-            ),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: const Color(0xFF3B82F6),
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: const Color(0xFF3B82F6),
-          labelStyle: TextStyle(fontSize: _getResponsiveFontSize(context, 14)),
-          tabs: const [
-            Tab(text: 'Dashboard'),
-            Tab(text: 'Reimbursements'),
-            Tab(text: 'Users'),
-          ],
-        ),
-      ),
+      appBar: _buildAppBar(isWeb),
       body: _isLoading
           ? const Center(
               child: Column(
@@ -433,86 +387,305 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                 children: [
                   CircularProgressIndicator(
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      Color(0xFF3B82F6),
+                      Color(0xFF6366F1),
                     ),
                   ),
                   SizedBox(height: 16),
                   Text(
-                    'Memuat data HRD...',
+                    'Memuat data reimbursement...',
                     style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
                   ),
                 ],
               ),
             )
           : _currentUserId == null || _currentUserName == null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: Color(0xFFEF4444),
+          ? _buildErrorState()
+          : isWeb
+          ? _buildWebLayout()
+          : _buildMobileLayout(),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(bool isWeb) {
+    return AppBar(
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366F1).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.receipt_long,
+              color: Color(0xFF6366F1),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              'Manajemen Reimbursement',
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, isWeb ? 20 : 17),
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      centerTitle: !isWeb,
+      elevation: 0,
+      backgroundColor: Colors.white,
+      leading: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios,
+            color: Colors.black87,
+            size: 18,
+          ),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      actions: [
+        Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: IconButton(
+            tooltip: 'Perbarui data',
+            icon: const Icon(Icons.refresh, color: Colors.black87, size: 18),
+            onPressed: _isLoading ? null : _refreshData,
+          ),
+        ),
+      ],
+      bottom: isWeb
+          ? null
+          : TabBar(
+              controller: _tabController,
+              labelColor: const Color(0xFF6366F1),
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: const Color(0xFF6366F1),
+              indicatorWeight: 3,
+              isScrollable: true,
+              tabs: const [
+                Tab(icon: Icon(Icons.dashboard, size: 18), text: 'Dashboard'),
+                Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Pengajuan'),
+                Tab(icon: Icon(Icons.people, size: 18), text: 'Karyawan'),
+                Tab(icon: Icon(Icons.analytics, size: 18), text: 'Laporan'),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildMobileLayout() {
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildDashboardTab(),
+        _buildReimbursementsTab(),
+        _buildUsersTab(),
+        _buildReportsTab(),
+      ],
+    );
+  }
+
+  Widget _buildWebLayout() {
+    const tabs = [
+      _ReimbursementWebTab(Icons.dashboard, 'Dashboard', 0),
+      _ReimbursementWebTab(Icons.list_alt, 'Pengajuan', 1),
+      _ReimbursementWebTab(Icons.people, 'Karyawan', 2),
+      _ReimbursementWebTab(Icons.analytics, 'Laporan', 3),
+    ];
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 218,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(right: BorderSide(color: Colors.grey.shade200)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildWebStatsSummary(),
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              ...tabs.map((tab) {
+                final selected = _webTabIndex == tab.index;
+                return InkWell(
+                  onTap: () {
+                    setState(() => _webTabIndex = tab.index);
+                    _tabController.animateTo(tab.index);
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 3,
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Data User Tidak Ditemukan',
-                      style: TextStyle(
-                        fontSize: _getResponsiveFontSize(context, 20),
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1F2937),
-                      ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Silakan login ulang untuk mengakses halaman HRD.',
-                      style: TextStyle(
-                        fontSize: _getResponsiveFontSize(context, 14),
-                        color: Color(0xFF6B7280),
-                      ),
-                      textAlign: TextAlign.center,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFF6366F1).withOpacity(0.08)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: selected
+                          ? Border.all(
+                              color: const Color(0xFF6366F1).withOpacity(0.20),
+                            )
+                          : null,
                     ),
-                    const SizedBox(height: 24),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
+                    child: Row(
                       children: [
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                          },
-                          icon: const Icon(Icons.arrow_back),
-                          label: const Text('Kembali'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF6B7280),
-                            foregroundColor: Colors.white,
-                          ),
+                        Icon(
+                          tab.icon,
+                          size: 17,
+                          color: selected
+                              ? const Color(0xFF6366F1)
+                              : Colors.grey[500],
                         ),
-                        ElevatedButton.icon(
-                          onPressed: _loadUserData,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Coba Lagi'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF3B82F6),
-                            foregroundColor: Colors.white,
+                        const SizedBox(width: 10),
+                        Text(
+                          tab.label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                            color: selected
+                                ? const Color(0xFF6366F1)
+                                : Colors.grey[600],
                           ),
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            )
-          : TabBarView(
-              controller: _tabController,
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+        Expanded(
+          child: IndexedStack(
+            index: _webTabIndex,
+            children: [
+              _buildDashboardTab(),
+              _buildReimbursementsTab(),
+              _buildUsersTab(),
+              _buildReportsTab(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  int get _pendingCountLive => _allReimbursements.where((item) {
+    final status = item.status.toLowerCase().replaceAll(' ', '_');
+    return status == 'pending' || status == 'pending_finance';
+  }).length;
+
+  int get _approvedCountLive => _allReimbursements.where((item) {
+    final status = item.status.toLowerCase();
+    return status == 'approved' || status == 'paid';
+  }).length;
+
+  int get _rejectedCountLive => _allReimbursements
+      .where((item) => item.status.toLowerCase() == 'rejected')
+      .length;
+
+  Widget _buildWebStatsSummary() {
+    final data = [
+      {
+        'label': 'Total',
+        'value': _allReimbursements.length,
+        'color': Colors.blue,
+      },
+      {'label': 'Pending', 'value': _pendingCountLive, 'color': Colors.orange},
+      {
+        'label': 'Disetujui',
+        'value': _approvedCountLive,
+        'color': Colors.green,
+      },
+      {'label': 'Ditolak', 'value': _rejectedCountLive, 'color': Colors.red},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Statistik',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1F2937),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...data.map((item) {
+          final color = item['color'] as Color;
+          final count = item['value'] as int;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: color.withOpacity(0.15)),
+            ),
+            child: Row(
               children: [
-                _buildDashboardTab(),
-                _buildReimbursementsTab(),
-                _buildUsersTab(),
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    item['label'] as String,
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  ),
+                ),
+                Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
               ],
             ),
+          );
+        }),
+      ],
     );
   }
 
@@ -520,26 +693,177 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     return RefreshIndicator(
       onRefresh: _refreshData,
       child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Statistics Cards
+            _buildWelcomeBanner(),
+            const SizedBox(height: 24),
             if (_statistics != null) _buildStatisticsCards(_statistics!),
-
             const SizedBox(height: 24),
-
-            // Recent Urgent Items
-            _buildUrgentItems(),
-
-            const SizedBox(height: 24),
-
-            // Quick Actions
-            _buildQuickActions(),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 800;
+                if (!wide) {
+                  return Column(
+                    children: [
+                      _buildUrgentItems(),
+                      const SizedBox(height: 24),
+                      _buildQuickActions(),
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _buildUrgentItems()),
+                    const SizedBox(width: 20),
+                    Expanded(child: _buildQuickActions()),
+                  ],
+                );
+              },
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildWelcomeBanner() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6366F1).withOpacity(0.30),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.20),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet,
+                  size: 28,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Human Resource Department',
+                      style: TextStyle(
+                        fontSize: _getResponsiveFontSize(context, 11),
+                        color: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _currentUserName ?? 'HRD Manager',
+                      style: TextStyle(
+                        fontSize: _getResponsiveFontSize(context, 17),
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildQuickStat('Karyawan', '${_users.length}', Icons.people),
+                Container(width: 1, height: 36, color: Colors.white24),
+                _buildQuickStat(
+                  'Menunggu',
+                  '$_pendingCountLive',
+                  Icons.pending_actions,
+                ),
+                Container(width: 1, height: 36, color: Colors.white24),
+                _buildQuickStat(
+                  'Nilai Disetujui',
+                  _formatCompactCurrency(_calculateTotalReimbursementAmount()),
+                  Icons.payments,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickStat(String label, String value, IconData icon) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.white70, size: 18),
+          const SizedBox(height: 6),
+          FittedBox(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, 16),
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: _getResponsiveFontSize(context, 10),
+              color: Colors.white70,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatCompactCurrency(double amount) {
+    if (amount >= 1000000) {
+      final value = amount / 1000000;
+      return 'Rp ${value.toStringAsFixed(value % 1 == 0 ? 0 : 1)} jt';
+    }
+    if (amount >= 1000) {
+      final value = amount / 1000;
+      return 'Rp ${value.toStringAsFixed(value % 1 == 0 ? 0 : 1)} rb';
+    }
+    return _formatCurrency(amount);
   }
 
   Widget _buildReimbursementsTab() {
@@ -547,22 +871,25 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       onRefresh: _refreshData,
       child: Column(
         children: [
-          // Search and Filter Section
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.white,
-            child: Column(
-              children: [
-                // Search Bar
-                TextField(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 760;
+                final search = TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Cari berdasarkan judul, kategori, atau nama...',
+                    hintText: 'Cari judul, kategori, atau nama karyawan...',
                     hintStyle: TextStyle(
                       fontSize: _getResponsiveFontSize(context, 14),
                     ),
                     prefixIcon: const Icon(Icons.search),
                     border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
                     ),
@@ -573,61 +900,83 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                       vertical: 12,
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
+                );
 
-                // Filter Row - PERBAIKAN: Menggunakan Flexible untuk mencegah overflow
-                Row(
+                if (wide) {
+                  return Row(
+                    children: [
+                      Expanded(flex: 3, child: search),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildStatusFilter()),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildUserFilter()),
+                    ],
+                  );
+                }
+
+                return Column(
                   children: [
-                    Flexible(child: _buildStatusFilter()),
-                    const SizedBox(width: 12),
-                    Flexible(child: _buildUserFilter()),
+                    search,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildStatusFilter()),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildUserFilter()),
+                      ],
+                    ),
                   ],
-                ),
-              ],
+                );
+              },
             ),
           ),
-
-          // List Header
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             color: const Color(0xFFF8FAFC),
             child: Row(
               children: [
                 Expanded(
                   child: Text(
-                    'Daftar Reimbursement',
+                    'Daftar Pengajuan Reimbursement',
                     style: TextStyle(
                       fontSize: _getResponsiveFontSize(context, 16),
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1F2937),
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF1F2937),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Text(
-                  '${_filteredReimbursements.length} data',
-                  style: TextStyle(
-                    fontSize: _getResponsiveFontSize(context, 14),
-                    color: const Color(0xFF6B7280),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_filteredReimbursements.length} data',
+                    style: TextStyle(
+                      fontSize: _getResponsiveFontSize(context, 12),
+                      color: const Color(0xFF6366F1),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-
-          // List Content
           Expanded(
             child: _filteredReimbursements.isEmpty
                 ? _buildEmptyState()
                 : ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     itemCount: _filteredReimbursements.length,
-                    itemBuilder: (context, index) {
-                      return _buildHRDReimbursementCard(
-                        _filteredReimbursements[index],
-                      );
-                    },
+                    itemBuilder: (context, index) => _buildHRDReimbursementCard(
+                      _filteredReimbursements[index],
+                    ),
                   ),
           ),
         ],
@@ -636,17 +985,327 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   Widget _buildUsersTab() {
+    if (_users.isEmpty) return _buildEmptyState();
+
     return RefreshIndicator(
       onRefresh: _refreshData,
-      child: _users.isEmpty
-          ? _buildEmptyState()
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _users.length,
-              itemBuilder: (context, index) {
-                return _buildHRDUserCard(_users[index]);
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final columns = constraints.maxWidth >= 1100
+              ? 3
+              : constraints.maxWidth >= 700
+              ? 2
+              : 1;
+          return GridView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            itemCount: _users.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              crossAxisSpacing: 14,
+              mainAxisSpacing: 14,
+              childAspectRatio: columns == 1 ? 1.0 : 1.20,
+            ),
+            itemBuilder: (context, index) => _buildHRDUserCard(_users[index]),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildReportsTab() {
+    final totalNominal = _calculateTotalReimbursementAmount();
+    final average = _allReimbursements.isEmpty
+        ? 0.0
+        : totalNominal / _allReimbursements.length;
+    final approvalRate = _calculateApprovalRate();
+
+    return RefreshIndicator(
+      onRefresh: _refreshData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Laporan & Anggaran',
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, 18),
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF1F2937),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Ringkasan reimbursement dan akses laporan terperinci.',
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, 13),
+                color: const Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(height: 18),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 850 ? 3 : 1;
+                return GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: columns,
+                  childAspectRatio: columns == 1 ? 3.7 : 1.7,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  children: [
+                    _buildReportMetricCard(
+                      'Total disetujui',
+                      _formatCurrency(totalNominal),
+                      Icons.payments,
+                      const Color(0xFF10B981),
+                    ),
+                    _buildReportMetricCard(
+                      'Rata-rata per pengajuan',
+                      _formatCurrency(average),
+                      Icons.insights,
+                      const Color(0xFF6366F1),
+                    ),
+                    _buildReportMetricCard(
+                      'Tingkat persetujuan',
+                      '${approvalRate.toStringAsFixed(1)}%',
+                      Icons.check_circle,
+                      const Color(0xFF0EA5E9),
+                    ),
+                  ],
+                );
               },
             ),
+            const SizedBox(height: 24),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 760;
+                final reportCard = _buildReportActionCard(
+                  title: 'Laporan Reimbursement',
+                  subtitle:
+                      'Analisis bulanan, kategori, departemen, dan karyawan.',
+                  icon: Icons.assessment,
+                  color: const Color(0xFF6366F1),
+                  buttonLabel: 'Buka Laporan',
+                  onTap: _showReimbursementReport,
+                );
+                final budgetCard = _buildReportActionCard(
+                  title: 'Overview Anggaran',
+                  subtitle:
+                      'Pantau penggunaan anggaran serta peringatan biaya.',
+                  icon: Icons.account_balance_wallet,
+                  color: const Color(0xFF8B5CF6),
+                  buttonLabel: 'Lihat Anggaran',
+                  onTap: _showBudgetOverview,
+                );
+                return wide
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: reportCard),
+                          const SizedBox(width: 16),
+                          Expanded(child: budgetCard),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          reportCard,
+                          const SizedBox(height: 16),
+                          budgetCard,
+                        ],
+                      );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportMetricCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: _getResponsiveFontSize(context, 18),
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1F2937),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: _getResponsiveFontSize(context, 12),
+                    color: const Color(0xFF6B7280),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportActionCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required String buttonLabel,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.20)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: _getResponsiveFontSize(context, 16),
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF1F2937),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: _getResponsiveFontSize(context, 13),
+              height: 1.4,
+              color: const Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton.icon(
+              onPressed: onTap,
+              icon: const Icon(Icons.arrow_forward, size: 16),
+              label: Text(buttonLabel),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Color(0xFFEF4444)),
+            const SizedBox(height: 16),
+            Text(
+              'Data User Tidak Ditemukan',
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, 20),
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF1F2937),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Silakan login ulang untuk mengakses halaman HRD.',
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, 14),
+                color: const Color(0xFF6B7280),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Kembali'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: _loadUserData,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Coba Lagi'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1362,7 +2021,9 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   String _getStatusDisplayName(String status) {
     switch (status.toLowerCase()) {
       case 'pending':
-        return 'Menunggu Review';
+        return 'Menunggu HRD';
+      case 'pending_finance':
+        return 'Menunggu Finance';
       case 'approved':
         return 'Disetujui';
       case 'rejected':
@@ -1634,10 +2295,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                             Flexible(
                               child: ElevatedButton.icon(
                                 onPressed: () => _quickReview(item, 'approved'),
-                                icon: const Icon(Icons.check, size: 16),
-                                label: const Text('Setujui'),
+                                icon: const Icon(Icons.arrow_forward, size: 16),
+                                label: const Text('→ Finance'),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF10B981),
+                                  backgroundColor: const Color(0xFF3B82F6),
                                   foregroundColor: Colors.white,
                                   elevation: 0,
                                 ),
@@ -2116,12 +2777,11 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
         status: status,
         reviewedBy: _currentUserName!,
       );
-
       if (response.success) {
         await _refreshData();
         _showSuccessSnackBar(
           status == 'approved'
-              ? 'Reimbursement disetujui'
+              ? 'Disetujui HRD — diteruskan ke Finance'
               : 'Reimbursement ditolak',
         );
       } else {
@@ -2998,7 +3658,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
                   ),
                 ),
                 Text(
-                  '${user.jobs ?? 'No Position'} • ${user.department ?? 'No Dept'}',
+                  '${user.jobs ?? 'No Position'} • ${user.department}',
                   style: TextStyle(
                     fontSize: _getResponsiveFontSize(context, 12),
                     color: const Color(0xFF6B7280),
@@ -5314,4 +5974,12 @@ class _BudgetOverviewModalState extends State<BudgetOverviewModal> {
       ),
     );
   }
+}
+
+class _ReimbursementWebTab {
+  final IconData icon;
+  final String label;
+  final int index;
+
+  const _ReimbursementWebTab(this.icon, this.label, this.index);
 }

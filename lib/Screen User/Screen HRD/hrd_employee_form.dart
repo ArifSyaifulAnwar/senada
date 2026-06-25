@@ -490,6 +490,9 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
   final _companyCtrl = TextEditingController();
   final _joinDateCtrl = TextEditingController();
   final _endContractCtrl = TextEditingController();
+  final _bankNameCtrl = TextEditingController();
+  final _bankAccountNumberCtrl = TextEditingController();
+  final _bankAccountNameCtrl = TextEditingController();
 
   String? _employmentStatusVal;
   String? _statusDisplayVal;
@@ -561,6 +564,9 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
     _companyCtrl,
     _joinDateCtrl,
     _endContractCtrl,
+    _bankNameCtrl,
+    _bankAccountNumberCtrl,
+    _bankAccountNameCtrl,
   ];
 
   void _fillFromEmployee(EmployeeData e) {
@@ -588,7 +594,9 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
       e.tanggalBergabung.isNotEmpty ? e.tanggalBergabung : null,
     );
     _endContractCtrl.text = _fmtDisplay(e.endContractDate);
-
+    _bankNameCtrl.text = e.bankName ?? '';
+    _bankAccountNumberCtrl.text = e.bankAccountNumber ?? '';
+    _bankAccountNameCtrl.text = e.bankAccountName ?? '';
     // ── Fix: gender dari field 'gender', bukan 'jobs' ──────────────────────
     _genderVal = _genderOpts.contains(e.gender) ? e.gender : null;
     _maritalVal = _maritalOpts.contains(e.maritalStatus)
@@ -770,6 +778,9 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
             branch: _branchCtrl.text.trim(),
             companyName: _companyCtrl.text.trim(),
             statusDisplay: _statusDisplayVal,
+            bankName: _bankNameCtrl.text.trim(),
+            bankAccountNumber: _bankAccountNumberCtrl.text.trim(),
+            bankAccountName: _bankAccountNameCtrl.text.trim(),
             skills: _skills,
             profilePhotoBase64: photoBase64,
           ),
@@ -1000,12 +1011,106 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
             'Akhir Kontrak (jika ada)',
             Icons.event_busy,
           ),
-          // Manager dropdown
           _buildManagerDropdown(),
+        ]),
+        const SizedBox(height: 16),
+        // ── BARU: section bank ───────────────────────────────────────────────
+        _buildSection('Informasi Bank', [
+          _bankNameField(),
+          _tf(
+            _bankAccountNumberCtrl,
+            'Nomor Rekening',
+            Icons.credit_card,
+            type: TextInputType.number,
+          ),
+          _tf(_bankAccountNameCtrl, 'Atas Nama Rekening', Icons.person_outline),
         ]),
       ],
     ),
   );
+  static const _bankOpts = [
+    'BCA',
+    'BRI',
+    'BNI',
+    'Mandiri',
+    'BSI',
+    'CIMB Niaga',
+    'Danamon',
+    'Permata',
+    'BTN',
+    'Maybank',
+    'OCBC',
+    'Panin',
+    'BII Maybank',
+    'Mega',
+    'Bukopin',
+    'Lainnya',
+  ];
+  Widget _bankNameField() {
+    // Cek apakah nilai saat ini ada di list atau tidak
+    final inList =
+        _bankOpts.contains(_bankNameCtrl.text) || _bankNameCtrl.text.isEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          value: inList && _bankNameCtrl.text.isNotEmpty
+              ? _bankNameCtrl.text
+              : null,
+          onChanged: (v) {
+            if (v == 'Lainnya') {
+              // kosongkan supaya user bisa ketik manual
+              setState(() => _bankNameCtrl.text = '');
+            } else {
+              setState(() => _bankNameCtrl.text = v ?? '');
+            }
+          },
+          decoration: InputDecoration(
+            labelText: 'Nama Bank',
+            prefixIcon: const Icon(
+              Icons.account_balance,
+              size: 18,
+              color: Color(0xFF64748B),
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF3B82F6)),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            labelStyle: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+          ),
+          style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
+          items: [
+            const DropdownMenuItem(
+              value: null,
+              child: Text('-- Pilih Bank --'),
+            ),
+            ..._bankOpts.map((b) => DropdownMenuItem(value: b, child: Text(b))),
+          ],
+        ),
+        // Kalau pilih "Lainnya" atau nilai tidak ada di list → tampilkan TextField
+        if (!inList || _bankNameCtrl.text == '')
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: _tf(_bankNameCtrl, 'Nama Bank (isi manual)', Icons.edit),
+          ),
+      ],
+    );
+  }
 
   Widget _buildManagerDropdown() {
     return Column(

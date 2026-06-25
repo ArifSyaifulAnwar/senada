@@ -49,9 +49,7 @@ class EmployeeListResponse {
   });
 
   factory EmployeeListResponse.fromJson(Map<String, dynamic> json) {
-    // handle both PascalCase and camelCase
-    dynamic g(String k) =>
-        json[k] ?? json[k[0].toLowerCase() + k.substring(1)];
+    dynamic g(String k) => json[k] ?? json[k[0].toLowerCase() + k.substring(1)];
 
     return EmployeeListResponse(
       data: ((g('Data') as List?) ?? [])
@@ -82,7 +80,7 @@ class EmployeeApiData {
   final String? residentialAddress;
   final String? postalCode;
   final String? gender;
-  final String? jobs; // jabatan teks bebas (bukan gender)
+  final String? jobs;
   final String? placeOfBirth;
   final DateTime? birthDate;
   final String? maritalStatus;
@@ -91,7 +89,7 @@ class EmployeeApiData {
   final String? nik;
   final String? nip;
   final String? npwp;
-  final String? bpjsKetenagakerjaan; // ← BARU
+  final String? bpjsKetenagakerjaan;
   final String? passportNumber;
   final DateTime? passportExpiry;
   final bool active;
@@ -105,7 +103,7 @@ class EmployeeApiData {
   final String? barcode;
   final String? companyName;
   final String? branch;
-  final String? department; // = organization
+  final String? department;
   final String? jobPosition;
   final String? employmentStatus;
   final DateTime? joinDate;
@@ -113,10 +111,15 @@ class EmployeeApiData {
   final int? workingPeriodYear;
   final int? workingPeriodMonth;
   final int? workingPeriodDay;
-  final String? manager; // nama manager (dari SP)
-  final String? managerUserId; // ← BARU: userid manager (untuk dropdown)
+  final String? manager;
+  final String? managerUserId;
 
-  // derived / display
+  // ── BARU: bank ──────────────────────────────────────────────────────────────
+  final String? bankName;
+  final String? bankAccountNumber;
+  final String? bankAccountName;
+
+  // derived
   final String statusDisplay;
   final List<String> skills;
 
@@ -163,12 +166,15 @@ class EmployeeApiData {
     this.workingPeriodDay,
     this.manager,
     this.managerUserId,
+    // ── BARU ──────────────────────────────────────────────────────────────────
+    this.bankName,
+    this.bankAccountNumber,
+    this.bankAccountName,
     required this.statusDisplay,
     required this.skills,
   });
 
   factory EmployeeApiData.fromJson(Map<String, dynamic> json) {
-    // helper: coba PascalCase dulu, fallback snake_case / camelCase
     dynamic g(String pascal, [String? snake]) {
       return json[pascal] ??
           (snake != null ? json[snake] : null) ??
@@ -186,6 +192,7 @@ class EmployeeApiData {
           g('Mail', 'mail')?.toString() ??
           g('Email', 'email')?.toString() ??
           '',
+
       phone: g('Phone', 'phone')?.toString(),
       additionalPhone: g('AdditionalPhone', 'additional_phone')?.toString(),
       address: g('Address', 'address')?.toString(),
@@ -218,6 +225,7 @@ class EmployeeApiData {
       profilePhotoBase64:
           g('ProfilePhoto', 'FotoProfil')?.toString() ??
           g('FotoProfil')?.toString(),
+
       employeeId: g('EmployeeId', 'employeeID')?.toString() ?? '',
       barcode: g('Barcode', 'barcode')?.toString(),
       companyName: g('CompanyName', 'company_name')?.toString(),
@@ -235,6 +243,15 @@ class EmployeeApiData {
       workingPeriodDay: g('WorkingPeriodDay', 'working_period_day') as int?,
       manager: g('Manager', 'manager')?.toString(),
       managerUserId: g('ManagerUserId', 'manager_userid')?.toString(),
+
+      // ── BARU: bank ──────────────────────────────────────────────────────────
+      bankName: g('BankName', 'bank_name')?.toString(),
+      bankAccountNumber: g(
+        'BankAccountNumber',
+        'bank_account_number',
+      )?.toString(),
+      bankAccountName: g('BankAccountName', 'bank_account_name')?.toString(),
+
       statusDisplay: g('StatusDisplay', 'status_display')?.toString() ?? '',
       skills: (g('Skills', 'skills') as List? ?? [])
           .map((e) => e.toString())
@@ -242,7 +259,6 @@ class EmployeeApiData {
     );
   }
 
-  /// Convert ke EmployeeData untuk UI
   EmployeeData toEmployeeData() {
     return EmployeeData(
       id: id,
@@ -287,6 +303,10 @@ class EmployeeApiData {
       workingPeriodYear: workingPeriodYear,
       workingPeriodMonth: workingPeriodMonth,
       workingPeriodDay: workingPeriodDay,
+      // ── BARU: bank ──────────────────────────────────────────────────────────
+      bankName: bankName,
+      bankAccountNumber: bankAccountNumber,
+      bankAccountName: bankAccountName,
     );
   }
 }

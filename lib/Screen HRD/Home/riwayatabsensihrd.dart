@@ -234,17 +234,29 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (result.success && result.data != null && result.data!.isNotEmpty) {
         final periods = result.data!;
         final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
 
-        HrdWorkPeriod? currentPeriod;
+        // Pilih periode yang rentang tanggalnya benar-benar mencakup hari ini.
+        // Jangan gunakan `bulan == now.month`, karena periode baru bisa mulai
+        // sebelum bulan kalender berganti.
+        final activePeriods = periods.where((p) {
+          final start = DateTime(
+            p.tanggalMulai.year,
+            p.tanggalMulai.month,
+            p.tanggalMulai.day,
+          );
+          final end = DateTime(
+            p.tanggalSelesai.year,
+            p.tanggalSelesai.month,
+            p.tanggalSelesai.day,
+          );
 
-        for (final p in periods) {
-          if (p.tahun == now.year && p.bulan == now.month) {
-            currentPeriod = p;
-            break;
-          }
-        }
+          return !today.isBefore(start) && !today.isAfter(end);
+        }).toList()..sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
 
-        currentPeriod ??= periods.last;
+        final currentPeriod = activePeriods.isNotEmpty
+            ? activePeriods.first
+            : periods.last;
 
         setState(() {
           _analyticsPeriods = periods;

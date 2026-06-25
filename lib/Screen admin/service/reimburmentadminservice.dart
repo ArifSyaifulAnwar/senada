@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dart';
 import 'package:http/http.dart' as http;
 import 'package:absensikaryawan/Services/config.dart';
@@ -39,6 +40,41 @@ class AdminReimbursementService {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
     };
+  }
+
+  Future<AdminResponse> financeReview({
+    required int id,
+    required String status, // 'approved' atau 'rejected'
+    required String financeUserId,
+    String? reviewNotes,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/finance/review'),
+        headers: headers,
+        body: json.encode({
+          'id': id,
+          'status': status,
+          'financeUserId': financeUserId,
+          'reviewNotes': reviewNotes,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+        return AdminResponse.fromJson(jsonData);
+      }
+      final errorData = json.decode(response.body);
+      return AdminResponse(
+        success: false,
+        message: errorData['message'] ?? 'Terjadi kesalahan server',
+      );
+    } catch (e) {
+      return AdminResponse(
+        success: false,
+        message: 'Terjadi kesalahan jaringan: $e',
+      );
+    }
   }
 
   // ✅ SIMPLE SOLUTION: Setelah stored procedure diperbaiki
@@ -268,7 +304,7 @@ class AdminReimbursementService {
     try {
       final headers = await _getHeaders();
 
-      final response = await http.get(
+      final response = await http.post(
         Uri.parse('$baseURL/api/asn/reimbursement/admin/users'),
         headers: headers,
       );
@@ -300,15 +336,179 @@ class AdminReimbursementService {
     }
   }
 
-  // Get receipt image URL for admin
-  String getAdminReceiptImageUrl(int reimbursementId) {
-    final url =
-        '$baseURL/api/asn/reimbursement/admin/receipt/view/$reimbursementId';
-    return url;
+  /// URL preview bukti pengajuan user untuk HRD / Head Finance.
+  /// viewerUserId wajib agar backend memvalidasi akses dari role aktif.
+  String getAdminReceiptImageUrl({
+    required int reimbursementId,
+    required String viewerUserId,
+  }) {
+    return Uri.parse(
+      '$baseURL/api/asn/reimbursement/admin/receipt/view/$reimbursementId',
+    ).replace(queryParameters: {'viewerUserId': viewerUserId}).toString();
+  }
+
+  /// Ambil bukti reimbursement sebagai bytes untuk tombol Preview/Download.
+  Future<AdminReimbursementAttachment> getAdminReceiptAttachment({
+    required int reimbursementId,
+    required String viewerUserId,
+    String? fallbackFileName,
+  }) async {
+    final uri = Uri.parse(
+      '$baseURL/api/asn/reimbursement/admin/receipt/view/$reimbursementId',
+    ).replace(queryParameters: {'viewerUserId': viewerUserId});
+
+    final response = await http
+        .post(uri, headers: await _getHeaders())
+        .timeout(const Duration(seconds: 45));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      String message = 'Gagal mengambil bukti pembayaran.';
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['message'] != null) {
+          message = body['message'].toString();
+        }
+      } catch (_) {}
+      throw Exception(message);
+    }
+
+    if (response.bodyBytes.isEmpty) {
+      throw Exception('Bukti pembayaran kosong atau tidak ditemukan.');
+    }
+
+    final rawName = _fileNameFromContentDisposition(
+      response.headers['content-disposition'],
+      fallbackFileName?.trim().isNotEmpty == true
+          ? fallbackFileName!.trim()
+          : 'bukti_reimbursement_$reimbursementId',
+    );
+
+    return AdminReimbursementAttachment(
+      bytes: Uint8List.fromList(response.bodyBytes),
+      fileName: _ensureExtension(rawName, response.headers['content-type']),
+      contentType: response.headers['content-type'],
+    );
+  }
+
+  /// Ambil bukti transfer yang diunggah Head Finance.
+  ///
+  /// Endpoint memakai POST agar backend dapat memvalidasi viewerUserId:
+  /// POST /api/asn/reimbursement/payment-proof/download
+  Future<AdminReimbursementAttachment> getAdminPaymentProofAttachment({
+    required int reimbursementId,
+    required String viewerUserId,
+    String? fallbackFileName,
+  }) async {
+    final response = await http
+        .post(
+          Uri.parse('$baseURL/api/asn/reimbursement/payment-proof/download'),
+          headers: await _getHeaders(),
+          body: jsonEncode({'id': reimbursementId, 'userId': viewerUserId}),
+        )
+        .timeout(const Duration(seconds: 45));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      String message = 'Gagal mengambil bukti transfer Finance.';
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['message'] != null) {
+          message = body['message'].toString();
+        }
+      } catch (_) {}
+      throw Exception(message);
+    }
+
+    if (response.bodyBytes.isEmpty) {
+      throw Exception('Bukti transfer Finance kosong atau tidak ditemukan.');
+    }
+
+    final rawName = _fileNameFromContentDisposition(
+      response.headers['content-disposition'],
+      fallbackFileName?.trim().isNotEmpty == true
+          ? fallbackFileName!.trim()
+          : 'bukti_transfer_$reimbursementId',
+    );
+
+    return AdminReimbursementAttachment(
+      bytes: Uint8List.fromList(response.bodyBytes),
+      fileName: _ensureExtension(rawName, response.headers['content-type']),
+      contentType: response.headers['content-type'],
+    );
+  }
+
+  String _fileNameFromContentDisposition(
+    String? contentDisposition,
+    String fallback,
+  ) {
+    if (contentDisposition == null || contentDisposition.trim().isEmpty) {
+      return fallback;
+    }
+
+    final utf8Match = RegExp(
+      r"filename\*\s*=\s*(?:UTF-8'')?([^;]+)",
+      caseSensitive: false,
+    ).firstMatch(contentDisposition);
+
+    if (utf8Match != null) {
+      final raw = utf8Match.group(1)!.trim().replaceAll('"', '');
+      try {
+        return Uri.decodeComponent(raw);
+      } catch (_) {
+        return raw;
+      }
+    }
+
+    final normalMatch = RegExp(
+      r'filename\s*=\s*"?([^";]+)"?',
+      caseSensitive: false,
+    ).firstMatch(contentDisposition);
+
+    final name = normalMatch?.group(1)?.trim();
+    return name == null || name.isEmpty ? fallback : name;
+  }
+
+  String _ensureExtension(String fileName, String? contentType) {
+    final name = fileName.trim().isEmpty ? 'bukti_reimbursement' : fileName;
+    final clean = name.split('?').first;
+
+    if (clean.contains('.') && !clean.endsWith('.')) return name;
+
+    final mime = (contentType ?? '').split(';').first.trim().toLowerCase();
+    final extension = switch (mime) {
+      'image/jpeg' || 'image/jpg' => 'jpg',
+      'image/png' => 'png',
+      'image/webp' => 'webp',
+      'image/gif' => 'gif',
+      'application/pdf' => 'pdf',
+      _ => '',
+    };
+
+    return extension.isEmpty ? name : '$name.$extension';
   }
 
   // Get admin headers
   Future<Map<String, String>> getAdminHeaders() async {
     return await _getHeaders();
   }
+}
+
+class AdminReimbursementAttachment {
+  final Uint8List bytes;
+  final String fileName;
+  final String? contentType;
+
+  const AdminReimbursementAttachment({
+    required this.bytes,
+    required this.fileName,
+    this.contentType,
+  });
+
+  String get extension {
+    final value = fileName.split('?').first;
+    if (!value.contains('.')) return '';
+    return value.split('.').last.toLowerCase();
+  }
+
+  bool get isImage =>
+      const ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].contains(extension);
 }

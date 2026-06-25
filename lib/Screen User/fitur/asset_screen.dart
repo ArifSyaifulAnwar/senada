@@ -144,12 +144,18 @@ class _AssetScreenState extends State<AssetScreen>
 
   /// Serialize initial loads supaya tidak ada race condition di
   /// TokenService.getToken() saat banyak request dipanggil bersamaan
-  /// pada kondisi token belum ter-cache. Token di-fetch sekali dulu,
-  /// baru semua request data jalan paralel dengan aman.
+  /// pada kondisi token belum ter-cache atau sudah expire.
+  /// Token di-fetch sekali dulu (warmUp), baru semua request jalan.
   Future<void> _initialLoad() async {
+    // Step 1: pastikan token valid sebelum semua request
     await AssetService.warmUpToken();
     if (!mounted) return;
+
+    // Step 2: cek akses (sequential, karena hasil ini menentukan tab count)
     await _initAccessAndTabs();
+    if (!mounted) return;
+
+    // Step 3: load data dasar secara paralel (token sudah pasti valid)
     await Future.wait([
       _loadCategories(),
       _loadCatalog(),
@@ -179,11 +185,14 @@ class _AssetScreenState extends State<AssetScreen>
       _isCheckingAccess = false;
       _tabController = TabController(length: _tabCount, vsync: this);
     });
-    if (canManage) _loadAllItems();
-    if (isHead) {
-      _loadReportPeriods();
-      _loadInventoryItems();
-    }
+
+    // Jalankan load data tambahan secara paralel — token sudah pasti valid
+    // karena warmUpToken() sudah dipanggil sebelum method ini.
+    await Future.wait([
+      if (canManage) _loadAllItems(),
+      if (isHead) _loadReportPeriods(),
+      if (isHead) _loadInventoryItems(),
+    ]);
   }
 
   @override
@@ -580,6 +589,11 @@ class _AssetScreenState extends State<AssetScreen>
   }
 
   Future<void> _refreshAll() async {
+    // Warmup token dulu sebelum semua request paralel — mencegah
+    // race condition kalau token kebetulan expire saat refresh.
+    await AssetService.warmUpToken();
+    if (!mounted) return;
+
     await Future.wait([
       _loadCategories(),
       _loadCatalog(),
