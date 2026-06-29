@@ -5,6 +5,13 @@ import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dar
 import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io' show File;
+import 'dart:typed_data';
+import 'package:absensikaryawan/Screen%20admin/service/web_preview.dart';
+import 'package:absensikaryawan/Services/web_download.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 
 class HalamanAdminReimbursement extends StatefulWidget {
   const HalamanAdminReimbursement({super.key});
@@ -1524,7 +1531,7 @@ class _AdminReimbursementDetailModalState
   final TextEditingController _reviewNotesController = TextEditingController();
 
   bool _isProcessing = false;
-
+  bool _isAttachmentProcessing = false;
   // Bukti dimuat melalui POST. Jangan gunakan Image.network di modal ini,
   // karena Image.network selalu mengirim GET dan API receipt memakai POST.
   AdminReimbursementAttachment? _receiptAttachment;
@@ -1542,14 +1549,8 @@ class _AdminReimbursementDetailModalState
   @override
   void initState() {
     super.initState();
-
-    if (widget.item.hasReceipt) {
-      _loadReceiptAttachment();
-    }
-
-    if (_hasPaymentProof()) {
-      _loadPaymentProofAttachment();
-    }
+    if (widget.item.hasReceipt) _loadReceiptAttachment();
+    if (_hasPaymentProof()) _loadPaymentProofAttachment();
   }
 
   @override
@@ -1560,28 +1561,23 @@ class _AdminReimbursementDetailModalState
 
   Future<void> _loadReceiptAttachment() async {
     if (_isLoadingReceipt) return;
-
     setState(() {
       _isLoadingReceipt = true;
       _receiptError = null;
     });
-
     try {
-      final attachment = await widget.adminService.getAdminReceiptAttachment(
+      final att = await widget.adminService.getAdminReceiptAttachment(
         reimbursementId: widget.item.id,
         viewerUserId: widget.currentAdminId,
         fallbackFileName: widget.item.receiptFilename,
       );
-
       if (!mounted) return;
-
       setState(() {
-        _receiptAttachment = attachment;
+        _receiptAttachment = att;
         _isLoadingReceipt = false;
       });
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         _receiptAttachment = null;
         _isLoadingReceipt = false;
@@ -1592,29 +1588,23 @@ class _AdminReimbursementDetailModalState
 
   Future<void> _loadPaymentProofAttachment() async {
     if (_isLoadingPaymentProof) return;
-
     setState(() {
       _isLoadingPaymentProof = true;
       _paymentProofError = null;
     });
-
     try {
-      final attachment = await widget.adminService
-          .getAdminPaymentProofAttachment(
-            reimbursementId: widget.item.id,
-            viewerUserId: widget.currentAdminId,
-            fallbackFileName: widget.item.paymentProofFilename,
-          );
-
+      final att = await widget.adminService.getAdminPaymentProofAttachment(
+        reimbursementId: widget.item.id,
+        viewerUserId: widget.currentAdminId,
+        fallbackFileName: widget.item.paymentProofFilename,
+      );
       if (!mounted) return;
-
       setState(() {
-        _paymentProofAttachment = attachment;
+        _paymentProofAttachment = att;
         _isLoadingPaymentProof = false;
       });
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         _paymentProofAttachment = null;
         _isLoadingPaymentProof = false;
@@ -1623,446 +1613,366 @@ class _AdminReimbursementDetailModalState
     }
   }
 
-  void _showReceiptPreview() {
-    final attachment = _receiptAttachment;
-
-    if (attachment == null || !attachment.isImage) return;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920, maxHeight: 760),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.receipt_long_outlined,
-                        color: Color(0xFF3B82F6),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          attachment.fileName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1E293B),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Flexible(
-                  child: Container(
-                    width: double.infinity,
-                    color: const Color(0xFFF8FAFC),
-                    padding: const EdgeInsets.all(12),
-                    child: InteractiveViewer(
-                      minScale: 0.6,
-                      maxScale: 5,
-                      child: Center(
-                        child: Image.memory(
-                          attachment.bytes,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Text(
-                            'Gambar bukti tidak dapat ditampilkan.',
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showPaymentProofPreview() {
-    final attachment = _paymentProofAttachment;
-
-    if (attachment == null || !attachment.isImage) return;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920, maxHeight: 760),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.account_balance_rounded,
-                        color: Color(0xFF16A34A),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          attachment.fileName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF1E293B),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Flexible(
-                  child: Container(
-                    width: double.infinity,
-                    color: const Color(0xFFF0FDF4),
-                    padding: const EdgeInsets.all(12),
-                    child: InteractiveViewer(
-                      minScale: 0.6,
-                      maxScale: 5,
-                      child: Center(
-                        child: Image.memory(
-                          attachment.bytes,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Text(
-                            'Gambar bukti transfer tidak dapat ditampilkan.',
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildPaymentProofViewer() {
     if (_isLoadingPaymentProof) {
-      return Container(
-        width: double.infinity,
-        height: 220,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF0FDF4),
-          border: Border.all(color: const Color(0xFFBBF7D0)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
+      return _attachmentLoading(color: const Color(0xFF10B981));
+    }
+
+    final att = _paymentProofAttachment;
+
+    if (att == null) {
+      return _attachmentError(
+        error: _paymentProofError ?? 'Bukti transfer tidak dapat dimuat.',
+        onRetry: _loadPaymentProofAttachment,
+        color: const Color(0xFF10B981),
       );
     }
 
-    final attachment = _paymentProofAttachment;
-
-    if (attachment == null) {
-      return Container(
-        width: double.infinity,
-        height: 220,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF0FDF4),
-          border: Border.all(color: const Color(0xFFBBF7D0)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.account_balance_outlined,
-                size: 46,
-                color: Color(0xFF64748B),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                _paymentProofError ??
-                    'Bukti transfer Finance tidak dapat dimuat.',
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _loadPaymentProofAttachment,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Muat Ulang'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (!attachment.isImage) {
-      return Container(
-        width: double.infinity,
-        height: 220,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF0FDF4),
-          border: Border.all(color: const Color(0xFFBBF7D0)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              attachment.extension == 'pdf'
-                  ? Icons.picture_as_pdf_outlined
-                  : Icons.insert_drive_file_outlined,
-              size: 58,
-              color: attachment.extension == 'pdf'
-                  ? const Color(0xFFEF4444)
-                  : const Color(0xFF16A34A),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              attachment.fileName,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF374151),
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'File bukti transfer berhasil dimuat.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      width: double.infinity,
-      height: 220,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFBBF7D0)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(6),
-              child: Image.memory(
-                attachment.bytes,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Center(
-                  child: Text('Gambar bukti transfer tidak dapat ditampilkan.'),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 8,
-              bottom: 8,
-              child: ElevatedButton.icon(
-                onPressed: _showPaymentProofPreview,
-                icon: const Icon(Icons.visibility_outlined, size: 16),
-                label: const Text('Preview'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF15803D),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  textStyle: const TextStyle(fontSize: 12),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return _attachmentCard(
+      attachment: att,
+      accentColor: const Color(0xFF10B981),
+      onPreview: () => _handlePreview(att),
+      onDownload: () => _handleDownload(att),
     );
   }
 
   Widget _buildReceiptViewer() {
     if (_isLoadingReceipt) {
-      return Container(
-        width: double.infinity,
-        height: 220,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
+      return _attachmentLoading();
+    }
+
+    final att = _receiptAttachment;
+
+    if (att == null) {
+      return _attachmentError(
+        error: _receiptError ?? 'Bukti pembayaran tidak dapat dimuat.',
+        onRetry: _loadReceiptAttachment,
+        color: const Color(0xFF3B82F6),
       );
     }
 
-    final attachment = _receiptAttachment;
+    return _attachmentCard(
+      attachment: att,
+      accentColor: const Color(0xFF3B82F6),
+      onPreview: () => _handlePreview(att),
+      onDownload: () => _handleDownload(att),
+    );
+  }
 
-    if (attachment == null) {
-      return Container(
-        width: double.infinity,
-        height: 220,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-          borderRadius: BorderRadius.circular(8),
+  Widget _attachmentError({
+    required String error,
+    required VoidCallback onRetry,
+    Color color = const Color(0xFF3B82F6),
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image_outlined, size: 36, color: Colors.grey[400]),
+          const SizedBox(height: 8),
+          Text(
+            error,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Muat Ulang'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color.withOpacity(0.5)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _attachmentCard({
+    required AdminReimbursementAttachment attachment,
+    required Color accentColor,
+    required VoidCallback onPreview,
+    required VoidCallback onDownload,
+  }) {
+    final ext = attachment.extension;
+    final isImage = attachment.isImage;
+    final isPdf = ext == 'pdf';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Preview area
+        Container(
+          width: double.infinity,
+          height: 200,
+          decoration: BoxDecoration(
+            color: accentColor.withOpacity(0.04),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: accentColor.withOpacity(0.2)),
+          ),
+          child: isImage
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.memory(
+                    attachment.bytes,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => _fileIcon(ext, accentColor),
+                  ),
+                )
+              : _fileIcon(ext, accentColor),
         ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.broken_image_outlined,
-                size: 46,
-                color: Color(0xFF94A3B8),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                _receiptError ?? 'Bukti pembayaran tidak dapat dimuat.',
-                textAlign: TextAlign.center,
-                maxLines: 2,
+
+        const SizedBox(height: 10),
+
+        // Nama file
+        Row(
+          children: [
+            Icon(
+              isPdf
+                  ? Icons.picture_as_pdf_outlined
+                  : isImage
+                  ? Icons.image_outlined
+                  : Icons.insert_drive_file_outlined,
+              size: 16,
+              color: accentColor,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                attachment.fileName,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF374151),
+                ),
               ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _loadReceiptAttachment,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Muat Ulang'),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 10),
+
+        // Tombol Preview + Download
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _isAttachmentProcessing ? null : onPreview,
+                icon: _isAttachmentProcessing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.visibility_outlined, size: 17),
+                label: const Text('Preview'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: accentColor,
+                  side: BorderSide(color: accentColor.withOpacity(0.5)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isAttachmentProcessing ? null : onDownload,
+                icon: const Icon(Icons.download_rounded, size: 17),
+                label: const Text('Download'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accentColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _fileIcon(String ext, Color color) {
+    final isPdf = ext == 'pdf';
+    final iconData = isPdf
+        ? Icons.picture_as_pdf_outlined
+        : Icons.insert_drive_file_outlined;
+    final iconColor = isPdf ? const Color(0xFFEF4444) : color;
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(iconData, size: 52, color: iconColor),
+          const SizedBox(height: 8),
+          Text(
+            ext.isEmpty ? 'File' : ext.toUpperCase(),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: iconColor,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'File berhasil dimuat',
+            style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handlePreview(AdminReimbursementAttachment att) async {
+    if (_isAttachmentProcessing) return;
+    setState(() => _isAttachmentProcessing = true);
+    try {
+      if (att.isImage) {
+        await _showImagePreview(att.bytes, att.fileName);
+        return;
+      }
+
+      if (kIsWeb) {
+        openBytesInBrowser(
+          att.bytes,
+          att.fileName,
+          att.contentType ?? 'application/octet-stream',
+        );
+        return;
+      }
+
+      final tempDir = await getTemporaryDirectory();
+      final file = File(
+        '${tempDir.path}/${att.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')}',
+      );
+      await file.writeAsBytes(att.bytes, flush: true);
+      final result = await OpenFile.open(file.path);
+      if (result.type != ResultType.done && mounted) {
+        _showErrorSnackBar('Tidak ada aplikasi untuk membuka file ini.');
+      }
+    } catch (e) {
+      if (mounted) _showErrorSnackBar('Gagal membuka file: $e');
+    } finally {
+      if (mounted) setState(() => _isAttachmentProcessing = false);
+    }
+  }
+
+  Future<void> _handleDownload(AdminReimbursementAttachment att) async {
+    if (_isAttachmentProcessing) return;
+    setState(() => _isAttachmentProcessing = true);
+    try {
+      if (kIsWeb) {
+        downloadFileWeb(att.bytes, att.fileName);
+        if (mounted) _showSuccessSnackBar('File sedang diunduh.');
+        return;
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final safeName = att.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final file = File('${dir.path}/$safeName');
+      await file.writeAsBytes(att.bytes, flush: true);
+      if (mounted) _showSuccessSnackBar('File tersimpan: ${file.path}');
+    } catch (e) {
+      if (mounted) _showErrorSnackBar('Gagal menyimpan file: $e');
+    } finally {
+      if (mounted) setState(() => _isAttachmentProcessing = false);
+    }
+  }
+
+  Future<void> _showImagePreview(Uint8List bytes, String fileName) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 760),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.image_outlined,
+                      color: Color(0xFF6366F1),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        fileName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: Container(
+                  width: double.infinity,
+                  color: const Color(0xFFF8FAFC),
+                  padding: const EdgeInsets.all(12),
+                  child: InteractiveViewer(
+                    minScale: 0.6,
+                    maxScale: 5,
+                    child: Center(
+                      child: Image.memory(
+                        bytes,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) =>
+                            const Text('Gambar tidak dapat ditampilkan.'),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    if (!attachment.isImage) {
-      return Container(
-        width: double.infinity,
-        height: 220,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              attachment.extension == 'pdf'
-                  ? Icons.picture_as_pdf_outlined
-                  : Icons.insert_drive_file_outlined,
-              size: 58,
-              color: attachment.extension == 'pdf'
-                  ? const Color(0xFFEF4444)
-                  : const Color(0xFF3B82F6),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              attachment.fileName,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF374151),
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'File berhasil dimuat. Format file bukan gambar.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-          ],
-        ),
-      );
-    }
-
+  Widget _attachmentLoading({Color color = const Color(0xFF3B82F6)}) {
     return Container(
       width: double.infinity,
-      height: 220,
+      height: 100,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        borderRadius: BorderRadius.circular(8),
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(6),
-              child: Image.memory(
-                attachment.bytes,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Center(
-                  child: Text('Gambar bukti tidak dapat ditampilkan.'),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 8,
-              bottom: 8,
-              child: ElevatedButton.icon(
-                onPressed: _showReceiptPreview,
-                icon: const Icon(Icons.visibility_outlined, size: 16),
-                label: const Text('Preview'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black87,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  textStyle: const TextStyle(fontSize: 12),
-                ),
-              ),
-            ),
-          ],
+      child: Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(color),
+          strokeWidth: 2,
         ),
       ),
     );
