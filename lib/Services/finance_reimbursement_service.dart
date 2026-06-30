@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/reimbursementservice.dart' show ReimbursementAttachmentMeta;
 import 'package:http/http.dart' as http;
 
 import '../models/finance_reimbursement_model.dart';
@@ -115,6 +116,73 @@ class FinanceReimbursementService {
       fallbackFileName?.trim().isNotEmpty == true
           ? fallbackFileName!.trim()
           : defaultName,
+    );
+    return FinanceReimbursementAttachment(
+      fileName: name,
+      bytes: response.bodyBytes,
+      contentType: response.headers['content-type'],
+    );
+  }
+
+  /// Ambil list metadata attachment (tanpa bytes) untuk finance view.
+  static Future<List<ReimbursementAttachmentMeta>> getAttachmentsMeta({
+    required int reimbursementId,
+    required String viewerUserId,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/asn/reimbursement/attachments/list'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'reimbursementId': reimbursementId,
+              'userId': viewerUserId,
+            }),
+          )
+          .timeout(_timeout);
+      final body = _decodeBody(response);
+      if (body is Map && body['success'] == true) {
+        final list = (body['data'] as List<dynamic>?) ?? [];
+        return list
+            .whereType<Map<String, dynamic>>()
+            .map(ReimbursementAttachmentMeta.fromJson)
+            .toList();
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Download satu attachment by ID untuk preview/download.
+  static Future<FinanceReimbursementAttachment> downloadAttachmentById({
+    required int attachmentId,
+    required String viewerUserId,
+    String? fallbackFileName,
+  }) async {
+    final uri = Uri.parse(
+      '$baseURL/api/asn/reimbursement/attachments/view/$attachmentId',
+    ).replace(queryParameters: {'userId': viewerUserId});
+
+    final response = await http
+        .get(uri, headers: await _headers())
+        .timeout(_timeout);
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      dynamic body;
+      try {
+        body = response.body.trim().isEmpty ? null : jsonDecode(response.body);
+      } catch (_) {}
+      throw FinanceServiceException(_messageFrom(body, response.statusCode));
+    }
+    if (response.bodyBytes.isEmpty) {
+      throw const FinanceServiceException('File lampiran kosong.');
+    }
+    final name = _fileNameFromContentDisposition(
+      response.headers['content-disposition'],
+      fallbackFileName?.trim().isNotEmpty == true
+          ? fallbackFileName!.trim()
+          : 'attachment_$attachmentId',
     );
     return FinanceReimbursementAttachment(
       fileName: name,

@@ -1450,6 +1450,16 @@ class _DetailSheetState extends State<_DetailSheet> {
       return const SizedBox.shrink();
     }
 
+    final ft = _fullTimeOff;
+    final hasTextLaporan = ft != null && (
+      (ft.hasilPerjalanan?.isNotEmpty == true) ||
+      (ft.laporanKepada?.isNotEmpty == true) ||
+      (ft.penyelesaian?.isNotEmpty == true)
+    );
+    final hasFileLaporan = ft != null &&
+        (ft.laporanFileName != null || ft.anggaranFileName != null);
+    final laporanSubmitted = ft != null && ft.laporanSubmittedAt != null;
+
     return Column(
       children: [
         const SizedBox(height: 14),
@@ -1461,9 +1471,7 @@ class _DetailSheetState extends State<_DetailSheet> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else if (_fullTimeOff == null ||
-              (_fullTimeOff!.laporanFileName == null &&
-                  _fullTimeOff!.anggaranFileName == null))
+          else if (ft == null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
@@ -1471,17 +1479,37 @@ class _DetailSheetState extends State<_DetailSheet> {
                 style: TextStyle(fontSize: 12, color: Colors.grey[500]),
               ),
             )
+          else if (!hasTextLaporan && !hasFileLaporan)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                laporanSubmitted
+                    ? 'Laporan telah disubmit (tidak ada konten untuk ditampilkan).'
+                    : 'Laporan belum disubmit.',
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              ),
+            )
           else ...[
-            if (_fullTimeOff!.laporanFileName != null)
+            // Tampilkan isi laporan teks (form e/f/g)
+            if (ft.hasilPerjalanan?.isNotEmpty == true)
+              _dRow('E. Hasil Perjalanan', ft.hasilPerjalanan!),
+            if (ft.laporanKepada?.isNotEmpty == true)
+              _dRow('F. Laporan Kepada', ft.laporanKepada!),
+            if (ft.penyelesaian?.isNotEmpty == true)
+              _dRow('G. Penyelesaian', ft.penyelesaian!),
+            // Tampilkan file laporan jika ada
+            if (ft.laporanFileName != null) ...[
+              if (hasTextLaporan) const SizedBox(height: 8),
               _buildLaporanFileRow(
                 icon: Icons.description_outlined,
                 color: const Color(0xFF3B82F6),
                 label: 'Laporan Perjalanan Dinas',
-                fileName: _fullTimeOff!.laporanFileName!,
+                fileName: ft.laporanFileName!,
                 fileType: 'laporan',
                 accentColor: c,
               ),
-            if (_fullTimeOff!.anggaranFileName != null) ...[
+            ],
+            if (ft.anggaranFileName != null) ...[
               const SizedBox(height: 8),
               _buildLaporanFileRow(
                 icon: Icons.receipt_outlined,
@@ -1489,7 +1517,7 @@ class _DetailSheetState extends State<_DetailSheet> {
                 label: widget.item.rabType == 'reimbursement'
                     ? 'Bukti Pembayaran'
                     : 'Bukti Penggunaan Uang Kantor',
-                fileName: _fullTimeOff!.anggaranFileName!,
+                fileName: ft.anggaranFileName!,
                 fileType: 'anggaran',
                 accentColor: c,
               ),

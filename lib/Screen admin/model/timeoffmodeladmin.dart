@@ -92,21 +92,19 @@ class AdminTimeOffData {
   final String? fileType;
   final int daysSinceSubmitted;
   final bool hasFile;
-
-  // Data Dinas Luar.
   final String? jenisPekerjaan;
   final String? rabType;
   final double? nominalUangKantor;
   final String? orgTarget;
   final String? managerApprovalStatus;
-
-  // Data laporan Dinas Luar.
   final String? laporanStatus;
   final DateTime? laporanSubmittedAt;
   final String? laporanFileName;
   final String? laporanFilePath;
   final String? anggaranFileName;
   final String? anggaranFilePath;
+  final bool requiresDirectorApproval;
+  final String? directorUserId;
 
   const AdminTimeOffData({
     required this.id,
@@ -143,9 +141,10 @@ class AdminTimeOffData {
     this.laporanFilePath,
     this.anggaranFileName,
     this.anggaranFilePath,
+    this.requiresDirectorApproval = false,
+    this.directorUserId,
   });
 
-  // Membaca PascalCase, camelCase, maupun snake_case dari API.
   static dynamic _f(Map<String, dynamic> json, String pascal, String snake) {
     final camel = pascal[0].toLowerCase() + pascal.substring(1);
     return json[pascal] ?? json[camel] ?? json[snake];
@@ -185,6 +184,17 @@ class AdminTimeOffData {
   static DateTime? _parseDate(dynamic value) {
     if (value == null) return null;
     return DateTime.tryParse(value.toString());
+  }
+
+  static int? _toIntOrNull(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+
+  static bool _hasText(String? value) {
+    final text = value?.trim();
+    return text != null && text.isNotEmpty && text.toLowerCase() != 'null';
   }
 
   factory AdminTimeOffData.fromJson(Map<String, dynamic> json) {
@@ -241,36 +251,27 @@ class AdminTimeOffData {
       laporanFileName: _toNullableString(
         _f(json, 'LaporanFileName', 'laporan_file_name'),
       ),
-      // WAJIB: sebelumnya dua field path ini belum dimapping.
       laporanFilePath: _toNullableString(
-        _f(json, 'LaporanFilePath', 'laporan_file_path'),
+        _f(json, 'LaporanFilePath', 'laporan_file_path') ??
+            json['laporanFilePath'],
       ),
       anggaranFileName: _toNullableString(
         _f(json, 'AnggaranFileName', 'anggaran_file_name'),
       ),
       anggaranFilePath: _toNullableString(
-        _f(json, 'AnggaranFilePath', 'anggaran_file_path'),
+        _f(json, 'AnggaranFilePath', 'anggaran_file_path') ??
+            json['anggaranFilePath'],
+      ),
+      requiresDirectorApproval: _toBool(
+        _f(json, 'RequiresDirectorApproval', 'requires_director_approval'),
+      ),
+      directorUserId: _toNullableString(
+        _f(json, 'DirectorUserId', 'director_user_id'),
       ),
     );
   }
 
-  static int? _toIntOrNull(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toInt();
-    return int.tryParse(value.toString());
-  }
-
-  static bool _hasText(String? value) {
-    final text = value?.trim();
-    return text != null && text.isNotEmpty && text.toLowerCase() != 'null';
-  }
-
-  static String _fileNameFromPath(String? path, String fallback) {
-    if (!_hasText(path)) return fallback;
-    final normalized = path!.replaceAll('\\', '/');
-    final name = normalized.split('/').last.trim();
-    return name.isEmpty ? fallback : name;
-  }
+  // ── Getters ──────────────────────────────────────────────────────────────
 
   bool get isDinasLuar => jenisTimeOff.trim().toLowerCase() == 'dinas luar';
 
@@ -280,9 +281,6 @@ class AdminTimeOffData {
   bool get hasAnggaranFile =>
       _hasText(anggaranFileName) || _hasText(anggaranFilePath);
 
-  // Beberapa response API lama tidak mengirim laporanFilePath/laporanFileName,
-  // walaupun user sudah berhasil upload. Pada alur Dinas Luar, status di bawah
-  // hanya mungkin terjadi setelah laporan dikirim ke Head/HRD.
   bool get hasLaporanWorkflowSubmitted {
     final laporan = (laporanStatus ?? '').trim().toLowerCase();
     final currentStatus = status.trim().toLowerCase();
@@ -302,34 +300,45 @@ class AdminTimeOffData {
         currentStatus == 'laporan approved';
   }
 
-  // Laporan dianggap tersedia bila ada nama/path file ATAU status workflow
-  // membuktikan upload laporan sudah berhasil dilakukan.
   bool get hasLaporan =>
       hasLaporanFile || hasAnggaranFile || hasLaporanWorkflowSubmitted;
 
   String get laporanDisplayFileName {
     if (_hasText(laporanFileName)) return laporanFileName!.trim();
-    return _fileNameFromPath(
-      laporanFilePath,
-      hasLaporanWorkflowSubmitted
-          ? 'Laporan Dinas Luar (sudah diupload)'
-          : 'Laporan Dinas Luar',
-    );
+    if (_hasText(laporanFilePath)) {
+      final name = laporanFilePath!
+          .replaceAll('\\', '/')
+          .split('/')
+          .last
+          .trim();
+      if (name.isNotEmpty) return name;
+    }
+    return hasLaporanWorkflowSubmitted
+        ? 'Laporan Dinas Luar (sudah diupload)'
+        : 'Laporan Dinas Luar';
   }
 
   String get anggaranDisplayFileName {
     if (_hasText(anggaranFileName)) return anggaranFileName!.trim();
-    return _fileNameFromPath(anggaranFilePath, 'Laporan Anggaran');
+    if (_hasText(anggaranFilePath)) {
+      final name = anggaranFilePath!
+          .replaceAll('\\', '/')
+          .split('/')
+          .last
+          .trim();
+      if (name.isNotEmpty) return name;
+    }
+    return 'Laporan Anggaran';
   }
 
   bool get isPendingHrd => status.trim().toLowerCase() == 'pending hrd';
+
   bool get isPendingDirector =>
       status.trim().toLowerCase() == 'pending director';
+
   bool get needsReview {
-    final normalized = status.trim().toLowerCase();
-    return normalized == 'pending' ||
-        normalized == 'pending hrd' ||
-        normalized == 'pending director';
+    final s = status.trim().toLowerCase();
+    return s == 'pending' || s == 'pending hrd' || s == 'pending director';
   }
 
   String get statusText {
@@ -354,6 +363,12 @@ class AdminTimeOffData {
         return 'Menunggu Divisi';
       case 'menunggu laporan':
         return 'Menunggu Laporan';
+      case 'pending laporan head':
+        return 'Menunggu Verifikasi Head';
+      case 'pending laporan hrd':
+        return 'Menunggu Verifikasi HRD';
+      case 'laporan ditolak':
+        return 'Laporan Ditolak';
       case 'menunggu verifikasi head':
         return 'Menunggu Verifikasi Head';
       case 'menunggu verifikasi hrd':
@@ -378,12 +393,15 @@ class AdminTimeOffData {
       case 'rejected':
       case 'ditolak':
       case 'revisi':
+      case 'laporan ditolak':
         return const Color(0xFFEF4444);
       case 'processed':
         return const Color(0xFF3B82F6);
       case 'menunggu manager':
       case 'menunggu verifikasi head':
       case 'menunggu verifikasi hrd':
+      case 'pending laporan head':
+      case 'pending laporan hrd':
         return const Color(0xFF6366F1);
       case 'menunggu org':
         return const Color(0xFF0EA5E9);
@@ -398,8 +416,9 @@ class AdminTimeOffData {
 
   String get formattedDate {
     String fmt(DateTime date) =>
-        '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-
+        '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/'
+        '${date.year}';
     final start = fmt(tanggalMulai);
     final end = fmt(tanggalSelesai);
     return start == end ? start : '$start - $end';
@@ -419,8 +438,11 @@ class AdminTimeOffData {
   }
 
   String get formattedSubmittedDate =>
-      '${submittedAt.day.toString().padLeft(2, '0')}/${submittedAt.month.toString().padLeft(2, '0')}/${submittedAt.year} '
-      '${submittedAt.hour.toString().padLeft(2, '0')}:${submittedAt.minute.toString().padLeft(2, '0')}';
+      '${submittedAt.day.toString().padLeft(2, '0')}/'
+      '${submittedAt.month.toString().padLeft(2, '0')}/'
+      '${submittedAt.year} '
+      '${submittedAt.hour.toString().padLeft(2, '0')}:'
+      '${submittedAt.minute.toString().padLeft(2, '0')}';
 
   String get jenisIcon {
     switch (jenisTimeOff) {

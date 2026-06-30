@@ -1,10 +1,23 @@
 // screens/halaman_hrd_reimbursement.dart
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:absensikaryawan/Screen%20admin/Home/reimbursementadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dart';
 import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.dart';
+import 'package:absensikaryawan/Screen%20User/Screen%20HRD/hrd_employee_service.dart';
+import 'package:absensikaryawan/Services/time_off_model.dart' hide ApiResponse;
+import 'package:absensikaryawan/Services/time_off_service.dart';
+import 'package:absensikaryawan/models/employee_models.dart';
+import 'package:absensikaryawan/utils/web_file_download.dart';
+import 'package:excel/excel.dart' as xl;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 bool _isReimbursementWebLayout(BuildContext context) =>
@@ -25,6 +38,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   List<AdminReimbursementData> _allReimbursements = [];
   List<AdminReimbursementData> _filteredReimbursements = [];
   List<UserWithReimbursements> _users = [];
+  List<EmployeeApiData> _allActiveEmployees = [];
   AdminReimbursementStatistics? _statistics;
 
   bool _isLoading = true;
@@ -32,6 +46,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   String? _currentUserName;
   String? _selectedStatus;
   String? _selectedUserId;
+
+  List<WorkPeriodModel> _workPeriods = [];
+  WorkPeriodModel? _selectedPeriod;
+  bool _isLoadingPeriods = false;
 
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
@@ -54,6 +72,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       if (mounted) setState(() => _webTabIndex = _tabController.index);
     });
     _loadUserData();
+    _loadWorkPeriods();
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -62,6 +81,43 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     _tabController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadWorkPeriods() async {
+    if (!mounted) return;
+    setState(() => _isLoadingPeriods = true);
+    try {
+      final res = await TimeOffService.getWorkPeriods();
+      if (mounted && res.success && res.data != null) {
+        final today = DateTime.now();
+        final todayNorm = DateTime(today.year, today.month, today.day);
+        WorkPeriodModel? active;
+        for (final p in res.data!) {
+          final start = DateTime(
+            p.tanggalMulai.year,
+            p.tanggalMulai.month,
+            p.tanggalMulai.day,
+          );
+          final end = DateTime(
+            p.tanggalSelesai.year,
+            p.tanggalSelesai.month,
+            p.tanggalSelesai.day,
+          );
+          if (!todayNorm.isBefore(start) && !todayNorm.isAfter(end)) {
+            active = p;
+            break;
+          }
+        }
+        setState(() {
+          _workPeriods = res.data!;
+          _selectedPeriod = active;
+          _isLoadingPeriods = false;
+        });
+        _applyFilters();
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingPeriods = false);
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -107,6 +163,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               ),
               _adminService.getUsersWithReimbursements(),
               _adminService.getAdminStatistics(),
+              HrdEmployeeService.getEmployeeList(
+                status: 'Aktif',
+                pageSize: 1000,
+              ),
             ]).timeout(
               const Duration(seconds: 30),
               onTimeout: () {
@@ -117,6 +177,11 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
         reimbursements = futures[0] as List<AdminReimbursementData>;
         users = futures[1] as List<UserWithReimbursements>;
         statistics = futures[2] as AdminReimbursementStatistics?;
+
+        final empRes = futures[3] as ApiResponse<EmployeeListResponse>;
+        if (empRes.success && empRes.data != null) {
+          _allActiveEmployees = empRes.data!.data;
+        }
       } catch (e) {
         if (e.toString().toLowerCase().contains('admin') ||
             e.toString().toLowerCase().contains('akses')) {
@@ -192,6 +257,17 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       _showErrorSnackBar('Statistik menggunakan data default');
     }
 
+    // Load semua karyawan aktif
+    try {
+      final empRes = await HrdEmployeeService.getEmployeeList(
+        status: 'Aktif',
+        pageSize: 1000,
+      );
+      if (empRes.success && empRes.data != null) {
+        _allActiveEmployees = empRes.data!.data;
+      }
+    } catch (_) {}
+
     setState(() {
       _allReimbursements = reimbursements;
       _users = users;
@@ -243,7 +319,29 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   void _applyFilters() {
     List<AdminReimbursementData> filtered = _allReimbursements;
 
-    // Filter by status - PERBAIKAN: Case-insensitive comparison
+    // Filter by period
+    if (_selectedPeriod != null) {
+      final start = DateTime(
+        _selectedPeriod!.tanggalMulai.year,
+        _selectedPeriod!.tanggalMulai.month,
+        _selectedPeriod!.tanggalMulai.day,
+      );
+      final end = DateTime(
+        _selectedPeriod!.tanggalSelesai.year,
+        _selectedPeriod!.tanggalSelesai.month,
+        _selectedPeriod!.tanggalSelesai.day,
+      );
+      filtered = filtered.where((item) {
+        final d = DateTime(
+          item.submittedAt.year,
+          item.submittedAt.month,
+          item.submittedAt.day,
+        );
+        return !d.isBefore(start) && !d.isAfter(end);
+      }).toList();
+    }
+
+    // Filter by status
     if (_selectedStatus != null && _selectedStatus != 'Semua Status') {
       filtered = filtered
           .where(
@@ -617,13 +715,35 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       .where((item) => item.status.toLowerCase() == 'rejected')
       .length;
 
+  /// Semua karyawan aktif + data reimbursement masing-masing (0 jika belum pernah)
+  List<UserWithReimbursements> get _mergedUsers {
+    if (_allActiveEmployees.isEmpty) return _users;
+    final Map<String, UserWithReimbursements> byId = {
+      for (final u in _users) u.userId: u,
+    };
+    return _allActiveEmployees.map((emp) {
+      final existing = byId[emp.userId];
+      if (existing != null) return existing;
+      return UserWithReimbursements(
+        userId: emp.userId,
+        name: emp.name,
+        department: emp.department ?? '-',
+        mail: emp.email,
+        jobs: emp.jobs ?? emp.jobPosition,
+        totalReimbursements: 0,
+        pendingCount: 0,
+        approvedCount: 0,
+        rejectedCount: 0,
+        paidCount: 0,
+        totalAmount: 0,
+        formattedTotalAmount: 'Rp 0',
+      );
+    }).toList();
+  }
+
   Widget _buildWebStatsSummary() {
     final data = [
-      {
-        'label': 'Total',
-        'value': _allReimbursements.length,
-        'color': Colors.blue,
-      },
+      {'label': 'Karyawan', 'value': _mergedUsers.length, 'color': Colors.blue},
       {'label': 'Pending', 'value': _pendingCountLive, 'color': Colors.orange},
       {
         'label': 'Disetujui',
@@ -801,7 +921,11 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildQuickStat('Karyawan', '${_users.length}', Icons.people),
+                _buildQuickStat(
+                  'Karyawan',
+                  '${_mergedUsers.length}',
+                  Icons.people,
+                ),
                 Container(width: 1, height: 36, color: Colors.white24),
                 _buildQuickStat(
                   'Menunggu',
@@ -907,6 +1031,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                     children: [
                       Expanded(flex: 3, child: search),
                       const SizedBox(width: 12),
+                      Expanded(child: _buildPeriodFilter()),
+                      const SizedBox(width: 12),
                       Expanded(child: _buildStatusFilter()),
                       const SizedBox(width: 12),
                       Expanded(child: _buildUserFilter()),
@@ -918,6 +1044,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                   children: [
                     search,
                     const SizedBox(height: 12),
+                    _buildPeriodFilter(),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(child: _buildStatusFilter()),
@@ -985,7 +1113,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   Widget _buildUsersTab() {
-    if (_users.isEmpty) return _buildEmptyState();
+    final merged = _mergedUsers;
+    if (merged.isEmpty) return _buildEmptyState();
 
     return RefreshIndicator(
       onRefresh: _refreshData,
@@ -999,14 +1128,14 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
           return GridView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(16),
-            itemCount: _users.length,
+            itemCount: merged.length,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
               crossAxisSpacing: 14,
               mainAxisSpacing: 14,
               childAspectRatio: columns == 1 ? 1.0 : 1.20,
             ),
-            itemBuilder: (context, index) => _buildHRDUserCard(_users[index]),
+            itemBuilder: (context, index) => _buildHRDUserCard(merged[index]),
           );
         },
       ),
@@ -1352,7 +1481,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               crossAxisCount: crossAxisCount,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: screenWidth > 600 ? 1.5 : 1.3,
+              childAspectRatio: screenWidth > 600 ? 1.2 : 1.3,
               children: [
                 _buildStatCard(
                   title: 'Total Pengajuan',
@@ -1944,6 +2073,53 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     );
   }
 
+  Widget _buildPeriodFilter() {
+    return DropdownButtonFormField<WorkPeriodModel?>(
+      value: _selectedPeriod,
+      decoration: InputDecoration(
+        labelText: 'Periode',
+        labelStyle: TextStyle(fontSize: _getResponsiveFontSize(context, 12)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        isDense: true,
+      ),
+      style: TextStyle(
+        fontSize: _getResponsiveFontSize(context, 14),
+        color: Colors.black,
+      ),
+      isExpanded: true,
+      items: [
+        DropdownMenuItem<WorkPeriodModel?>(
+          value: null,
+          child: Text(
+            'Semua Periode',
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: _getResponsiveFontSize(context, 14)),
+          ),
+        ),
+        ..._workPeriods.map(
+          (p) => DropdownMenuItem<WorkPeriodModel?>(
+            value: p,
+            child: Text(
+              p.label,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+              style: TextStyle(fontSize: _getResponsiveFontSize(context, 14)),
+            ),
+          ),
+        ),
+      ],
+      onChanged: _isLoadingPeriods
+          ? null
+          : (value) {
+              setState(() {
+                _selectedPeriod = value;
+                _applyFilters();
+              });
+            },
+    );
+  }
+
   Widget _buildStatusFilter() {
     return DropdownButtonFormField<String>(
       value: _selectedStatus,
@@ -2352,7 +2528,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                             child: ElevatedButton.icon(
                               onPressed: () => _quickReview(item, 'approved'),
                               icon: const Icon(Icons.check, size: 16),
-                              label: const Text('Setujui'),
+                              label: const Text('Setujui → Finance'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF10B981),
                                 foregroundColor: Colors.white,
@@ -2806,6 +2982,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
           statistics: _statistics,
           currentUserId: _currentUserId ?? '',
           currentUserName: _currentUserName ?? '',
+          workPeriods: _workPeriods,
         );
       },
     );
@@ -2833,12 +3010,12 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
 // Reimbursement Report Modal Class
 class ReimbursementReportModal extends StatefulWidget {
-  final List<dynamic>
-  allReimbursements; // Changed to dynamic to avoid type issues
-  final List<dynamic> users; // Changed to dynamic to avoid type issues
-  final dynamic statistics; // Changed to dynamic to avoid type issues
+  final List<dynamic> allReimbursements;
+  final List<dynamic> users;
+  final dynamic statistics;
   final String currentUserId;
   final String currentUserName;
+  final List<WorkPeriodModel> workPeriods;
 
   const ReimbursementReportModal({
     super.key,
@@ -2847,6 +3024,7 @@ class ReimbursementReportModal extends StatefulWidget {
     required this.statistics,
     required this.currentUserId,
     required this.currentUserName,
+    this.workPeriods = const [],
   });
 
   @override
@@ -2856,8 +3034,7 @@ class ReimbursementReportModal extends StatefulWidget {
 
 class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   String _selectedReportType = 'monthly';
-  String _selectedMonth = DateTime.now().month.toString();
-  String _selectedYear = DateTime.now().year.toString();
+  WorkPeriodModel? _selectedPeriod;
 
   final List<String> _reportTypes = [
     'monthly',
@@ -2867,6 +3044,24 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
     'user',
     'summary',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.workPeriods.isNotEmpty) {
+      final today = DateTime.now();
+      final todayNorm = DateTime(today.year, today.month, today.day);
+      for (final p in widget.workPeriods) {
+        final start = DateTime(p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day);
+        final end = DateTime(p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day);
+        if (!todayNorm.isBefore(start) && !todayNorm.isAfter(end)) {
+          _selectedPeriod = p;
+          break;
+        }
+      }
+      _selectedPeriod ??= widget.workPeriods.first;
+    }
+  }
 
   double _getResponsiveFontSize(BuildContext context, double baseSize) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -2987,53 +3182,31 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
               );
             }).toList(),
           ),
-          if (_selectedReportType == 'monthly') ...[
+          if (_selectedReportType == 'monthly' && widget.workPeriods.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedMonth,
-                    decoration: const InputDecoration(
-                      labelText: 'Bulan',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: List.generate(12, (index) {
-                      final month = (index + 1).toString();
-                      return DropdownMenuItem(
-                        value: month,
-                        child: Text(_getMonthName(month)),
-                      );
-                    }),
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedMonth = value!;
-                      });
-                    },
-                  ),
+            DropdownButtonFormField<WorkPeriodModel?>(
+              value: _selectedPeriod,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Periode',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem<WorkPeriodModel?>(
+                  value: null,
+                  child: Text('Semua Periode', overflow: TextOverflow.ellipsis),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedYear,
-                    decoration: const InputDecoration(
-                      labelText: 'Tahun',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: List.generate(5, (index) {
-                      final year = (DateTime.now().year - 2 + index).toString();
-                      return DropdownMenuItem(value: year, child: Text(year));
-                    }),
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedYear = value!;
-                      });
-                    },
+                ...widget.workPeriods.map(
+                  (p) => DropdownMenuItem<WorkPeriodModel?>(
+                    value: p,
+                    child: Text(p.label, overflow: TextOverflow.ellipsis),
                   ),
                 ),
               ],
+              onChanged: (value) {
+                setState(() => _selectedPeriod = value);
+              },
             ),
           ],
         ],
@@ -3066,7 +3239,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildReportHeader(
-          'Laporan Bulanan - ${_getMonthName(_selectedMonth)} $_selectedYear',
+          'Laporan Periode - ${_selectedPeriod?.label ?? 'Semua Periode'}',
         ),
         const SizedBox(height: 20),
 
@@ -3093,7 +3266,9 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildReportHeader('Laporan Tahunan $_selectedYear'),
+        _buildReportHeader(
+          'Laporan Tahunan ${_selectedPeriod?.tanggalMulai.year ?? DateTime.now().year}',
+        ),
         const SizedBox(height: 20),
 
         // Yearly Statistics
@@ -3910,13 +4085,14 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   Map<String, dynamic> _getMonthlyData() {
-    final selectedDate = DateTime(
-      int.parse(_selectedYear),
-      int.parse(_selectedMonth),
-    );
     final monthlyReimbursements = widget.allReimbursements.where((item) {
-      return item.submittedAt.year == selectedDate.year &&
-          item.submittedAt.month == selectedDate.month;
+      if (_selectedPeriod == null) return true;
+      final start = DateTime(_selectedPeriod!.tanggalMulai.year,
+          _selectedPeriod!.tanggalMulai.month, _selectedPeriod!.tanggalMulai.day);
+      final end = DateTime(_selectedPeriod!.tanggalSelesai.year,
+          _selectedPeriod!.tanggalSelesai.month, _selectedPeriod!.tanggalSelesai.day);
+      final d = DateTime(item.submittedAt.year, item.submittedAt.month, item.submittedAt.day);
+      return !d.isBefore(start) && !d.isAfter(end);
     }).toList();
 
     final totalAmount = monthlyReimbursements.fold(
@@ -3974,7 +4150,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   Map<String, dynamic> _getYearlyData() {
-    final selectedYear = int.parse(_selectedYear);
+    final selectedYear = _selectedPeriod?.tanggalMulai.year ?? DateTime.now().year;
     final yearlyReimbursements = widget.allReimbursements.where((item) {
       return item.submittedAt.year == selectedYear;
     }).toList();
@@ -4301,130 +4477,503 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
     );
   }
 
-  void _exportReport() {
-    // Show export options
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Export Report'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.text_snippet),
-              title: const Text('Export as Text'),
-              onTap: () {
-                Navigator.pop(context);
-                _exportAsText();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share),
-              title: const Text('Share Report'),
-              onTap: () {
-                Navigator.pop(context);
-                _shareReport();
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
+  void _exportReport() => _exportAsExcel();
 
-  void _exportAsText() {
-    // Generate text report
-    final reportText = _generateTextReport();
-
-    // Show the generated report in a dialog
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Text Report'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: SingleChildScrollView(
-            child: Text(
-              reportText,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // Copy to clipboard
-              // Clipboard.setData(ClipboardData(text: reportText));
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Report copied to clipboard')),
-              );
-            },
-            child: const Text('Copy'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _shareReport() {
-    _generateTextReport();
-    // Implement sharing functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Share functionality will be implemented')),
-    );
-    // Note: reportText is prepared for future sharing implementation
-  }
-
-  String _generateTextReport() {
-    final buffer = StringBuffer();
-    buffer.writeln('=== LAPORAN REIMBURSEMENT HRD ===');
-    buffer.writeln('Dibuat pada: ${DateTime.now()}');
-    buffer.writeln('Dibuat oleh: ${widget.currentUserName}');
-    buffer.writeln('Jenis: ${_getReportTypeName(_selectedReportType)}');
-    buffer.writeln();
-
-    if (_selectedReportType == 'monthly') {
-      buffer.writeln('Period: ${_getMonthName(_selectedMonth)} $_selectedYear');
-    } else if (_selectedReportType == 'yearly') {
-      buffer.writeln('Period: Tahun $_selectedYear');
+  List<dynamic> _getFilteredReimbursements() {
+    if (_selectedReportType == 'monthly' && _selectedPeriod != null) {
+      final start = DateTime(_selectedPeriod!.tanggalMulai.year,
+          _selectedPeriod!.tanggalMulai.month, _selectedPeriod!.tanggalMulai.day);
+      final end = DateTime(_selectedPeriod!.tanggalSelesai.year,
+          _selectedPeriod!.tanggalSelesai.month, _selectedPeriod!.tanggalSelesai.day);
+      return widget.allReimbursements.where((r) {
+        final d = DateTime(r.submittedAt.year, r.submittedAt.month, r.submittedAt.day);
+        return !d.isBefore(start) && !d.isAfter(end);
+      }).toList();
     }
-
-    buffer.writeln();
-    buffer.writeln('STATISTIK UTAMA:');
-    buffer.writeln('- Total Pengajuan: ${widget.allReimbursements.length}');
-    buffer.writeln(
-      '- Total Nilai: ${_formatCurrency(widget.allReimbursements.fold(0.0, (sum, item) => sum + item.amount))}',
-    );
-    buffer.writeln('- Pending: ${widget.statistics?.pendingCount ?? 0}');
-    buffer.writeln('- Approved: ${widget.statistics?.approvedCount ?? 0}');
-    buffer.writeln('- Rejected: ${widget.statistics?.rejectedCount ?? 0}');
-    buffer.writeln();
-
-    buffer.writeln('TOP CATEGORIES:');
-    final categoryData = _getCategoryData();
-    categoryData.entries.take(5).forEach((entry) {
-      buffer.writeln(
-        '- ${entry.key}: ${entry.value['count']} (${_formatCurrency(entry.value['amount'])})',
-      );
-    });
-
-    buffer.writeln();
-    buffer.writeln('=== END OF REPORT ===');
-
-    return buffer.toString();
+    if (_selectedReportType == 'yearly') {
+      final y = _selectedPeriod?.tanggalMulai.year ?? DateTime.now().year;
+      return widget.allReimbursements
+          .where((r) => r.submittedAt.year == y)
+          .toList();
+    }
+    return List.from(widget.allReimbursements);
   }
+
+  Future<void> _exportAsExcel() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Row(children: [
+          SizedBox(width: 20, height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+          SizedBox(width: 12),
+          Text('Membuat file Excel...'),
+        ]),
+        duration: Duration(seconds: 10),
+        backgroundColor: Color(0xFF3949AB),
+      ),
+    );
+
+    try {
+      final data = _getFilteredReimbursements()
+          .cast<AdminReimbursementData>()
+        ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+
+      final now = DateTime.now();
+      String fmtDate(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
+      String fmtCurr(double v) => NumberFormat.currency(
+          locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(v);
+      final periodLabel = _selectedReportType == 'monthly'
+          ? (_selectedPeriod?.label ?? 'Semua Periode')
+          : _selectedReportType == 'yearly'
+              ? 'Tahun ${_selectedPeriod?.tanggalMulai.year ?? DateTime.now().year}'
+              : 'Semua Data';
+      final printDate =
+          'Dicetak: ${DateFormat('dd MMM yyyy HH:mm', 'id_ID').format(now)}';
+
+      // ── Warna ────────────────────────────────────────────────────────────
+      final cHeaderBg   = xl.ExcelColor.fromHexString('#1E3A5F');
+      final cHeaderFg   = xl.ExcelColor.fromHexString('#FFFFFF');
+      final cSubHdr     = xl.ExcelColor.fromHexString('#3949AB');
+      final cColHdr     = xl.ExcelColor.fromHexString('#E8EAF6');
+      final cColHdrFg   = xl.ExcelColor.fromHexString('#1A237E');
+      final cAlt        = xl.ExcelColor.fromHexString('#F5F5FF');
+      final cWhite      = xl.ExcelColor.fromHexString('#FFFFFF');
+      final cBorder     = xl.ExcelColor.fromHexString('#C5CAE9');
+      final cGreen      = xl.ExcelColor.fromHexString('#C8E6C9');
+      final cYellow     = xl.ExcelColor.fromHexString('#FFF9C4');
+      final cOrange     = xl.ExcelColor.fromHexString('#FFE0B2');
+      final cRed        = xl.ExcelColor.fromHexString('#FFCDD2');
+      final cBlue       = xl.ExcelColor.fromHexString('#B3E5FC');
+      final cTotalRow   = xl.ExcelColor.fromHexString('#283593');
+
+      xl.Border thinBorder() => xl.Border(
+          borderStyle: xl.BorderStyle.Thin,
+          borderColorHex: cBorder);
+
+      xl.CellStyle makeStyle({
+        xl.ExcelColor? bg,
+        xl.ExcelColor? fg,
+        bool bold = false,
+        bool italic = false,
+        int fontSize = 10,
+        xl.HorizontalAlign hAlign = xl.HorizontalAlign.Left,
+        xl.VerticalAlign vAlign = xl.VerticalAlign.Center,
+        bool wrap = false,
+        bool border = true,
+      }) {
+        final b = border
+            ? thinBorder()
+            : xl.Border(borderStyle: xl.BorderStyle.None);
+        return xl.CellStyle(
+          backgroundColorHex: bg ?? cWhite,
+          fontColorHex: fg ?? xl.ExcelColor.fromHexString('#212121'),
+          bold: bold,
+          italic: italic,
+          fontSize: fontSize,
+          horizontalAlign: hAlign,
+          verticalAlign: vAlign,
+          textWrapping: wrap ? xl.TextWrapping.WrapText : null,
+          leftBorder: b, rightBorder: b,
+          topBorder: b, bottomBorder: b,
+        );
+      }
+
+      void setC(xl.Sheet s, int col, int row, dynamic val,
+          xl.CellStyle style) {
+        final c = s.cell(
+            xl.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row));
+        if (val is int) {
+          c.value = xl.IntCellValue(val);
+        } else if (val is double) {
+          c.value = xl.DoubleCellValue(val);
+        } else {
+          c.value = xl.TextCellValue(val?.toString() ?? '');
+        }
+        c.cellStyle = style;
+      }
+
+      void titleRow(xl.Sheet s, String title, String mergeEnd, int row) {
+        s.cell(xl.CellIndex.indexByString('A${row + 1}'))
+          ..value = xl.TextCellValue(title)
+          ..cellStyle = makeStyle(
+              bg: cHeaderBg, fg: cHeaderFg, bold: true,
+              fontSize: 14, hAlign: xl.HorizontalAlign.Center, border: false);
+        s.merge(xl.CellIndex.indexByString('A${row + 1}'),
+            xl.CellIndex.indexByString('$mergeEnd${row + 1}'));
+      }
+
+      void subtitleRow(xl.Sheet s, String left, String right,
+          String midCol, String endCol, int row) {
+        final st = makeStyle(bg: cSubHdr, fg: cHeaderFg, italic: true,
+            fontSize: 9, hAlign: xl.HorizontalAlign.Center, border: false);
+        s.cell(xl.CellIndex.indexByString('A${row + 1}'))
+          ..value = xl.TextCellValue(left)..cellStyle = st;
+        s.merge(xl.CellIndex.indexByString('A${row + 1}'),
+            xl.CellIndex.indexByString('$midCol${row + 1}'));
+        s.cell(xl.CellIndex.indexByString(
+                '${String.fromCharCode(midCol.codeUnitAt(0) + 1)}${row + 1}'))
+          ..value = xl.TextCellValue(right)..cellStyle = st;
+        s.merge(
+            xl.CellIndex.indexByString(
+                '${String.fromCharCode(midCol.codeUnitAt(0) + 1)}${row + 1}'),
+            xl.CellIndex.indexByString('$endCol${row + 1}'));
+      }
+
+      xl.ExcelColor statusBg(String status) {
+        switch (status.toLowerCase()) {
+          case 'approved': return cGreen;
+          case 'paid':     return cBlue;
+          case 'rejected': return cRed;
+          case 'pending_finance': return cOrange;
+          default:         return cYellow;
+        }
+      }
+
+      // ── Kalkulasi agregat ─────────────────────────────────────────────────
+      final totalAmount = data.fold(0.0, (s, r) => s + r.amount);
+      final pendingCount  = data.where((r) =>
+          r.status.toLowerCase() == 'pending').length;
+      final financeCount  = data.where((r) =>
+          r.status.toLowerCase() == 'pending_finance').length;
+      final approvedCount = data.where((r) =>
+          r.status.toLowerCase() == 'approved').length;
+      final rejectedCount = data.where((r) =>
+          r.status.toLowerCase() == 'rejected').length;
+      final paidCount     = data.where((r) =>
+          r.status.toLowerCase() == 'paid').length;
+
+      // Per kategori
+      final Map<String, _CatStat> catMap = {};
+      for (final r in data) {
+        catMap.putIfAbsent(r.category, () => _CatStat());
+        catMap[r.category]!.count++;
+        catMap[r.category]!.total += r.amount;
+      }
+
+      // Per karyawan
+      final Map<String, _EmpStat> empMap = {};
+      for (final r in data) {
+        empMap.putIfAbsent(r.userId,
+            () => _EmpStat(r.userName, r.userJob ?? '-'));
+        final e = empMap[r.userId]!;
+        e.total++;
+        e.amount += r.amount;
+        switch (r.status.toLowerCase()) {
+          case 'pending': e.pending++; break;
+          case 'pending_finance': e.finance++; break;
+          case 'approved': e.approved++; break;
+          case 'rejected': e.rejected++; break;
+          case 'paid': e.paid++; break;
+        }
+      }
+
+      final excel = xl.Excel.createExcel();
+
+      // ══════════════════════════════════════════════════════════════════════
+      // SHEET 1 — RINGKASAN
+      // ══════════════════════════════════════════════════════════════════════
+      final s1 = excel['Ringkasan'];
+      titleRow(s1, 'LAPORAN REIMBURSEMENT HRD', 'H', 0);
+      subtitleRow(s1, 'Periode: $periodLabel', printDate, 'D', 'H', 1);
+      // blank row 2
+
+      // Statistik utama header
+      s1.cell(xl.CellIndex.indexByString('A4'))
+        ..value = xl.TextCellValue('STATISTIK UTAMA')
+        ..cellStyle = makeStyle(bg: cSubHdr, fg: cHeaderFg, bold: true,
+            fontSize: 11, hAlign: xl.HorizontalAlign.Center, border: false);
+      s1.merge(xl.CellIndex.indexByString('A4'),
+          xl.CellIndex.indexByString('H4'));
+
+      final statLabelStyle = makeStyle(
+          fg: xl.ExcelColor.fromHexString('#1A237E'), bold: true, fontSize: 10);
+      final statValStyle = makeStyle(
+          hAlign: xl.HorizontalAlign.Right, bold: true, fontSize: 11);
+
+      final stats = [
+        ['Total Pengajuan', '${data.length} pengajuan'],
+        ['Total Nilai', fmtCurr(totalAmount)],
+        ['Menunggu HRD', '$pendingCount pengajuan'],
+        ['Menunggu Finance', '$financeCount pengajuan'],
+        ['Disetujui', '$approvedCount pengajuan'],
+        ['Ditolak', '$rejectedCount pengajuan'],
+        ['Dibayar', '$paidCount pengajuan'],
+        ['Tingkat Persetujuan',
+          data.isEmpty ? '0%'
+              : '${((approvedCount + paidCount) / data.length * 100).toStringAsFixed(1)}%'],
+      ];
+      for (int i = 0; i < stats.length; i++) {
+        final row = 4 + i;
+        setC(s1, 0, row, stats[i][0], statLabelStyle);
+        s1.merge(xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row),
+            xl.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row));
+        setC(s1, 4, row, stats[i][1], statValStyle);
+        s1.merge(xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row),
+            xl.CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: row));
+      }
+
+      // blank
+      final catStartRow = 13;
+      s1.cell(xl.CellIndex.indexByString('A${catStartRow + 1}'))
+        ..value = xl.TextCellValue('RINGKASAN PER KATEGORI')
+        ..cellStyle = makeStyle(bg: cSubHdr, fg: cHeaderFg, bold: true,
+            fontSize: 11, hAlign: xl.HorizontalAlign.Center, border: false);
+      s1.merge(xl.CellIndex.indexByString('A${catStartRow + 1}'),
+          xl.CellIndex.indexByString('H${catStartRow + 1}'));
+
+      final catHdrs = ['Kategori', 'Jumlah', 'Total Nilai', 'Rata-rata',
+          'Proporsi'];
+      final catHStyle = makeStyle(bg: cColHdr, fg: cColHdrFg, bold: true,
+          fontSize: 10, hAlign: xl.HorizontalAlign.Center);
+      for (int c = 0; c < catHdrs.length; c++) {
+        setC(s1, c, catStartRow + 1, catHdrs[c], catHStyle);
+      }
+      final catList = catMap.entries.toList()
+        ..sort((a, b) => b.value.total.compareTo(a.value.total));
+      for (int i = 0; i < catList.length; i++) {
+        final e = catList[i];
+        final row = catStartRow + 2 + i;
+        final bg = i.isOdd ? cAlt : cWhite;
+        final pct = totalAmount > 0
+            ? '${(e.value.total / totalAmount * 100).toStringAsFixed(1)}%'
+            : '0%';
+        setC(s1, 0, row, e.key, makeStyle(bg: bg, bold: true));
+        setC(s1, 1, row, e.value.count, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s1, 2, row, fmtCurr(e.value.total), makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Right));
+        setC(s1, 3, row, fmtCurr(e.value.count > 0
+            ? e.value.total / e.value.count : 0),
+            makeStyle(bg: bg, hAlign: xl.HorizontalAlign.Right));
+        setC(s1, 4, row, pct, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+      }
+
+      s1.setColumnWidth(0, 30); s1.setColumnWidth(1, 14);
+      s1.setColumnWidth(2, 22); s1.setColumnWidth(3, 22);
+      s1.setColumnWidth(4, 14); s1.setColumnWidth(5, 14);
+      s1.setColumnWidth(6, 14); s1.setColumnWidth(7, 20);
+
+      // ══════════════════════════════════════════════════════════════════════
+      // SHEET 2 — DETAIL PENGAJUAN
+      // ══════════════════════════════════════════════════════════════════════
+      final s2 = excel['Detail Pengajuan'];
+      titleRow(s2, 'DETAIL PENGAJUAN REIMBURSEMENT', 'K', 0);
+      subtitleRow(s2, 'Periode: $periodLabel', printDate, 'F', 'K', 1);
+
+      const d2Hdrs = ['No', 'Tgl Pengajuan', 'Nama Karyawan', 'Jabatan',
+          'Judul', 'Kategori', 'Nominal', 'Tgl Pengeluaran',
+          'Status', 'Tgl Review', 'Catatan'];
+      final d2HStyle = makeStyle(bg: cColHdr, fg: cColHdrFg, bold: true,
+          fontSize: 10, hAlign: xl.HorizontalAlign.Center);
+      for (int c = 0; c < d2Hdrs.length; c++) {
+        setC(s2, c, 3, d2Hdrs[c], d2HStyle);
+      }
+
+      for (int i = 0; i < data.length; i++) {
+        final r = data[i];
+        final row = 4 + i;
+        final sBg = statusBg(r.status);
+        final bg  = i.isOdd ? cAlt : cWhite;
+        setC(s2, 0,  row, i + 1, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s2, 1,  row, fmtDate(r.submittedAt), makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s2, 2,  row, r.userName, makeStyle(bg: bg, bold: true));
+        setC(s2, 3,  row, r.userJob ?? '-', makeStyle(bg: bg));
+        setC(s2, 4,  row, r.title, makeStyle(bg: bg, wrap: true));
+        setC(s2, 5,  row, r.category, makeStyle(bg: bg));
+        setC(s2, 6,  row, fmtCurr(r.amount), makeStyle(bg: bg, bold: true,
+            hAlign: xl.HorizontalAlign.Right));
+        setC(s2, 7,  row, fmtDate(r.expenseDate), makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s2, 8,  row, r.statusText, makeStyle(bg: sBg, bold: true,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s2, 9,  row, r.reviewedAt != null
+            ? fmtDate(r.reviewedAt!) : '-',
+            makeStyle(bg: bg, hAlign: xl.HorizontalAlign.Center));
+        setC(s2, 10, row, r.reviewNotes ?? '-', makeStyle(bg: bg, wrap: true));
+      }
+
+      // Total row
+      final totalRow2 = 4 + data.length;
+      final tStyle = makeStyle(bg: cTotalRow, fg: cHeaderFg, bold: true,
+          hAlign: xl.HorizontalAlign.Right);
+      setC(s2, 0, totalRow2, 'TOTAL', makeStyle(bg: cTotalRow, fg: cHeaderFg,
+          bold: true, hAlign: xl.HorizontalAlign.Center));
+      s2.merge(
+          xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: totalRow2),
+          xl.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: totalRow2));
+      setC(s2, 6, totalRow2, fmtCurr(totalAmount), tStyle);
+      s2.merge(
+          xl.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: totalRow2),
+          xl.CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: totalRow2));
+
+      s2.setColumnWidth(0, 5);  s2.setColumnWidth(1, 15);
+      s2.setColumnWidth(2, 24); s2.setColumnWidth(3, 20);
+      s2.setColumnWidth(4, 30); s2.setColumnWidth(5, 18);
+      s2.setColumnWidth(6, 18); s2.setColumnWidth(7, 15);
+      s2.setColumnWidth(8, 18); s2.setColumnWidth(9, 14);
+      s2.setColumnWidth(10, 30);
+
+      // ══════════════════════════════════════════════════════════════════════
+      // SHEET 3 — PER KARYAWAN
+      // ══════════════════════════════════════════════════════════════════════
+      final s3 = excel['Per Karyawan'];
+      titleRow(s3, 'RINGKASAN REIMBURSEMENT PER KARYAWAN', 'I', 0);
+      subtitleRow(s3, 'Periode: $periodLabel', printDate, 'E', 'I', 1);
+
+      const e3Hdrs = ['No', 'Nama Karyawan', 'Jabatan', 'Total',
+          'Menunggu HRD', 'Menunggu Finance', 'Disetujui', 'Ditolak', 'Dibayar',
+          'Total Nominal'];
+      final e3HStyle = makeStyle(bg: cColHdr, fg: cColHdrFg, bold: true,
+          fontSize: 10, hAlign: xl.HorizontalAlign.Center);
+      for (int c = 0; c < e3Hdrs.length; c++) {
+        setC(s3, c, 3, e3Hdrs[c], e3HStyle);
+      }
+
+      final empList = empMap.values.toList()
+        ..sort((a, b) => b.amount.compareTo(a.amount));
+      double empTotalAmount = 0;
+      for (int i = 0; i < empList.length; i++) {
+        final e = empList[i];
+        final row = 4 + i;
+        final bg  = i.isOdd ? cAlt : cWhite;
+        empTotalAmount += e.amount;
+        setC(s3, 0, row, i + 1, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 1, row, e.name, makeStyle(bg: bg, bold: true));
+        setC(s3, 2, row, e.job, makeStyle(bg: bg));
+        setC(s3, 3, row, e.total, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 4, row, e.pending, makeStyle(bg: e.pending > 0 ? cYellow : bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 5, row, e.finance, makeStyle(bg: e.finance > 0 ? cOrange : bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 6, row, e.approved, makeStyle(bg: e.approved > 0 ? cGreen : bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 7, row, e.rejected, makeStyle(bg: e.rejected > 0 ? cRed : bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 8, row, e.paid, makeStyle(bg: e.paid > 0 ? cBlue : bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s3, 9, row, fmtCurr(e.amount), makeStyle(bg: bg, bold: true,
+            hAlign: xl.HorizontalAlign.Right));
+      }
+      // Total row
+      final totalRow3 = 4 + empList.length;
+      final t3 = makeStyle(bg: cTotalRow, fg: cHeaderFg, bold: true,
+          hAlign: xl.HorizontalAlign.Center);
+      setC(s3, 0, totalRow3, 'TOTAL', t3);
+      s3.merge(
+          xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: totalRow3),
+          xl.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: totalRow3));
+      setC(s3, 9, totalRow3, fmtCurr(empTotalAmount),
+          makeStyle(bg: cTotalRow, fg: cHeaderFg, bold: true,
+              hAlign: xl.HorizontalAlign.Right));
+
+      s3.setColumnWidth(0, 5);  s3.setColumnWidth(1, 26);
+      s3.setColumnWidth(2, 22); s3.setColumnWidth(3, 10);
+      s3.setColumnWidth(4, 15); s3.setColumnWidth(5, 18);
+      s3.setColumnWidth(6, 13); s3.setColumnWidth(7, 12);
+      s3.setColumnWidth(8, 12); s3.setColumnWidth(9, 22);
+
+      // ══════════════════════════════════════════════════════════════════════
+      // SHEET 4 — PER KATEGORI
+      // ══════════════════════════════════════════════════════════════════════
+      final s4 = excel['Per Kategori'];
+      titleRow(s4, 'RINGKASAN REIMBURSEMENT PER KATEGORI', 'F', 0);
+      subtitleRow(s4, 'Periode: $periodLabel', printDate, 'C', 'F', 1);
+
+      const c4Hdrs = ['No', 'Kategori', 'Jumlah Pengajuan',
+          'Total Nilai', 'Rata-rata Nilai', 'Proporsi (%)'];
+      final c4HStyle = makeStyle(bg: cColHdr, fg: cColHdrFg, bold: true,
+          fontSize: 10, hAlign: xl.HorizontalAlign.Center);
+      for (int c = 0; c < c4Hdrs.length; c++) {
+        setC(s4, c, 3, c4Hdrs[c], c4HStyle);
+      }
+
+      for (int i = 0; i < catList.length; i++) {
+        final e = catList[i];
+        final row = 4 + i;
+        final bg  = i.isOdd ? cAlt : cWhite;
+        final pct = totalAmount > 0
+            ? (e.value.total / totalAmount * 100).toStringAsFixed(1)
+            : '0.0';
+        setC(s4, 0, row, i + 1, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s4, 1, row, e.key, makeStyle(bg: bg, bold: true));
+        setC(s4, 2, row, e.value.count, makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+        setC(s4, 3, row, fmtCurr(e.value.total), makeStyle(bg: bg, bold: true,
+            hAlign: xl.HorizontalAlign.Right));
+        setC(s4, 4, row, fmtCurr(e.value.count > 0
+            ? e.value.total / e.value.count : 0),
+            makeStyle(bg: bg, hAlign: xl.HorizontalAlign.Right));
+        setC(s4, 5, row, '$pct%', makeStyle(bg: bg,
+            hAlign: xl.HorizontalAlign.Center));
+      }
+      // Total row
+      final totalRow4 = 4 + catList.length;
+      setC(s4, 0, totalRow4, 'TOTAL',
+          makeStyle(bg: cTotalRow, fg: cHeaderFg, bold: true,
+              hAlign: xl.HorizontalAlign.Center));
+      s4.merge(
+          xl.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: totalRow4),
+          xl.CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: totalRow4));
+      setC(s4, 3, totalRow4, fmtCurr(totalAmount),
+          makeStyle(bg: cTotalRow, fg: cHeaderFg, bold: true,
+              hAlign: xl.HorizontalAlign.Right));
+      s4.merge(
+          xl.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: totalRow4),
+          xl.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: totalRow4));
+
+      s4.setColumnWidth(0, 5);  s4.setColumnWidth(1, 28);
+      s4.setColumnWidth(2, 18); s4.setColumnWidth(3, 22);
+      s4.setColumnWidth(4, 22); s4.setColumnWidth(5, 14);
+
+      // ── Hapus default sheet & encode ──────────────────────────────────────
+      if (excel.sheets.containsKey('Sheet1')) excel.delete('Sheet1');
+      excel.setDefaultSheet('Ringkasan');
+
+      final Uint8List? bytes = excel.encode() != null
+          ? Uint8List.fromList(excel.encode()!)
+          : null;
+      if (bytes == null) throw Exception('Gagal encode Excel');
+
+      messenger.hideCurrentSnackBar();
+
+      final ts = DateFormat('yyyyMMdd_HHmmss').format(now);
+      final fileName = 'laporan_reimbursement_$ts.xlsx';
+
+      if (kIsWeb) {
+        downloadFileWeb(fileName, bytes);
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsBytes(bytes);
+        await OpenFile.open(file.path);
+      }
+
+      messenger.showSnackBar(SnackBar(
+        content: Row(children: [
+          const Icon(Icons.check_circle, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+              'Excel berhasil dibuat — ${data.length} data, $periodLabel')),
+        ]),
+        backgroundColor: const Color(0xFF10B981),
+        duration: const Duration(seconds: 4),
+      ));
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+        content: Text('Gagal membuat Excel: $e'),
+        backgroundColor: const Color(0xFFEF4444),
+      ));
+    }
+  }
+
 }
 
 // Budget Overview Modal Class
@@ -5982,4 +6531,23 @@ class _ReimbursementWebTab {
   final int index;
 
   const _ReimbursementWebTab(this.icon, this.label, this.index);
+}
+
+class _CatStat {
+  int count = 0;
+  double total = 0;
+}
+
+class _EmpStat {
+  final String name;
+  final String job;
+  int total = 0;
+  double amount = 0;
+  int pending = 0;
+  int finance = 0;
+  int approved = 0;
+  int rejected = 0;
+  int paid = 0;
+
+  _EmpStat(this.name, this.job);
 }

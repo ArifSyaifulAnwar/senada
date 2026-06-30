@@ -3,6 +3,7 @@
 
 import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dart';
 import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.dart';
+import 'package:absensikaryawan/Services/reimbursementservice.dart' show ReimbursementAttachmentMeta;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io' show File;
@@ -1541,6 +1542,13 @@ class _AdminReimbursementDetailModalState
   String? _receiptError;
   String? _paymentProofError;
 
+  // Multi-attachment support (tabel baru, bisa lebih dari 1 file)
+  List<ReimbursementAttachmentMeta> _attachmentMetas = [];
+  bool _isLoadingAttachmentList = false;
+  final Map<int, AdminReimbursementAttachment?> _attachmentBytesMap = {};
+  final Map<int, bool> _attachmentBytesLoading = {};
+  final Map<int, String?> _attachmentBytesError = {};
+
   bool _hasPaymentProof() {
     return widget.item.hasPaymentProof ||
         (widget.item.paymentProofFilename?.trim().isNotEmpty == true);
@@ -1549,6 +1557,7 @@ class _AdminReimbursementDetailModalState
   @override
   void initState() {
     super.initState();
+    _loadAttachments();
     if (widget.item.hasReceipt) _loadReceiptAttachment();
     if (_hasPaymentProof()) _loadPaymentProofAttachment();
   }
@@ -1611,6 +1620,112 @@ class _AdminReimbursementDetailModalState
         _paymentProofError = e.toString();
       });
     }
+  }
+
+  Future<void> _loadAttachments() async {
+    if (_isLoadingAttachmentList) return;
+    setState(() => _isLoadingAttachmentList = true);
+    try {
+      final metas = await widget.adminService.getAdminAttachments(
+        reimbursementId: widget.item.id,
+        viewerUserId: widget.currentAdminId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _attachmentMetas = metas;
+        _isLoadingAttachmentList = false;
+      });
+      for (final meta in metas) {
+        _loadAttachmentBytes(meta.id);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingAttachmentList = false);
+    }
+  }
+
+  Future<void> _loadAttachmentBytes(int attachmentId) async {
+    if (_attachmentBytesLoading[attachmentId] == true) return;
+    setState(() {
+      _attachmentBytesLoading[attachmentId] = true;
+      _attachmentBytesError[attachmentId] = null;
+    });
+    try {
+      final att = await widget.adminService.getAdminAttachmentBytes(
+        attachmentId: attachmentId,
+        viewerUserId: widget.currentAdminId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _attachmentBytesMap[attachmentId] = att;
+        _attachmentBytesLoading[attachmentId] = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _attachmentBytesMap[attachmentId] = null;
+        _attachmentBytesLoading[attachmentId] = false;
+        _attachmentBytesError[attachmentId] = e.toString();
+      });
+    }
+  }
+
+  Widget _buildAttachmentsViewer() {
+    if (_isLoadingAttachmentList) {
+      return _attachmentLoading();
+    }
+
+    if (_attachmentMetas.isEmpty) {
+      // Fallback ke single receipt lama
+      return _buildReceiptViewer();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(_attachmentMetas.length, (index) {
+        final meta = _attachmentMetas[index];
+        final isLoading = _attachmentBytesLoading[meta.id] == true;
+        final att = _attachmentBytesMap[meta.id];
+        final err = _attachmentBytesError[meta.id];
+
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: index < _attachmentMetas.length - 1 ? 16 : 0,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_attachmentMetas.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'File ${index + 1} dari ${_attachmentMetas.length}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ),
+              if (isLoading)
+                _attachmentLoading()
+              else if (att == null)
+                _attachmentError(
+                  error: err ?? 'File tidak dapat dimuat.',
+                  onRetry: () => _loadAttachmentBytes(meta.id),
+                )
+              else
+                _attachmentCard(
+                  attachment: att,
+                  accentColor: const Color(0xFF3B82F6),
+                  onPreview: () => _handlePreview(att),
+                  onDownload: () => _handleDownload(att),
+                ),
+            ],
+          ),
+        );
+      }),
+    );
   }
 
   Widget _buildPaymentProofViewer() {
@@ -2195,15 +2310,22 @@ class _AdminReimbursementDetailModalState
 
                   // Bukti pembayaran user diambil melalui POST lalu
                   // dirender dari response bytes menggunakan Image.memory.
-                  if (widget.item.hasReceipt) ...[
-                    _buildInfoSection('Bukti Pembayaran', [
-                      _buildDetailRow(
-                        'File',
-                        widget.item.receiptFilename ?? 'receipt',
-                      ),
-                      const SizedBox(height: 12),
-                      _buildReceiptViewer(),
-                    ]),
+                  if (widget.item.hasReceipt || _attachmentMetas.isNotEmpty || _isLoadingAttachmentList) ...[
+                    _buildInfoSection(
+                      _attachmentMetas.length > 1
+                          ? 'Bukti Pembayaran (${_attachmentMetas.length} file)'
+                          : 'Bukti Pembayaran',
+                      [
+                        if (_attachmentMetas.isEmpty && !_isLoadingAttachmentList)
+                          _buildDetailRow(
+                            'File',
+                            widget.item.receiptFilename ?? 'receipt',
+                          ),
+                        if (_attachmentMetas.isEmpty && !_isLoadingAttachmentList)
+                          const SizedBox(height: 12),
+                        _buildAttachmentsViewer(),
+                      ],
+                    ),
                     const SizedBox(height: 20),
                   ],
 
@@ -2388,7 +2510,7 @@ class _AdminReimbursementDetailModalState
             child: ElevatedButton.icon(
               onPressed: () => _reviewReimbursement('approved'),
               icon: const Icon(Icons.check),
-              label: const Text('Setujui'),
+              label: const Text('Setujui → Finance'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF10B981),
                 foregroundColor: Colors.white,

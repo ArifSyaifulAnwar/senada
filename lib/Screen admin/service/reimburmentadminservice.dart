@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dart';
+import 'package:absensikaryawan/Services/reimbursementservice.dart' show ReimbursementAttachmentMeta;
 import 'package:http/http.dart' as http;
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -484,6 +485,77 @@ class AdminReimbursementService {
     };
 
     return extension.isEmpty ? name : '$name.$extension';
+  }
+
+  /// Ambil list metadata attachment untuk admin/HRD view.
+  Future<List<ReimbursementAttachmentMeta>> getAdminAttachments({
+    required int reimbursementId,
+    required String viewerUserId,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/attachments/list'),
+        headers: await _getHeaders(),
+        body: jsonEncode({
+          'reimbursementId': reimbursementId,
+          'userId': viewerUserId,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['success'] == true) {
+          final list = data['data'] as List<dynamic>? ?? [];
+          return list
+              .map(
+                (e) => ReimbursementAttachmentMeta.fromJson(
+                  e as Map<String, dynamic>,
+                ),
+              )
+              .toList();
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Ambil bytes satu attachment untuk admin/HRD preview/download.
+  Future<AdminReimbursementAttachment> getAdminAttachmentBytes({
+    required int attachmentId,
+    required String viewerUserId,
+  }) async {
+    final uri = Uri.parse(
+      '$baseURL/api/asn/reimbursement/attachments/view/$attachmentId',
+    ).replace(queryParameters: {'userId': viewerUserId});
+
+    final response = await http
+        .get(uri, headers: await _getHeaders())
+        .timeout(const Duration(seconds: 45));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      String message = 'Gagal mengambil attachment.';
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['message'] != null) {
+          message = body['message'].toString();
+        }
+      } catch (_) {}
+      throw Exception(message);
+    }
+
+    if (response.bodyBytes.isEmpty) throw Exception('File kosong.');
+
+    final fileName = _fileNameFromContentDisposition(
+      response.headers['content-disposition'],
+      'attachment_$attachmentId',
+    );
+
+    return AdminReimbursementAttachment(
+      bytes: Uint8List.fromList(response.bodyBytes),
+      fileName: _ensureExtension(fileName, response.headers['content-type']),
+      contentType: response.headers['content-type'],
+    );
   }
 
   // Get admin headers

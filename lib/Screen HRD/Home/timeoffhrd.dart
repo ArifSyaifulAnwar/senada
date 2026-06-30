@@ -3701,6 +3701,10 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
       final res = await TimeOffAdminService.exportTimeOffFormAdmin(
         timeOffId: widget.item.id,
         adminId: widget.currentHRDId,
+        directorId: widget.item.directorUserId ??
+            (widget.item.requiresDirectorApproval
+                ? widget.item.approvedBy
+                : null),
       );
 
       if (!res.success || res.data == null) {

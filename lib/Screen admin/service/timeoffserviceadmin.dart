@@ -304,6 +304,7 @@ class TimeOffAdminService {
   static Future<ApiResponse<Uint8List>> exportTimeOffFormAdmin({
     required int timeOffId,
     required String adminId,
+    String? directorId,
   }) async {
     try {
       final token = await _getToken();
@@ -323,7 +324,11 @@ class TimeOffAdminService {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
             },
-            body: jsonEncode({'timeOffId': timeOffId, 'adminId': adminId}),
+            body: jsonEncode({
+              'timeOffId': timeOffId,
+              'adminId': adminId,
+              if (directorId != null) 'directorId': directorId,
+            }),
           )
           .timeout(const Duration(seconds: 60));
 

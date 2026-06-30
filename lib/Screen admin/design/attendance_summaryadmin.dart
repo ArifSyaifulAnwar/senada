@@ -1,7 +1,9 @@
 // ignore_for_file: deprecated_member_use, use_build_context_synchronously
 
 import 'dart:convert';
+import 'package:absensikaryawan/Services/company_calendar_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -15,13 +17,42 @@ class AttendanceSummaryAdmin extends StatefulWidget {
   State<AttendanceSummaryAdmin> createState() => _AttendanceSummaryAdminState();
 }
 
-class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
-  late Future<List<AttendanceCardModel>> _futureCards;
+class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
+    with WidgetsBindingObserver {
+  List<AttendanceCardModel> _cards = [];
+  bool _isLoading = true;
+  String? _error;
+  DateTime _lastFetchDate = DateTime(0);
+
+  // Simpan hasil kalkulasi periode untuk ditampilkan di dialog
+  int _calcTotal = 0;
+  int _calcWeekends = 0;
+  int _calcHolidays = 0;
+  int _calcWorkDays = 0;
 
   @override
   void initState() {
     super.initState();
-    _futureCards = fetchSummaryCards();
+    WidgetsBinding.instance.addObserver(this);
+    _fetchData();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final today = DateTime.now();
+      if (today.year != _lastFetchDate.year ||
+          today.month != _lastFetchDate.month ||
+          today.day != _lastFetchDate.day) {
+        _fetchData();
+      }
+    }
   }
 
   static Future<String?> _getToken() async {
@@ -74,10 +105,114 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     }
   }
 
-  void _refreshData() {
+  Future<void> _fetchData() async {
+    if (!mounted) return;
     setState(() {
-      _futureCards = fetchSummaryCards();
+      _isLoading = true;
+      _error = null;
     });
+    try {
+      final token = await _getToken();
+      if (token == null) throw Exception('Gagal mendapatkan token');
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+      if (response.statusCode != 200) throw Exception('Gagal memuat data summary');
+      final List<dynamic> raw = json.decode(response.body);
+      final cards = raw.map((e) => AttendanceCardModel.fromJson(e)).toList();
+      await _overrideTotalHari(cards);
+      if (mounted) {
+        setState(() {
+          _cards = cards;
+          _isLoading = false;
+          _lastFetchDate = DateTime.now();
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
+    }
+  }
+
+  void _refreshData() => _fetchData();
+
+  Future<void> _overrideTotalHari(List<AttendanceCardModel> cards) async {
+    try {
+      final idx = cards.indexWhere(
+        (c) =>
+            c.title.toLowerCase().contains('total') ||
+            c.subText.toLowerCase().contains('hari kerja'),
+      );
+      if (idx == -1) return;
+
+      final periodsRes = await TimeOffService.getWorkPeriods();
+      if (!periodsRes.success || periodsRes.data == null || periodsRes.data!.isEmpty) return;
+
+      final today = DateTime.now();
+      final todayNorm = DateTime(today.year, today.month, today.day);
+
+      final activePeriod = periodsRes.data!.cast<dynamic>().firstWhere(
+        (p) {
+          final s = DateTime(p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day);
+          final e = DateTime(p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day);
+          return !todayNorm.isBefore(s) && !todayNorm.isAfter(e);
+        },
+        orElse: () => null,
+      );
+      if (activePeriod == null) return;
+
+      final start = DateTime(activePeriod.tanggalMulai.year, activePeriod.tanggalMulai.month, activePeriod.tanggalMulai.day);
+      final end   = DateTime(activePeriod.tanggalSelesai.year, activePeriod.tanggalSelesai.month, activePeriod.tanggalSelesai.day);
+      final totalDays = end.difference(start).inDays + 1;
+
+      int weekendDays = 0;
+      for (int i = 0; i < totalDays; i++) {
+        final d = start.add(Duration(days: i));
+        if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) weekendDays++;
+      }
+
+      final events = await CompanyCalendarService.getByYear(today.year);
+      int holidayCount = 0;
+      for (final event in events) {
+        if (event.tipe != 'LIBUR') continue;
+        final d = DateTime(event.tanggal.year, event.tanggal.month, event.tanggal.day);
+        if (!d.isBefore(start) && !d.isAfter(end) &&
+            d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+          holidayCount++;
+        }
+      }
+
+      final workDays = totalDays - weekendDays - holidayCount;
+
+      // Simpan untuk dialog info
+      _calcTotal    = totalDays;
+      _calcWeekends = weekendDays;
+      _calcHolidays = holidayCount;
+      _calcWorkDays = workDays;
+
+      cards[idx].mainText = '$workDays';
+      cards[idx].subText  = 'Hari Kerja';
+    } catch (_) {
+      // Gagal override — biarkan nilai API tetap tampil
+    }
+  }
+
+  Future<List<AttendanceCardModel>> fetchSummaryCards() async {
+    final token = await _getToken();
+    if (token == null) throw Exception('Gagal mendapatkan token');
+    final response = await http.post(
+      Uri.parse(apiUrl),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+    );
+    if (response.statusCode == 200) {
+      final List<dynamic> data = json.decode(response.body);
+      return data.map((e) => AttendanceCardModel.fromJson(e)).toList();
+    } else {
+      throw Exception('Gagal memuat data summary');
+    }
   }
 
   Future<void> _saveBreakTimeChange(
@@ -132,55 +267,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     }
   }
 
-  Future<void> _saveTotalDaysChange(AttendanceCardModel model, int days) async {
-    try {
-      final updatedModel = AttendanceCardModel(
-        id: model.id,
-        icon: model.icon,
-        iconColor: model.iconColor,
-        title: model.title,
-        mainText: days.toString(),
-        subText: 'Hari Kerja',
-        urutan: model.urutan,
-      );
 
-      final success = await _updateSummaryCard(updatedModel);
-      if (success) {
-        _refreshData();
-      } else {
-        throw Exception('Gagal menyimpan perubahan ke server');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gagal menyimpan perubahan: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<List<AttendanceCardModel>> fetchSummaryCards() async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Gagal mendapatkan token');
-
-    final response = await http.post(
-      Uri.parse(apiUrl),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
-      return data.map((e) => AttendanceCardModel.fromJson(e)).toList();
-    } else {
-      throw Exception('Gagal memuat data summary');
-    }
-  }
 
   void _showEditDialog(BuildContext context, AttendanceCardModel model) {
     switch (model.title.toLowerCase()) {
@@ -513,137 +600,85 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
   }
 
   void _showTotalDaysDialog(BuildContext context, AttendanceCardModel model) {
-    int selectedDays = 22;
-    try {
-      final currentText = model.mainText.replaceAll(RegExp(r'[^\d]'), '');
-      if (currentText.isNotEmpty) {
-        selectedDays = int.parse(currentText);
-      }
-    } catch (e) {
-      selectedDays = 22;
-    }
-
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(model.getIconData(), color: model.getIconColor(), size: 24),
+            const SizedBox(width: 8),
+            const Text(
+              'Total Hari Kerja',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Angka utama
+            Text(
+              '$_calcWorkDays',
+              style: TextStyle(
+                fontSize: 48,
+                fontWeight: FontWeight.w800,
+                color: model.getIconColor(),
               ),
-              title: Row(
+            ),
+            const Text(
+              'Hari Kerja',
+              style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 16),
+            // Breakdown
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  Icon(
-                    model.getIconData(),
-                    color: model.getIconColor(),
-                    size: 24,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Edit ${model.title}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  _infoCol('$_calcTotal', 'Total'),
+                  _infoCol('$_calcWeekends', 'Weekend'),
+                  _infoCol('$_calcHolidays', 'Libur'),
                 ],
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Total Hari Kerja',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: () {
-                            if (selectedDays > 1) {
-                              setDialogState(() => selectedDays--);
-                            }
-                          },
-                          icon: const Icon(Icons.remove_circle_outline),
-                          color: model.getIconColor(),
-                        ),
-                        Text(
-                          '$selectedDays hari',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: model.getIconColor(),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () {
-                            if (selectedDays < 31) {
-                              setDialogState(() => selectedDays++);
-                            }
-                          },
-                          icon: const Icon(Icons.add_circle_outline),
-                          color: model.getIconColor(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Rentang: 1 - 31 hari',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(Icons.info_outline, size: 13, color: Colors.grey[400]),
+                const SizedBox(width: 4),
+                Expanded(
                   child: Text(
-                    'Batal',
-                    style: TextStyle(color: Colors.grey[600]),
+                    'Dihitung otomatis dari periode kerja aktif.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                   ),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    _saveTotalDaysChange(model, selectedDays);
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Total hari kerja berhasil diubah ke $selectedDays hari',
-                        ),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: model.getIconColor(),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: const Text('Simpan'),
                 ),
               ],
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
     );
   }
+
+  Widget _infoCol(String value, String label) => Column(
+    children: [
+      Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
+      Text(label, style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
+    ],
+  );
 
   void _showGenericEditDialog(BuildContext context, AttendanceCardModel model) {
     final TextEditingController controller = TextEditingController(
@@ -737,77 +772,76 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin> {
     final double scale = isWeb ? 1.0 : screenWidth / baseWidth;
     final double cardSpacing = 12 * scale;
 
-    return FutureBuilder<List<AttendanceCardModel>>(
-      future: _futureCards,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        } else if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text('Tidak ada data summary'));
-        }
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
 
-        final cards = snapshot.data!;
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Gagal memuat data', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _fetchData,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      );
+    }
 
-        // Web: Row 4 kolom, tinggi mengikuti konten (tidak ada whitespace)
-        if (isWeb) {
-          final List<Widget> rows = [];
-          for (int i = 0; i < cards.length; i += 4) {
-            final rowCards = cards.sublist(
-              i,
-              i + 4 > cards.length ? cards.length : i + 4,
-            );
-            rows.add(
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (int j = 0; j < rowCards.length; j++) ...[
-                    if (j > 0) const SizedBox(width: 12),
-                    Expanded(child: _buildCard(context, rowCards[j], scale)),
-                  ],
-                  for (int j = rowCards.length; j < 4; j++) ...[
-                    const SizedBox(width: 12),
-                    const Expanded(child: SizedBox()),
-                  ],
-                ],
-              ),
-            );
-            if (i + 4 < cards.length) rows.add(const SizedBox(height: 12));
-          }
-          return Column(
+    if (_cards.isEmpty) return const Center(child: Text('Tidak ada data summary'));
+
+    final cards = _cards;
+
+    // Web: Row 4 kolom
+    if (isWeb) {
+      final List<Widget> rows = [];
+      for (int i = 0; i < cards.length; i += 4) {
+        final rowCards = cards.sublist(i, i + 4 > cards.length ? cards.length : i + 4);
+        rows.add(
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: rows,
-          );
-        }
-
-        // Mobile: layout 2 kolom asli (Row pairs)
-        return Padding(
-          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-          child: Column(
-            children: List.generate((cards.length / 2).ceil(), (index) {
-              final first = cards[index * 2];
-              final second = (index * 2 + 1 < cards.length)
-                  ? cards[index * 2 + 1]
-                  : null;
-
-              return Padding(
-                padding: EdgeInsets.only(bottom: cardSpacing),
-                child: Row(
-                  children: [
-                    Expanded(child: _buildCard(context, first, scale)),
-                    if (second != null) ...[
-                      SizedBox(width: cardSpacing),
-                      Expanded(child: _buildCard(context, second, scale)),
-                    ] else
-                      const Expanded(child: SizedBox()),
-                  ],
-                ),
-              );
-            }),
+            children: [
+              for (int j = 0; j < rowCards.length; j++) ...[
+                if (j > 0) const SizedBox(width: 12),
+                Expanded(child: _buildCard(context, rowCards[j], scale)),
+              ],
+              for (int j = rowCards.length; j < 4; j++) ...[
+                const SizedBox(width: 12),
+                const Expanded(child: SizedBox()),
+              ],
+            ],
           ),
         );
-      },
+        if (i + 4 < cards.length) rows.add(const SizedBox(height: 12));
+      }
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+    }
+
+    // Mobile: layout 2 kolom
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+      child: Column(
+        children: List.generate((cards.length / 2).ceil(), (index) {
+          final first = cards[index * 2];
+          final second = (index * 2 + 1 < cards.length) ? cards[index * 2 + 1] : null;
+          return Padding(
+            padding: EdgeInsets.only(bottom: cardSpacing),
+            child: Row(
+              children: [
+                Expanded(child: _buildCard(context, first, scale)),
+                if (second != null) ...[
+                  SizedBox(width: cardSpacing),
+                  Expanded(child: _buildCard(context, second, scale)),
+                ] else
+                  const Expanded(child: SizedBox()),
+              ],
+            ),
+          );
+        }),
+      ),
     );
   }
 

@@ -222,9 +222,24 @@ class ReimbursementData {
 
   String get normalizedStatus => status.trim().toLowerCase();
 
-  String get statusLabel => statusText.trim().isNotEmpty
-      ? statusText
-      : _statusLabel(normalizedStatus);
+  String get statusLabel {
+    const knownStatuses = {
+      'pending',
+      'pending_finance',
+      'approved',
+      'rejected',
+      'paid',
+      'done',
+      'completed',
+      'selesai',
+    };
+    if (knownStatuses.contains(normalizedStatus)) {
+      return _statusLabel(normalizedStatus);
+    }
+    return statusText.trim().isNotEmpty
+        ? statusText
+        : _statusLabel(normalizedStatus);
+  }
 
   Color get statusColorValue {
     switch (normalizedStatus) {

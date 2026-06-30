@@ -35,7 +35,7 @@ class _HalamanAjukanReimbursementState
 
   String _selectedCategory = '';
   List<ReimbursementCategory> _categories = [];
-  SelectedReimbursementFile? _selectedReceipt;
+  final List<PendingAttachmentFile> _selectedFiles = [];
   bool _isSubmitting = false;
   bool _isLoadingCategories = true;
   String? _currentUserId;
@@ -323,8 +323,8 @@ class _HalamanAjukanReimbursementState
       return;
     }
 
-    if (_selectedReceipt == null) {
-      _showErrorSnackBar('Harap upload bukti pembayaran');
+    if (_selectedFiles.isEmpty) {
+      _showErrorSnackBar('Harap upload minimal 1 bukti pembayaran');
       return;
     }
 
@@ -350,8 +350,8 @@ class _HalamanAjukanReimbursementState
         throw Exception('Jumlah tidak valid');
       }
 
-      // Submit reimbursement
-      final response = await _reimbursementService.submitReimbursement(
+      // Submit reimbursement + upload semua attachment
+      final response = await _reimbursementService.submitWithAttachments(
         userId: _currentUserId!,
         title: _judulController.text.trim(),
         category: _selectedCategory,
@@ -360,10 +360,7 @@ class _HalamanAjukanReimbursementState
         description: _keteranganController.text.trim().isEmpty
             ? null
             : _keteranganController.text.trim(),
-        receiptBytes: _selectedReceipt!.bytes,
-        receiptFileName: _selectedReceipt!.fileName,
-        receiptContentType: _selectedReceipt!.mimeType,
-        status: 'pending',
+        attachments: _selectedFiles,
       );
 
       setState(() {
@@ -371,15 +368,10 @@ class _HalamanAjukanReimbursementState
       });
 
       if (response.success) {
-        // Show success notification (both local and database)
-        if (response.reimbursementId != null) {
-          await _showSuccessNotification(response.reimbursementId.toString());
-        }
-
-        // Show success snackbar
+        await _showSuccessNotification(
+          response.reimbursementId?.toString() ?? '',
+        );
         _showSuccessSnackBar(response.message);
-
-        // Navigate back with success result
         Navigator.pop(context, true);
       } else {
         _showErrorSnackBar(response.message);
@@ -689,6 +681,12 @@ class _HalamanAjukanReimbursementState
   }) async {
     try {
       const maxSize = 10 * 1024 * 1024;
+      const maxFiles = 5;
+
+      if (_selectedFiles.length >= maxFiles) {
+        _showErrorSnackBar('Maksimal $maxFiles file dapat ditambahkan.');
+        return;
+      }
 
       if (bytes.isEmpty) {
         _showErrorSnackBar('File kosong atau tidak dapat dibaca.');
@@ -696,7 +694,7 @@ class _HalamanAjukanReimbursementState
       }
 
       if (bytes.length > maxSize) {
-        _showErrorSnackBar('Ukuran file terlalu besar. Maksimal 10MB.');
+        _showErrorSnackBar('Ukuran file terlalu besar. Maksimal 10MB per file.');
         return;
       }
 
@@ -713,24 +711,39 @@ class _HalamanAjukanReimbursementState
         return;
       }
 
+      String mimeType;
+      switch (extension) {
+        case 'jpg':
+        case 'jpeg':
+          mimeType = 'image/jpeg';
+          break;
+        case 'png':
+          mimeType = 'image/png';
+          break;
+        case 'pdf':
+          mimeType = 'application/pdf';
+          break;
+        default:
+          mimeType = 'application/octet-stream';
+      }
+
       setState(() {
-        _selectedReceipt = SelectedReimbursementFile(
+        _selectedFiles.add(PendingAttachmentFile(
           bytes: bytes,
           fileName: fileName,
           extension: extension,
-        );
+          mimeType: mimeType,
+        ));
       });
     } catch (e) {
       _showErrorSnackBar('Gagal memproses file: $e');
     }
   }
 
-  void _removeFile() {
+  void _removeFile(int index) {
     setState(() {
-      _selectedReceipt = null;
+      _selectedFiles.removeAt(index);
     });
-
-    _showSuccessSnackBar('File berhasil dihapus. Silakan pilih file baru.');
   }
 
   // =============================================
@@ -772,7 +785,7 @@ class _HalamanAjukanReimbursementState
 
   bool _isFormValid() {
     return _formKey.currentState?.validate() == true &&
-        _selectedReceipt != null &&
+        _selectedFiles.isNotEmpty &&
         _selectedDate != null &&
         _selectedCategory.isNotEmpty;
   }
@@ -934,7 +947,7 @@ class _HalamanAjukanReimbursementState
   }
 
   Widget _buildFilePreview() {
-    if (_selectedReceipt == null) {
+    if (_selectedFiles.isEmpty) {
       return GestureDetector(
         onTap: () => _showFileSourceOptions(context),
         child: Container(
@@ -975,100 +988,136 @@ class _HalamanAjukanReimbursementState
       );
     }
 
-    final String fileName = _selectedReceipt!.fileName;
-    final String fileExtension = _selectedReceipt!.extension;
-    final bool isImage = _selectedReceipt!.isImage;
-
-    return Container(
-      margin: EdgeInsets.only(bottom: _getResponsivePadding(context, 16)),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.green[300]!, width: 2),
-        borderRadius: BorderRadius.circular(16),
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.green.withOpacity(0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: EdgeInsets.all(12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ...List.generate(_selectedFiles.length, (index) {
+          final file = _selectedFiles[index];
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
-              color: Colors.green[50],
-              borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+              border: Border.all(color: Colors.green[300]!, width: 1.5),
+              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
             ),
             child: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.green[600], size: 20),
-                SizedBox(width: 8),
+                Container(
+                  width: 56,
+                  height: 56,
+                  margin: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: file.isImage ? Colors.grey[100] : Colors.red[50],
+                  ),
+                  child: file.isImage
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            file.bytes,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Icon(
+                              Icons.image,
+                              color: Colors.grey[400],
+                              size: 28,
+                            ),
+                          ),
+                        )
+                      : Icon(
+                          file.extension == 'pdf'
+                              ? Icons.picture_as_pdf
+                              : Icons.insert_drive_file,
+                          color: file.extension == 'pdf'
+                              ? Colors.red[600]
+                              : Colors.blue[600],
+                          size: 28,
+                        ),
+                ),
                 Expanded(
-                  child: Text(
-                    'File berhasil dipilih',
-                    style: TextStyle(
-                      color: Colors.green[700],
-                      fontSize: _getResponsiveFontSize(context, 13),
-                      fontWeight: FontWeight.w600,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          file.fileName,
+                          style: TextStyle(
+                            fontSize: _getResponsiveFontSize(context, 12),
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black87,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.green[50],
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                file.extension.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: _getResponsiveFontSize(context, 10),
+                                  color: Colors.green[700],
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${file.sizeMb.toStringAsFixed(1)} MB',
+                              style: TextStyle(
+                                fontSize: _getResponsiveFontSize(context, 11),
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.close, color: Colors.red[600], size: 18),
-                  onPressed: _removeFile,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints(),
+                  icon: Icon(Icons.close, color: Colors.red[400], size: 18),
+                  onPressed: () => _removeFile(index),
+                  padding: const EdgeInsets.all(12),
+                  constraints: const BoxConstraints(),
                 ),
               ],
             ),
-          ),
+          );
+        }),
+        if (_selectedFiles.length < 5)
           SizedBox(
-            height: 140,
-            child: isImage
-                ? _buildImagePreviewContent()
-                : _buildFilePreviewContent(fileName, fileExtension),
-          ),
-          Container(
-            padding: EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(14)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        fileName,
-                        style: TextStyle(
-                          fontSize: _getResponsiveFontSize(context, 12),
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black87,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        _getFileInfo(),
-                        style: TextStyle(
-                          fontSize: _getResponsiveFontSize(context, 11),
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showFileSourceOptions(context),
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(
+                'Tambah File (${_selectedFiles.length}/5)',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF3B82F6),
+                side: const BorderSide(color: Color(0xFF3B82F6)),
+                padding: EdgeInsets.symmetric(
+                  vertical: _getResponsivePadding(context, 12),
                 ),
-                _buildFileSizeInfo(),
-              ],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
           ),
-        ],
-      ),
+        SizedBox(height: _getResponsivePadding(context, 8)),
+      ],
     );
   }
 
@@ -1113,165 +1162,6 @@ class _HalamanAjukanReimbursementState
         );
       },
     );
-  }
-
-  Widget _buildFileSizeInfo() {
-    if (_selectedReceipt == null) {
-      return const SizedBox.shrink();
-    }
-
-    final sizeInMb = _selectedReceipt!.size / (1024 * 1024);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: sizeInMb < 5 ? Colors.green[100] : Colors.orange[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        '${sizeInMb.toStringAsFixed(1)} MB',
-        style: TextStyle(
-          fontSize: _getResponsiveFontSize(context, 10),
-          color: sizeInMb < 5 ? Colors.green[700] : Colors.orange[700],
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildImagePreviewContent() {
-    if (_selectedReceipt == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      width: double.infinity,
-      color: Colors.grey[100],
-      child: Image.memory(
-        _selectedReceipt!.bytes,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) {
-          return const Center(child: Text('Gambar tidak dapat ditampilkan.'));
-        },
-      ),
-    );
-  }
-
-  Widget _buildFilePreviewContent(String fileName, String fileExtension) {
-    IconData fileIcon;
-    Color iconColor;
-
-    switch (fileExtension) {
-      case 'pdf':
-        fileIcon = Icons.picture_as_pdf;
-        iconColor = Colors.red[600]!;
-        break;
-      default:
-        fileIcon = Icons.insert_drive_file;
-        iconColor = Colors.blue[600]!;
-    }
-
-    return Container(
-      width: double.infinity,
-      color: Colors.grey[50],
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(fileIcon, size: 40, color: iconColor),
-          ),
-          SizedBox(height: 12),
-          Text(
-            fileExtension.toUpperCase(),
-            style: TextStyle(
-              fontSize: _getResponsiveFontSize(context, 16),
-              fontWeight: FontWeight.w700,
-              color: iconColor,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Widget _buildUploadOptionButton({
-  //   required IconData icon,
-  //   required String label,
-  //   required String subtitle,
-  //   required MaterialColor color,
-  //   required VoidCallback onTap,
-  // }) {
-  //   return InkWell(
-  //     onTap: onTap,
-  //     borderRadius: BorderRadius.circular(12),
-  //     child: Container(
-  //       padding: EdgeInsets.symmetric(
-  //         vertical: _getResponsivePadding(context, 16),
-  //         horizontal: _getResponsivePadding(context, 8),
-  //       ),
-  //       decoration: BoxDecoration(
-  //         color: color[50],
-  //         border: Border.all(color: color[200]!, width: 1.5),
-  //         borderRadius: BorderRadius.circular(12),
-  //       ),
-  //       child: Column(
-  //         children: [
-  //           Container(
-  //             padding: EdgeInsets.all(12),
-  //             decoration: BoxDecoration(
-  //               color: color[100],
-  //               borderRadius: BorderRadius.circular(10),
-  //             ),
-  //             child: Icon(icon, color: color[600], size: 24),
-  //           ),
-  //           SizedBox(height: 8),
-  //           Text(
-  //             label,
-  //             style: TextStyle(
-  //               fontWeight: FontWeight.w600,
-  //               fontSize: _getResponsiveFontSize(context, 13),
-  //               color: color[700],
-  //             ),
-  //           ),
-  //           SizedBox(height: 2),
-  //           Text(
-  //             subtitle,
-  //             style: TextStyle(
-  //               fontSize: _getResponsiveFontSize(context, 10),
-  //               color: color[600],
-  //               fontWeight: FontWeight.w500,
-  //             ),
-  //             textAlign: TextAlign.center,
-  //             maxLines: 1,
-  //             overflow: TextOverflow.ellipsis,
-  //           ),
-  //         ],
-  //       ),
-  //     ),
-  //   );
-  // }
-
-  String _getFileInfo() {
-    if (_selectedReceipt == null) return '';
-
-    final String fileExtension = _selectedReceipt!.extension;
-
-    switch (fileExtension) {
-      case 'pdf':
-        return 'PDF Document';
-      case 'jpg':
-      case 'jpeg':
-        return 'JPEG Image';
-      case 'png':
-        return 'PNG Image';
-      default:
-        return 'File';
-    }
   }
 
   // =============================================
@@ -1623,36 +1513,6 @@ class _HalamanAjukanReimbursementState
                           //   ],
                           // ),
                           // SizedBox(height: 16),
-                          if (_selectedReceipt != null)
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _removeFile,
-                                icon: Icon(Icons.refresh_outlined, size: 18),
-                                label: Text(
-                                  'Ganti File',
-                                  style: TextStyle(fontWeight: FontWeight.w600),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.grey[100],
-                                  foregroundColor: Colors.grey[700],
-                                  side: BorderSide(
-                                    color: Colors.grey[300]!,
-                                    width: 1,
-                                  ),
-                                  padding: EdgeInsets.symmetric(
-                                    vertical: _getResponsivePadding(
-                                      context,
-                                      12,
-                                    ),
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  elevation: 0,
-                                ),
-                              ),
-                            ),
                         ],
                       ),
                     ),

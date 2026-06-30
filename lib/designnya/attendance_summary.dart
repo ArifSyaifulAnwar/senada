@@ -1,7 +1,9 @@
 // ignore_for_file: deprecated_member_use
 
 import 'dart:convert';
+import 'package:absensikaryawan/Services/company_calendar_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -15,13 +17,39 @@ class AttendanceSummary extends StatefulWidget {
   State<AttendanceSummary> createState() => _AttendanceSummaryState();
 }
 
-class _AttendanceSummaryState extends State<AttendanceSummary> {
-  late Future<List<AttendanceCardModel>> _futureCards;
+class _AttendanceSummaryState extends State<AttendanceSummary>
+    with WidgetsBindingObserver {
+  List<AttendanceCardModel> _cards = [];
+  bool _isLoading = true;
+  String? _error;
+
+  // Tanggal terakhir fetch — deteksi pergantian hari/periode
+  DateTime _lastFetchDate = DateTime(0);
 
   @override
   void initState() {
     super.initState();
-    _futureCards = fetchSummaryCards();
+    WidgetsBinding.instance.addObserver(this);
+    _fetchData();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final today = DateTime.now();
+      // Refresh jika hari sudah berganti → mungkin periode baru dimulai
+      if (today.year != _lastFetchDate.year ||
+          today.month != _lastFetchDate.month ||
+          today.day != _lastFetchDate.day) {
+        _fetchData();
+      }
+    }
   }
 
   static Future<String?> _getToken() async {
@@ -45,72 +73,183 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
     }
   }
 
-  Future<List<AttendanceCardModel>> fetchSummaryCards() async {
-    final token = await _getToken();
-    if (token == null) throw Exception('Gagal mendapatkan token');
+  Future<void> _fetchData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
 
-    final response = await http.post(
-      Uri.parse(apiUrl),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-    );
+    try {
+      final token = await _getToken();
+      if (token == null) throw Exception('Gagal mendapatkan token');
 
-    if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
-      return data.map((e) => AttendanceCardModel.fromJson(e)).toList();
-    } else {
-      throw Exception('Gagal memuat data summary');
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode != 200) throw Exception('Gagal memuat data summary');
+
+      final List<dynamic> raw = json.decode(response.body);
+      final cards = raw.map((e) => AttendanceCardModel.fromJson(e)).toList();
+
+      // Override "Total Hari" dengan kalkulasi client-side yang sama
+      // dengan yang dipakai di kalender HRD
+      await _overrideTotalHari(cards);
+
+      if (mounted) {
+        setState(() {
+          _cards = cards;
+          _isLoading = false;
+          _lastFetchDate = DateTime.now();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // Cari periode aktif, hitung hari kerja = total - weekend - libur(weekday),
+  // lalu replace mainText kartu "Total Hari".
+  Future<void> _overrideTotalHari(List<AttendanceCardModel> cards) async {
+    try {
+      // Cari kartu "Total Hari" (by title atau subText)
+      final idx = cards.indexWhere(
+        (c) =>
+            c.title.toLowerCase().contains('total') ||
+            c.subText.toLowerCase().contains('hari kerja'),
+      );
+      if (idx == -1) return;
+
+      // Ambil periode kerja
+      final periodsRes = await TimeOffService.getWorkPeriods();
+      if (!periodsRes.success || periodsRes.data == null || periodsRes.data!.isEmpty) return;
+
+      // Cari periode yang sedang aktif
+      final today = DateTime.now();
+      final todayNorm = DateTime(today.year, today.month, today.day);
+
+      final activePeriod = periodsRes.data!.cast<dynamic>().firstWhere(
+        (p) {
+          final start = DateTime(
+            p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day,
+          );
+          final end = DateTime(
+            p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day,
+          );
+          return !todayNorm.isBefore(start) && !todayNorm.isAfter(end);
+        },
+        orElse: () => null,
+      );
+      if (activePeriod == null) return;
+
+      // Hitung total hari dan weekend dalam periode
+      final start = DateTime(
+        activePeriod.tanggalMulai.year,
+        activePeriod.tanggalMulai.month,
+        activePeriod.tanggalMulai.day,
+      );
+      final end = DateTime(
+        activePeriod.tanggalSelesai.year,
+        activePeriod.tanggalSelesai.month,
+        activePeriod.tanggalSelesai.day,
+      );
+      final totalDays = end.difference(start).inDays + 1;
+
+      int weekendDays = 0;
+      for (int i = 0; i < totalDays; i++) {
+        final d = start.add(Duration(days: i));
+        if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) {
+          weekendDays++;
+        }
+      }
+
+      // Ambil event LIBUR tahun ini
+      final events = await CompanyCalendarService.getByYear(today.year);
+
+      // Hitung LIBUR yang jatuh di hari kerja dalam periode
+      int holidayCount = 0;
+      for (final event in events) {
+        if (event.tipe != 'LIBUR') continue;
+        final d = DateTime(event.tanggal.year, event.tanggal.month, event.tanggal.day);
+        if (!d.isBefore(start) && !d.isAfter(end)) {
+          if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+            holidayCount++;
+          }
+        }
+      }
+
+      final workDays = totalDays - weekendDays - holidayCount;
+
+      // Update kartu
+      cards[idx].mainText = '$workDays';
+      cards[idx].subText = 'Hari Kerja';
+    } catch (_) {
+      // Gagal override — biarkan nilai dari API tetap tampil
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<AttendanceCardModel>>(
-      future: _futureCards,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text('Tidak ada data summary'));
-        }
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Gagal memuat data',
+              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _fetchData,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_cards.isEmpty) {
+      return const Center(child: Text('Tidak ada data summary'));
+    }
 
-        final cards = snapshot.data!;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final int crossAxisCount = constraints.maxWidth >= 768
+            ? (constraints.maxWidth >= 1024 ? 4 : 3)
+            : 2;
 
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            // Tentukan jumlah kolom berdasarkan lebar
-            final int crossAxisCount = constraints.maxWidth >= 768
-                ? (constraints.maxWidth >= 1024 ? 4 : 3)
-                : 2;
+        final double scale = constraints.maxWidth >= 768
+            ? 1.0
+            : (constraints.maxWidth / 375.0).clamp(0.8, 1.2);
 
-            // Scale hanya dipakai di mobile untuk menyesuaikan ukuran font/padding
-            final double scale = constraints.maxWidth >= 768
-                ? 1.0
-                : (constraints.maxWidth / 375.0).clamp(0.8, 1.2);
+        final double spacing = 12 * scale;
 
-            final double spacing = 12 * scale;
-
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                crossAxisSpacing: spacing,
-                mainAxisSpacing: spacing,
-                // Ratio lebih tinggi di web (konten tidak terlalu besar)
-                childAspectRatio: constraints.maxWidth >= 768 ? 1.6 : 1.4,
-              ),
-              itemCount: cards.length,
-              itemBuilder: (context, index) =>
-                  _buildCard(context, cards[index], scale),
-            );
-          },
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+            childAspectRatio: constraints.maxWidth >= 768 ? 1.6 : 1.4,
+          ),
+          itemCount: _cards.length,
+          itemBuilder: (context, index) =>
+              _buildCard(context, _cards[index], scale),
         );
       },
     );
@@ -182,7 +321,10 @@ class _AttendanceSummaryState extends State<AttendanceSummary> {
               SizedBox(height: 3 * scale),
               Text(
                 model.subText,
-                style: TextStyle(fontSize: 10 * scale, color: Colors.grey[500]),
+                style: TextStyle(
+                  fontSize: 10 * scale,
+                  color: Colors.grey[500],
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ],

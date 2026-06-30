@@ -212,10 +212,16 @@ class _HomePageState extends State<HomeScreen> {
     try {
       if (userID == null) await loadUserId();
       if (userID == null || userID!.isEmpty) return;
-      final res = await TimeOffService.getPendingOrgReview(userID!);
-      if (res.success && res.data != null && mounted) {
-        setState(() => _pendingOrgCount = res.data!.length);
-      }
+      int count = 0;
+      await Future.wait([
+        TimeOffService.getPendingOrgReview(userID!).then((r) {
+          if (r.success && r.data != null) count += r.data!.length;
+        }).catchError((_) {}),
+        TimeOffService.getPendingHeadVerify(userID!).then((r) {
+          if (r.success && r.data != null) count += r.data!.length;
+        }).catchError((_) {}),
+      ]);
+      if (mounted) setState(() => _pendingOrgCount = count);
     } catch (_) {}
   }
 
@@ -818,8 +824,8 @@ class _HomePageState extends State<HomeScreen> {
         },
       ),
       _buildServiceIconData(
-        Icons.event,
-        "Acara",
+        Icons.today_outlined,
+        "Aktivitas Harian",
         const Color(0xFF795548),
         onTap: () => _showComingSoonDialog(context),
       ),

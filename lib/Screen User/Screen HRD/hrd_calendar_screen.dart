@@ -161,6 +161,73 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     }
   }
 
+  // ── Apakah periode sedang aktif (hari ini berada di dalamnya) ────
+  bool _isActivePeriod(WorkPeriod period) {
+    final today = DateTime.now();
+    final start = DateTime(
+      period.tanggalMulai.year,
+      period.tanggalMulai.month,
+      period.tanggalMulai.day,
+    );
+    final end = DateTime(
+      period.tanggalSelesai.year,
+      period.tanggalSelesai.month,
+      period.tanggalSelesai.day,
+    );
+    final todayNorm = DateTime(today.year, today.month, today.day);
+    return !todayNorm.isBefore(start) && !todayNorm.isAfter(end);
+  }
+
+  // ── Hitung statistik hari dalam periode ──────────────────────────
+  // totalDays  = semua hari dalam rentang periode
+  // weekends   = Sabtu + Minggu
+  // holidays   = event LIBUR yang jatuh di hari kerja (bukan weekend)
+  // workDays   = totalDays - weekends - holidays
+  Map<String, int> _calculateStats(WorkPeriod period) {
+    final start = DateTime(
+      period.tanggalMulai.year,
+      period.tanggalMulai.month,
+      period.tanggalMulai.day,
+    );
+    final end = DateTime(
+      period.tanggalSelesai.year,
+      period.tanggalSelesai.month,
+      period.tanggalSelesai.day,
+    );
+    final totalDays = end.difference(start).inDays + 1;
+
+    int weekendDays = 0;
+    for (int i = 0; i < totalDays; i++) {
+      final d = start.add(Duration(days: i));
+      if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) {
+        weekendDays++;
+      }
+    }
+
+    // Hitung LIBUR yang jatuh di hari kerja saja (weekend sudah dikurangi)
+    int holidayCount = 0;
+    for (final event in _events) {
+      if (event.tipe != 'LIBUR') continue;
+      final d = DateTime(
+        event.tanggal.year,
+        event.tanggal.month,
+        event.tanggal.day,
+      );
+      if (!d.isBefore(start) && !d.isAfter(end)) {
+        if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+          holidayCount++;
+        }
+      }
+    }
+
+    return {
+      'total': totalDays,
+      'weekends': weekendDays,
+      'holidays': holidayCount,
+      'workDays': totalDays - weekendDays - holidayCount,
+    };
+  }
+
   void _snack(
     String msg, {
     bool err = false,
@@ -687,112 +754,255 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
   );
 
   Widget _buildPeriodCard(WorkPeriod period) {
-    final start = DateFormat(
-      'dd MMM yyyy',
-      'id_ID',
-    ).format(period.tanggalMulai);
-    final end = DateFormat(
-      'dd MMM yyyy',
-      'id_ID',
-    ).format(period.tanggalSelesai);
+    final startLabel = DateFormat('dd MMM yyyy', 'id_ID').format(period.tanggalMulai);
+    final endLabel = DateFormat('dd MMM yyyy', 'id_ID').format(period.tanggalSelesai);
     final monthName = _monthNames[period.bulan - 1];
+    final isActive = _isActivePeriod(period);
+    final stats = _calculateStats(period);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(
+          color: isActive ? const Color(0xFF6366F1) : const Color(0xFFE5E7EB),
+          width: isActive ? 2 : 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
+            color: Colors.black.withOpacity(isActive ? 0.08 : 0.04),
+            blurRadius: isActive ? 10 : 6,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: const Color(0xFF6366F1).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.date_range_rounded,
-                color: Color(0xFF6366F1),
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$monthName ${period.tahun}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1E293B),
-                    ),
+            Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withOpacity(isActive ? 0.15 : 0.08),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '$start - $end',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF64748B),
-                      fontWeight: FontWeight.w500,
-                    ),
+                  child: Icon(
+                    Icons.date_range_rounded,
+                    color: const Color(0xFF6366F1),
+                    size: isActive ? 26 : 22,
                   ),
-                  if (period.keterangan.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      period.keterangan,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF94A3B8),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            '$monthName ${period.tahun}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1E293B),
+                            ),
+                          ),
+                          if (isActive) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF6366F1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                'Aktif',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 2),
+                      Text(
+                        '$startLabel – $endLabel',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (period.keterangan.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          period.keterangan,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF94A3B8),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (val) {
+                    if (val == 'edit') _showPeriodDialog(existing: period);
+                    if (val == 'delete') _confirmDeletePeriod(period);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, size: 16, color: Color(0xFF6366F1)),
+                          SizedBox(width: 8),
+                          Text('Edit'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, size: 16, color: Color(0xFFEF4444)),
+                          SizedBox(width: 8),
+                          Text('Hapus'),
+                        ],
+                      ),
                     ),
                   ],
-                ],
-              ),
-            ),
-            PopupMenuButton<String>(
-              onSelected: (val) {
-                if (val == 'edit') _showPeriodDialog(existing: period);
-                if (val == 'delete') _confirmDeletePeriod(period);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit, size: 16, color: Color(0xFF6366F1)),
-                      SizedBox(width: 8),
-                      Text('Edit'),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete, size: 16, color: Color(0xFFEF4444)),
-                      SizedBox(width: 8),
-                      Text('Hapus'),
-                    ],
-                  ),
+                  child: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
                 ),
               ],
-              child: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            // ── Statistik hari kerja ───────────────────────────────
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? const Color(0xFF6366F1).withOpacity(0.05)
+                    : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isActive
+                      ? const Color(0xFF6366F1).withOpacity(0.2)
+                      : const Color(0xFFE5E7EB),
+                ),
+              ),
+              child: Row(
+                children: [
+                  // Hari kerja — angka utama
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          '${stats['workDays']}',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: isActive
+                                ? const Color(0xFF6366F1)
+                                : const Color(0xFF1E293B),
+                          ),
+                        ),
+                        const Text(
+                          'Hari Kerja',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(width: 1, height: 36, color: const Color(0xFFE5E7EB)),
+                  // Total hari
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          '${stats['total']}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF374151),
+                          ),
+                        ),
+                        const Text(
+                          'Total Hari',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(width: 1, height: 36, color: const Color(0xFFE5E7EB)),
+                  // Weekend
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          '${stats['weekends']}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFF59E0B),
+                          ),
+                        ),
+                        const Text(
+                          'Weekend',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(width: 1, height: 36, color: const Color(0xFFE5E7EB)),
+                  // Hari libur
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          '${stats['holidays']}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFEF4444),
+                          ),
+                        ),
+                        const Text(
+                          'Libur',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

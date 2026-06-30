@@ -14,8 +14,16 @@ import '../Screen User/fitur/org_approval_screen.dart';
 class TimeOffService {
   static const String _base = '/api/timeoff';
 
-  // ── Auth token ─────────────────────────────────────────────────────────────
+  // ── Auth token (cached 10 menit agar tidak fetch ulang setiap call) ─────────
+  static String? _cachedToken;
+  static DateTime? _tokenExpiry;
+
   static Future<String?> _getToken() async {
+    if (_cachedToken != null &&
+        _tokenExpiry != null &&
+        DateTime.now().isBefore(_tokenExpiry!)) {
+      return _cachedToken;
+    }
     try {
       final res = await http
           .post(
@@ -26,7 +34,11 @@ class TimeOffService {
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
         final d = json.decode(res.body);
-        if (d['access_token'] != null) return d['access_token'];
+        if (d['access_token'] != null) {
+          _cachedToken = d['access_token'] as String;
+          _tokenExpiry = DateTime.now().add(const Duration(minutes: 10));
+          return _cachedToken;
+        }
       }
       return null;
     } catch (_) {
@@ -150,16 +162,18 @@ class TimeOffService {
     String? rejectionReason,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/dl-head-verify'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'id': timeOffId,
-          'headUserId': headUserId,
-          'status': status,
-          'rejectionReason': rejectionReason,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/dl-head-verify'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'id': timeOffId,
+              'headUserId': headUserId,
+              'status': status,
+              'rejectionReason': rejectionReason,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: _get(body, 'success') == true,
@@ -177,16 +191,18 @@ class TimeOffService {
     String? rejectionReason,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/finance-review'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'id': id,
-          'status': status,
-          'financeUserId': financeUserId,
-          'rejectionReason': rejectionReason,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/finance-review'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'id': id,
+              'status': status,
+              'financeUserId': financeUserId,
+              'rejectionReason': rejectionReason,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: _get(body, 'success') == true,
@@ -237,16 +253,18 @@ class TimeOffService {
     String? rejectionReason,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/dl-hrd-verify'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'id': timeOffId,
-          'hrdUserId': hrdUserId,
-          'status': status,
-          'rejectionReason': rejectionReason,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/dl-hrd-verify'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'id': timeOffId,
+              'hrdUserId': hrdUserId,
+              'status': status,
+              'rejectionReason': rejectionReason,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: _get(body, 'success') == true,
@@ -423,6 +441,7 @@ class TimeOffService {
   static Future<ApiResponse<Uint8List>> exportTimeOffFormUser({
     required int timeOffId,
     required String userId,
+    String? directorId,
   }) async {
     try {
       final token = await _getToken();
@@ -442,7 +461,11 @@ class TimeOffService {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
             },
-            body: jsonEncode({'timeOffId': timeOffId, 'userId': userId}),
+            body: jsonEncode({
+              'timeOffId': timeOffId,
+              'userId': userId,
+              if (directorId != null) 'directorId': directorId,
+            }),
           )
           .timeout(const Duration(seconds: 60));
 
@@ -507,16 +530,18 @@ class TimeOffService {
     String? rejectionReason,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/hrd-review'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'id': id,
-          'status': status,
-          'hrdUserId': hrdUserId,
-          'rejectionReason': rejectionReason,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/hrd-review'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'id': id,
+              'status': status,
+              'hrdUserId': hrdUserId,
+              'rejectionReason': rejectionReason,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: _get(body, 'success') == true,
@@ -1042,16 +1067,18 @@ class TimeOffService {
     String? rejectionReason,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/org-review'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'id': timeOffId,
-          'reviewerUserId': reviewerUserId,
-          'status': status,
-          'rejectionReason': rejectionReason,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/org-review'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'id': timeOffId,
+              'reviewerUserId': reviewerUserId,
+              'status': status,
+              'rejectionReason': rejectionReason,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: _get(body, 'success') == true,

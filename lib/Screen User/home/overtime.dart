@@ -2,6 +2,8 @@
 
 import 'package:absensikaryawan/Screen%20User/home/overtimeformscreen.dart';
 import 'package:absensikaryawan/Services/overtimeservice.dart';
+import 'package:absensikaryawan/Services/time_off_model.dart';
+import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:flutter/material.dart';
 
 class OvertimeScreen extends StatefulWidget {
@@ -21,38 +23,36 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
   String _errorMessage = '';
   final ScrollController _scrollController = ScrollController();
 
-  // Filter variables
-  int _selectedYear = DateTime.now().year;
-  int _selectedMonth = DateTime.now().month;
-  bool _isFilterExpanded = false;
-
-  // Month names
-  final List<String> _monthNames = [
-    'Semua Bulan',
-    'Januari',
-    'Februari',
-    'Maret',
-    'April',
-    'Mei',
-    'Juni',
-    'Juli',
-    'Agustus',
-    'September',
-    'Oktober',
-    'November',
-    'Desember',
-  ];
+  // Periode kerja
+  List<WorkPeriodModel> _workPeriods = [];
+  WorkPeriodModel? _selectedPeriod;
+  bool _isLoadingPeriods = false;
 
   @override
   void initState() {
     super.initState();
     _loadOvertimeData();
+    _loadWorkPeriods();
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadWorkPeriods() async {
+    setState(() => _isLoadingPeriods = true);
+    final res = await TimeOffService.getWorkPeriods();
+    if (!mounted) return;
+    setState(() {
+      if (res.success && res.data != null && res.data!.isNotEmpty) {
+        _workPeriods = res.data!;
+        _selectedPeriod = _workPeriods.first;
+      }
+      _isLoadingPeriods = false;
+    });
+    _applyClientSideFilter();
   }
 
   Future<void> _loadOvertimeData() async {
@@ -62,17 +62,16 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
     });
 
     try {
-      // Ambil semua data dari API tanpa filter
       final response = await _overtimeService.getMyOvertime(
         page: 1,
-        pageSize: 100, // Ambil lebih banyak data sekaligus
+        pageSize: 100,
       );
 
       if (response.success && response.data != null) {
         if (mounted) {
           setState(() {
             _allOvertimeList = response.data!.data;
-            _applyClientSideFilter(); // Terapkan filter di client
+            _applyClientSideFilter();
           });
         }
       } else {
@@ -102,70 +101,22 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
   void _applyClientSideFilter() {
     List<Overtime> filtered = _allOvertimeList;
 
-    // Filter berdasarkan tahun
-    filtered = filtered.where((overtime) {
-      return overtime.tanggalOvertime.year == _selectedYear;
-    }).toList();
-
-    // Filter berdasarkan bulan (jika bukan "Semua Bulan")
-    if (_selectedMonth != 0) {
-      filtered = filtered.where((overtime) {
-        return overtime.tanggalOvertime.month == _selectedMonth;
+    if (_selectedPeriod != null) {
+      final start = _selectedPeriod!.tanggalMulai;
+      final end = _selectedPeriod!.tanggalSelesai;
+      filtered = filtered.where((o) {
+        return !o.tanggalOvertime.isBefore(start) &&
+            !o.tanggalOvertime.isAfter(end);
       }).toList();
     }
 
-    // Urutkan berdasarkan tanggal terbaru
     filtered.sort((a, b) => b.tanggalOvertime.compareTo(a.tanggalOvertime));
-
-    setState(() {
-      _filteredOvertimeList = filtered;
-    });
+    setState(() => _filteredOvertimeList = filtered);
   }
 
-  Future<void> _refreshData() async {
-    await _loadOvertimeData();
-  }
+  Future<void> _refreshData() async => _loadOvertimeData();
 
-  void _applyFilter() {
-    setState(() {
-      _isFilterExpanded = false;
-    });
-    _applyClientSideFilter();
-  }
-
-  void _resetFilter() {
-    setState(() {
-      _selectedYear = DateTime.now().year;
-      _selectedMonth = DateTime.now().month;
-      _isFilterExpanded = false;
-    });
-    _applyClientSideFilter();
-  }
-
-  String _getFilterDisplayText() {
-    final monthName = _selectedMonth == 0
-        ? 'Semua'
-        : _monthNames[_selectedMonth];
-    return '$monthName $_selectedYear';
-  }
-
-  // Mendapatkan tahun yang tersedia dari data
-  List<int> _getAvailableYears() {
-    final years = _allOvertimeList
-        .map((overtime) => overtime.tanggalOvertime.year)
-        .toSet()
-        .toList();
-
-    years.sort((a, b) => b.compareTo(a)); // Urutkan dari terbaru
-
-    // Jika tidak ada data, gunakan 5 tahun terakhir
-    if (years.isEmpty) {
-      final currentYear = DateTime.now().year;
-      return List.generate(5, (index) => currentYear - 2 + index);
-    }
-
-    return years;
-  }
+  String _getFilterDisplayText() => _selectedPeriod?.label ?? 'Semua Periode';
 
   Color _colorForStatus(String status) {
     switch (status.toLowerCase()) {
@@ -520,13 +471,11 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
   }
 
   Widget _buildFilterSection() {
-    final availableYears = _getAvailableYears();
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE5E7EB), width: 1),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -535,243 +484,152 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          // Filter Header
-          InkWell(
-            onTap: () {
-              setState(() {
-                _isFilterExpanded = !_isFilterExpanded;
-              });
-            },
-            borderRadius: BorderRadius.vertical(
-              top: const Radius.circular(16),
-              bottom: _isFilterExpanded
-                  ? Radius.zero
-                  : const Radius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3B82F6).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.date_range_rounded,
+                    size: 20,
+                    color: Color(0xFF3B82F6),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text(
+                  'Filter Periode Kerja',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
+            const SizedBox(height: 14),
+            _isLoadingPeriods
+                ? const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : _workPeriods.isEmpty
+                ? Container(
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF3B82F6).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.orange[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.orange[200]!),
                     ),
-                    child: const Icon(
-                      Icons.filter_list_rounded,
-                      size: 20,
-                      color: Color(0xFF3B82F6),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: Colors.orange[700],
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Belum ada periode kerja. Tambahkan di menu Kalender terlebih dahulu.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange[700],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Filter Periode',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1F2937),
-                    ),
-                  ),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                  )
+                : Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(20),
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE5E7EB)),
                     ),
-                    child: Text(
-                      _getFilterDisplayText(),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF374151),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: _selectedPeriod?.id,
+                        isExpanded: true,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        itemHeight: 56,
+                        hint: const Text(
+                          'Pilih periode...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF9CA3AF),
+                          ),
+                        ),
+                        selectedItemBuilder: (context) => _workPeriods
+                            .map(
+                              (p) => Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  p.label,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        items: _workPeriods
+                            .map(
+                              (p) => DropdownMenuItem(
+                                value: p.id,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      p.label,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    if (p.keterangan?.isNotEmpty == true)
+                                      Text(
+                                        p.keterangan!,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: Colors.grey[500],
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (selectedId) {
+                          if (selectedId == null) return;
+                          setState(() {
+                            _selectedPeriod = _workPeriods.firstWhere(
+                              (p) => p.id == selectedId,
+                            );
+                          });
+                          _applyClientSideFilter();
+                        },
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    _isFilterExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: const Color(0xFF6B7280),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Filter Content
-          if (_isFilterExpanded) ...[
-            const Divider(height: 1, color: Color(0xFFE5E7EB)),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // Year Selector
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.calendar_today, // Ganti dengan icon yang tersedia
-                        size: 20,
-                        color: Color(0xFF6B7280),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Tahun:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF374151),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: availableYears.contains(_selectedYear)
-                                  ? _selectedYear
-                                  : (availableYears.isNotEmpty
-                                        ? availableYears.first
-                                        : DateTime.now().year),
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedYear = value!;
-                                });
-                              },
-                              items: availableYears.map((year) {
-                                return DropdownMenuItem(
-                                  value: year,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                    ),
-                                    child: Text(year.toString()),
-                                  ),
-                                );
-                              }).toList(),
-                              icon: const Icon(Icons.arrow_drop_down),
-                              isExpanded: true,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Month Selector
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.calendar_month_rounded,
-                        size: 20,
-                        color: Color(0xFF6B7280),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Bulan:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF374151),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: _selectedMonth,
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedMonth = value!;
-                                });
-                              },
-                              items: List.generate(_monthNames.length, (index) {
-                                return DropdownMenuItem(
-                                  value: index,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                    ),
-                                    child: Text(_monthNames[index]),
-                                  ),
-                                );
-                              }),
-                              icon: const Icon(Icons.arrow_drop_down),
-                              isExpanded: true,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Action Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _resetFilter,
-                          icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text(
-                            'Reset',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF6B7280),
-                            side: const BorderSide(color: Color(0xFFE5E7EB)),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: _applyFilter,
-                          icon: const Icon(Icons.search_rounded, size: 18),
-                          label: const Text(
-                            'Terapkan Filter',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF3B82F6),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
           ],
-        ],
+        ),
       ),
     );
   }

@@ -37,6 +37,7 @@ class TimeOffModel {
   final List<ReimbursementItem>? reimbursementItems;
   final List<TimeOffFileItem>? files;
   final bool? requiresDirectorApproval;
+  final String? directorUserId;
 
   // DL specific — NEW (Fase Final)
   final String? headName;
@@ -54,6 +55,11 @@ class TimeOffModel {
   final String? orgTarget;
   final String? financeRejectionReason;
   final String? hrdRejectionReason;
+
+  // DL laporan form fields (e/f/g)
+  final String? hasilPerjalanan;
+  final String? laporanKepada;
+  final String? penyelesaian;
 
   const TimeOffModel({
     this.id,
@@ -87,6 +93,7 @@ class TimeOffModel {
     this.reimbursementItems,
     this.files,
     this.requiresDirectorApproval,
+    this.directorUserId,
     // NEW
     this.headName,
     this.headJobPosition,
@@ -103,6 +110,9 @@ class TimeOffModel {
     this.orgTarget,
     this.hrdRejectionReason,
     this.financeRejectionReason,
+    this.hasilPerjalanan,
+    this.laporanKepada,
+    this.penyelesaian,
   });
 
   static dynamic _f(Map<String, dynamic> j, String camel, String snake) {
@@ -189,6 +199,8 @@ class TimeOffModel {
         (_f(json, 'requiresDirectorApproval', 'requires_director_approval')
             as bool?) ??
         false,
+    directorUserId:
+        _f(json, 'directorUserId', 'director_user_id')?.toString(),
     // DL NEW
     headName: _f(json, 'headName', 'head_name')?.toString(),
     headJobPosition: _f(
@@ -239,6 +251,13 @@ class TimeOffModel {
       'financeRejectionReason',
       'finance_rejection_reason',
     )?.toString(),
+    hasilPerjalanan: _f(
+      json,
+      'hasilPerjalanan',
+      'hasil_perjalanan',
+    )?.toString(),
+    laporanKepada: _f(json, 'laporanKepada', 'laporan_kepada')?.toString(),
+    penyelesaian: _f(json, 'penyelesaian', 'penyelesaian')?.toString(),
   );
 
   static DateTime? _parseDate(dynamic val) {

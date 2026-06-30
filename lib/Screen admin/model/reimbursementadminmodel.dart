@@ -143,9 +143,21 @@ class AdminReimbursementData {
           _adminFormatDate(expenseDate),
       description: _adminNullableString(_adminRead(json, 'description')),
       status: status,
-      statusText:
-          _adminNullableString(_adminRead(json, 'statusText')) ??
-          _adminStatusLabel(status),
+      statusText: () {
+        const knownStatuses = {
+          'pending',
+          'pending_finance',
+          'approved',
+          'rejected',
+          'paid',
+          'done',
+          'completed',
+          'selesai',
+        };
+        if (knownStatuses.contains(status)) return _adminStatusLabel(status);
+        return _adminNullableString(_adminRead(json, 'statusText')) ??
+            _adminStatusLabel(status);
+      }(),
       statusColor: _adminNullableString(_adminRead(json, 'statusColor')),
       submittedAt: submittedAt,
       reviewedAt: _adminNullableDate(

@@ -881,8 +881,8 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
         const SizedBox(height: 10),
         ...[
           _detailRow(
-            'ID Karyawan',
-            emp.nomorKaryawan,
+            'NIP',
+            emp.nip?.isNotEmpty == true ? emp.nip! : '-',
             Icons.badge,
             Colors.blue,
           ),
@@ -1493,8 +1493,8 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                   children: [
                     _buildDetailSection('Informasi Personal', [
                       _buildDetailItem(
-                        'ID Karyawan',
-                        emp.nomorKaryawan,
+                        'NIP',
+                        emp.nip?.isNotEmpty == true ? emp.nip! : '-',
                         Icons.badge,
                         Colors.blue,
                       ),

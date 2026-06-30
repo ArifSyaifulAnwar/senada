@@ -58,6 +58,77 @@ class ReimbursementAttachment {
     }
   }
 }
+// =============================================
+// lib/Services/reimbursementservice.dart
+// Tambahkan di class ReimbursementService
+// =============================================
+
+// Model attachment metadata
+class ReimbursementAttachmentMeta {
+  final int id;
+  final int reimbursementId;
+  final String fileName;
+  final String contentType;
+  final int fileSize;
+  final double fileSizeMb;
+  final int sortOrder;
+  final DateTime uploadedAt;
+  final String viewUrl;
+
+  const ReimbursementAttachmentMeta({
+    required this.id,
+    required this.reimbursementId,
+    required this.fileName,
+    required this.contentType,
+    required this.fileSize,
+    required this.fileSizeMb,
+    required this.sortOrder,
+    required this.uploadedAt,
+    required this.viewUrl,
+  });
+
+  factory ReimbursementAttachmentMeta.fromJson(Map<String, dynamic> json) {
+    return ReimbursementAttachmentMeta(
+      id: json['id'] as int,
+      reimbursementId: json['reimbursementId'] as int,
+      fileName: json['fileName'] as String? ?? '',
+      contentType: json['contentType'] as String? ?? '',
+      fileSize: json['fileSize'] as int? ?? 0,
+      fileSizeMb: (json['fileSizeMb'] as num?)?.toDouble() ?? 0.0,
+      sortOrder: json['sortOrder'] as int? ?? 1,
+      uploadedAt:
+          DateTime.tryParse(json['uploadedAt'] as String? ?? '') ??
+          DateTime.now(),
+      viewUrl: json['viewUrl'] as String? ?? '',
+    );
+  }
+
+  String get extension {
+    if (!fileName.contains('.')) return '';
+    return fileName.split('.').last.toLowerCase();
+  }
+
+  bool get isImage => const ['jpg', 'jpeg', 'png'].contains(extension);
+}
+
+// Model untuk file yang dipilih user (belum diupload)
+class PendingAttachmentFile {
+  final Uint8List bytes;
+  final String fileName;
+  final String extension;
+  final String mimeType;
+
+  const PendingAttachmentFile({
+    required this.bytes,
+    required this.fileName,
+    required this.extension,
+    required this.mimeType,
+  });
+
+  int get size => bytes.length;
+  double get sizeMb => size / (1024 * 1024);
+  bool get isImage => const ['jpg', 'jpeg', 'png'].contains(extension);
+}
 
 class ReimbursementService {
   // Private method untuk internal use
@@ -67,6 +138,253 @@ class ReimbursementService {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
     };
+  }
+  // =============================================
+  // Method baru di ReimbursementService
+  // =============================================
+
+  /// Upload satu attachment. Dipanggil per file setelah submit berhasil.
+  Future<ReimbursementResponse> uploadAttachment({
+    required int reimbursementId,
+    required String userId,
+    required Uint8List fileBytes,
+    required String fileName,
+    required String contentType,
+    int sortOrder = 1,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        '$baseURL/api/asn/reimbursement/attachments/upload',
+      );
+      final request = http.MultipartRequest('POST', uri);
+
+      final headers = await _getMultipartHeaders();
+      request.headers.addAll(headers);
+
+      request.fields['ReimbursementId'] = reimbursementId.toString();
+      request.fields['UserId'] = userId;
+      request.fields['SortOrder'] = sortOrder.toString();
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'AttachmentFile',
+          fileBytes,
+          filename: fileName,
+          contentType: _parseMediaType(contentType),
+        ),
+      );
+
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return ReimbursementResponse(
+          success: json['success'] == true,
+          message: json['message'] as String? ?? '',
+          reimbursementId: json['attachmentId'] as int?,
+        );
+      }
+
+      try {
+        final err = jsonDecode(response.body) as Map<String, dynamic>;
+        return ReimbursementResponse(
+          success: false,
+          message: err['message'] as String? ?? 'Gagal upload attachment.',
+        );
+      } catch (_) {
+        return ReimbursementResponse(
+          success: false,
+          message: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ReimbursementResponse(
+        success: false,
+        message: 'Terjadi kesalahan jaringan: $e',
+      );
+    }
+  }
+
+  /// Submit reimbursement + upload semua attachment secara berurutan.
+  /// Mengembalikan (success, message, failedFiles, reimbursementId).
+  Future<({bool success, String message, List<String> failedFiles, int? reimbursementId})>
+  submitWithAttachments({
+    required String userId,
+    required String title,
+    required String category,
+    required double amount,
+    required DateTime expenseDate,
+    String? description,
+    required List<PendingAttachmentFile> attachments,
+  }) async {
+    // 1. Submit reimbursement (file pertama → field lama untuk compat)
+    final first = attachments.first;
+
+    final submitResult = await submitReimbursement(
+      userId: userId,
+      title: title,
+      category: category,
+      amount: amount,
+      expenseDate: expenseDate,
+      description: description,
+      receiptBytes: first.bytes,
+      receiptFileName: first.fileName,
+      receiptContentType: first.mimeType,
+      status: 'pending',
+    );
+
+    if (!submitResult.success || submitResult.reimbursementId == null) {
+      return (
+        success: false,
+        message: submitResult.message,
+        failedFiles: <String>[],
+        reimbursementId: null,
+      );
+    }
+
+    final reimbursementId = submitResult.reimbursementId!;
+    final failedFiles = <String>[];
+
+    // 2. Upload semua attachment ke tabel baru (termasuk file pertama)
+    for (int i = 0; i < attachments.length; i++) {
+      final file = attachments[i];
+      final result = await uploadAttachment(
+        reimbursementId: reimbursementId,
+        userId: userId,
+        fileBytes: file.bytes,
+        fileName: file.fileName,
+        contentType: file.mimeType,
+        sortOrder: i + 1,
+      );
+
+      if (!result.success) {
+        failedFiles.add(file.fileName);
+      }
+    }
+
+    if (failedFiles.isEmpty) {
+      return (
+        success: true,
+        message: submitResult.message,
+        failedFiles: <String>[],
+        reimbursementId: reimbursementId,
+      );
+    }
+
+    return (
+      success: true,
+      message:
+          '${submitResult.message} (${failedFiles.length} file gagal diupload)',
+      failedFiles: failedFiles,
+      reimbursementId: reimbursementId,
+    );
+  }
+
+  /// Ambil list metadata attachment tanpa bytes.
+  Future<List<ReimbursementAttachmentMeta>> getAttachments({
+    required int reimbursementId,
+    String? userId,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/attachments/list'),
+        headers: headers,
+        body: jsonEncode({
+          'reimbursementId': reimbursementId,
+          'userId': userId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        if (json['success'] == true) {
+          final list = json['data'] as List<dynamic>? ?? [];
+          return list
+              .map(
+                (e) => ReimbursementAttachmentMeta.fromJson(
+                  e as Map<String, dynamic>,
+                ),
+              )
+              .toList();
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Ambil bytes satu attachment untuk preview.
+  Future<ReimbursementAttachment> getAttachmentBytes({
+    required int attachmentId,
+    String? userId,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final query = userId != null ? '?userId=$userId' : '';
+      final uri = Uri.parse(
+        '$baseURL/api/asn/reimbursement/attachments/view/$attachmentId$query',
+      );
+
+      final response = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 45));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Gagal mengambil attachment.');
+      }
+
+      if (response.bodyBytes.isEmpty) {
+        throw Exception('File kosong.');
+      }
+
+      final fallback = 'attachment_$attachmentId';
+      final fileName = _fileNameFromContentDisposition(
+        response.headers['content-disposition'],
+        fallback,
+      );
+
+      return ReimbursementAttachment(
+        bytes: Uint8List.fromList(response.bodyBytes),
+        fileName: fileName,
+        contentType: response.headers['content-type'],
+      );
+    } catch (e) {
+      if (e is Exception) rethrow;
+      throw Exception('Gagal mengambil attachment: $e');
+    }
+  }
+
+  /// Soft delete satu attachment.
+  Future<ReimbursementResponse> deleteAttachment({
+    required int attachmentId,
+    required String userId,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/attachments/delete'),
+        headers: headers,
+        body: jsonEncode({'attachmentId': attachmentId, 'userId': userId}),
+      );
+
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        return ReimbursementResponse(
+          success: json['success'] == true,
+          message: json['message'] as String? ?? '',
+        );
+      }
+
+      return ReimbursementResponse(
+        success: false,
+        message: 'Gagal menghapus attachment.',
+      );
+    } catch (e) {
+      return ReimbursementResponse(success: false, message: 'Error: $e');
+    }
   }
 
   static Future<String?> _getToken() async {

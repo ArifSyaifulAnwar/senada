@@ -227,6 +227,10 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       final res = await TimeOffService.exportTimeOffFormUser(
         timeOffId: timeOff.id!,
         userId: widget.userId,
+        directorId: timeOff.directorUserId ??
+            (timeOff.requiresDirectorApproval == true
+                ? timeOff.approvedBy
+                : null),
       );
       if (!res.success || res.data == null) {
         _showSnackBar(res.message, isError: true);

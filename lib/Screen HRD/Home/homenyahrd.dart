@@ -1196,8 +1196,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       },
     ),
     ServiceIconData(
-      icon: Icons.event,
-      label: 'Acara',
+      icon: Icons.today_outlined,
+      label: 'Aktivitas Harian',
       color: const Color(0xFF795548),
       onTap: _showComingSoonDialog,
     ),
