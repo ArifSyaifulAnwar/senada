@@ -90,11 +90,14 @@ class NotificationService {
   Future<Map<String, int>> getAdminNotificationStats() async {
     try {
       final headers = await _getHeaders();
+      final userId = await _getUserID();
+      final body = jsonEncode({'AdminId': userId, 'UserId': userId});
 
       final response = await http
           .post(
             Uri.parse('$baseURL/api/admin/notifications/stats'),
             headers: headers,
+            body: body,
           )
           .timeout(const Duration(seconds: 10));
 

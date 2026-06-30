@@ -11,7 +11,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 import 'package:absensikaryawan/Services/asset_service.dart';
 import 'package:absensikaryawan/Services/web_download.dart';
-import 'package:absensikaryawan/Services/inventory_service.dart';
+import 'package:absensikaryawan/Services/inventory_service.dart'
+    hide ApiResponse;
 
 enum AssetCategory { dipinjam, diambil }
 
@@ -277,46 +278,88 @@ class _AssetScreenState extends State<AssetScreen>
       _snack('Pilih periode dan karyawan terlebih dahulu', err: true);
       return;
     }
+    if (_isGeneratingReport) return;
+
+    // Simpan snapshot sebelum async gap
+    final emp = _selectedReportEmployee!;
+    final period = _selectedReportPeriod!;
+    final fileName =
+        'Laporan_Asset_${emp.name.replaceAll(' ', '_')}_'
+        '${period.bulan.toString().padLeft(2, '0')}${period.tahun}.pdf';
 
     setState(() => _isGeneratingReport = true);
-    final res = await AssetService.generateReport(
-      userId: _selectedReportEmployee!.userId,
-      workPeriodId: _selectedReportPeriod!.id,
-      requestedBy: widget.userId,
+
+    // Tampilkan konfirmasi langsung — download berjalan di background
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Menyiapkan laporan ${emp.name}...',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 180),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+        backgroundColor: const Color(0xFF4F46E5),
+      ),
     );
-    if (!mounted) return;
-    setState(() => _isGeneratingReport = false);
 
-    if (!res.success || res.data == null) {
-      _snack(res.message, err: true);
-      return;
-    }
+    // Jalankan di background — tidak await di UI thread
+    AssetService.generateReport(
+          userId: emp.userId,
+          workPeriodId: period.id,
+          requestedBy: widget.userId,
+        )
+        .then((res) async {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          setState(() => _isGeneratingReport = false);
 
-    final fileName =
-        'Laporan_Asset_${_selectedReportEmployee!.name.replaceAll(' ', '_')}_'
-        '${_selectedReportPeriod!.bulan.toString().padLeft(2, '0')}${_selectedReportPeriod!.tahun}.pdf';
-    final bytes = res.data!;
+          if (!res.success || res.data == null) {
+            _snack(res.message, err: true);
+            return;
+          }
 
-    try {
-      if (kIsWeb) {
-        downloadFileWeb(bytes, fileName);
-        _snack('Laporan berhasil diunduh');
-      } else {
-        final dir = await getTemporaryDirectory();
-        final file = File('${dir.path}/$fileName');
-        await file.writeAsBytes(bytes);
-        final result = await OpenFile.open(file.path);
-        if (result.type != ResultType.done) {
-          _snack(
-            'File tersimpan, tapi tidak bisa dibuka otomatis: ${result.message}',
-          );
-        } else {
-          _snack('Laporan berhasil dibuat');
-        }
-      }
-    } catch (e) {
-      _snack('Gagal menyimpan file: $e', err: true);
-    }
+          try {
+            if (kIsWeb) {
+              downloadFileWeb(res.data!, fileName);
+              _snack('Laporan $fileName berhasil diunduh');
+            } else {
+              final dir = await getTemporaryDirectory();
+              final file = File('${dir.path}/$fileName');
+              await file.writeAsBytes(res.data!);
+              final result = await OpenFile.open(file.path);
+              if (result.type != ResultType.done) {
+                _snack('File tersimpan: $fileName');
+              } else {
+                _snack('Laporan $fileName siap dibuka');
+              }
+            }
+          } catch (e) {
+            _snack('Gagal menyimpan file: $e', err: true);
+          }
+        })
+        .catchError((e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          setState(() => _isGeneratingReport = false);
+          _snack('Gagal membuat laporan: $e', err: true);
+        });
   }
 
   // ── Inventaris (Head HRD only) ───────────────────────────────────────────
@@ -1794,7 +1837,8 @@ class _AssetScreenState extends State<AssetScreen>
 
           const SizedBox(height: 24),
 
-          if (_selectedReportPeriod != null && _selectedReportEmployee != null)
+          if (_selectedReportPeriod != null &&
+              _selectedReportEmployee != null) ...[
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -1831,6 +1875,7 @@ class _AssetScreenState extends State<AssetScreen>
                 ),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -4616,14 +4661,14 @@ class _InventoryAssignSheet extends StatefulWidget {
 
 class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
   List<InventoryEligibleUserModel> _users = [];
-  List<InventoryEligibleUserModel> _adminInventarisUsers = [];
   InventoryEligibleUserModel? _selectedPic;
-  InventoryEligibleUserModel? _selectedAdmin;
+  InventoryEligibleUserModel? _autoAdmin;
+  bool _isLoadingAutoAdmin = true;
+  String? _autoAdminError;
   final _catatanCtrl = TextEditingController();
   bool _isLoading = true;
   bool _isSaving = false;
   String _searchPic = '';
-  String _searchAdmin = '';
   @override
   void initState() {
     super.initState();
@@ -4631,23 +4676,27 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
   }
 
   Future<void> _load() async {
-    final results = await Future.wait([
-      InventoryService.getAllActiveEmployees(
-        userId: widget.userId,
-      ), // semua karyawan -> penanggung jawab
-      InventoryService.getEligibleAdminInventaris(
-        userId: widget.userId,
-      ), // khusus org 'Inventaris'
-    ]);
+    final picFuture = InventoryService.getAllActiveEmployees(
+      userId: widget.userId,
+    );
+    final adminFuture = InventoryService.getAutoAdminInventaris(
+      userId: widget.userId,
+      kategori: widget.item.kategori,
+    );
+
+    final picRes = await picFuture;
+    final adminRes = await adminFuture;
+
     if (mounted) {
       setState(() {
-        final picRes = results[0];
-        final adminRes = results[1];
         if (picRes.success && picRes.data != null) _users = picRes.data!;
         if (adminRes.success && adminRes.data != null) {
-          _adminInventarisUsers = adminRes.data!;
+          _autoAdmin = adminRes.data;
+        } else {
+          _autoAdminError = adminRes.message;
         }
         _isLoading = false;
+        _isLoadingAutoAdmin = false;
       });
     }
   }
@@ -4665,9 +4714,14 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
       );
       return;
     }
-    if (_selectedAdmin == null) {
+    if (_autoAdmin == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pilih admin inventaris terlebih dahulu')),
+        SnackBar(
+          content: Text(
+            _autoAdminError ??
+                'Admin Inventaris untuk kategori ini belum diatur',
+          ),
+        ),
       );
       return;
     }
@@ -4675,7 +4729,7 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
     final res = await InventoryService.assign(
       inventoryItemId: widget.item.id,
       penanggungJawabUserId: _selectedPic!.userId,
-      adminInventarisUserId: _selectedAdmin!.userId,
+      adminInventarisUserId: _autoAdmin!.userId,
       catatan: _catatanCtrl.text.trim().isEmpty
           ? null
           : _catatanCtrl.text.trim(),
@@ -4691,6 +4745,105 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
         context,
       ).showSnackBar(SnackBar(content: Text(res.message)));
     }
+  }
+
+  Widget _buildAutoAdminCard() {
+    const color = Color(0xFF0EA5E9);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '2. Admin Inventaris (otomatis sesuai kategori)',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        if (_isLoadingAutoAdmin)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: CircularProgressIndicator(strokeWidth: 2, color: color),
+            ),
+          )
+        else if (_autoAdmin == null)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFECACA)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  size: 16,
+                  color: Color(0xFFDC2626),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _autoAdminError ??
+                        'Admin Inventaris untuk kategori "${widget.item.kategori}" belum diatur. '
+                            'Set organization karyawan terkait menjadi "IT & Admin Inventaris 1" (Laptop/Mouse/Keyboard/Monitor) '
+                            'atau "IT & Admin Inventaris 2" (lainnya).',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0xFFB91C1C),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: color,
+                  child: Text(
+                    _autoAdmin!.name.isNotEmpty
+                        ? _autoAdmin!.name[0].toUpperCase()
+                        : '?',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _autoAdmin!.name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (_autoAdmin!.jobPosition != null)
+                        Text(
+                          _autoAdmin!.jobPosition!,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.lock_outline_rounded, size: 16, color: color),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _userPickerList({
@@ -4894,18 +5047,7 @@ class _InventoryAssignSheetState extends State<_InventoryAssignSheet> {
                               setState(() => _searchPic = v),
                         ),
                         const SizedBox(height: 20),
-                        _userPickerList(
-                          title: '2. Pilih Admin Inventaris',
-                          users: _adminInventarisUsers,
-                          selected: _selectedAdmin,
-                          onSelect: (u) => setState(() => _selectedAdmin = u),
-                          color: const Color(0xFF0EA5E9),
-                          searchQuery: _searchAdmin,
-                          onSearchChanged: (v) =>
-                              setState(() => _searchAdmin = v),
-                          emptyHint:
-                              'Belum ada user dengan jabatan Admin Inventaris. Set organization karyawan terkait agar mengandung kata "Inventaris".',
-                        ),
+                        _buildAutoAdminCard(),
                         const SizedBox(height: 20),
                         const Text(
                           'Catatan (opsional)',

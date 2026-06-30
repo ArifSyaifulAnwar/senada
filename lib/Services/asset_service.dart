@@ -1075,15 +1075,17 @@ class AssetService {
     required String requestedBy,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/report-generate'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'userId': userId,
-          'workPeriodId': workPeriodId,
-          'requestedBy': requestedBy,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/report-generate'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'userId': userId,
+              'workPeriodId': workPeriodId,
+              'requestedBy': requestedBy,
+            }),
+          )
+          .timeout(const Duration(seconds: 180));
       if (res.statusCode == 200) {
         return ApiResponse(success: true, message: 'OK', data: res.bodyBytes);
       }

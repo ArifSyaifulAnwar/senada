@@ -666,4 +666,33 @@ class InventoryService {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }
   }
+
+  static Future<ApiResponse<InventoryEligibleUserModel>>
+  getAutoAdminInventaris({
+    required String userId,
+    required String kategori,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/auto-admin-inventaris'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId, 'kategori': kategori}),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final success = (_get(body, 'success') ?? false) == true;
+      final message = (_get(body, 'message') ?? '') as String;
+
+      InventoryEligibleUserModel? admin;
+      final data = _get(body, 'data');
+      if (data is Map) {
+        admin = InventoryEligibleUserModel.fromJson(
+          Map<String, dynamic>.from(data),
+        );
+      }
+
+      return ApiResponse(success: success, message: message, data: admin);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
 }

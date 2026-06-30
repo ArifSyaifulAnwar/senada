@@ -22,6 +22,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
+import '../../Screen User/fitur/daily_activity_screen.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Model
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1119,10 +1121,13 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
       ),
     ),
     ServiceIconData(
-      icon: Icons.event,
-      label: 'Acara',
+      icon: Icons.today_outlined,
+      label: 'Aktivitas Harian',
       color: const Color(0xFF795548),
-      onTap: _showComingSoonDialog,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DailyActivityScreen()),
+      ),
     ),
     ServiceIconData(
       icon: Icons.inventory,

@@ -23,6 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
 import '../../Screen User/Screen HRD/hrd_calendar_screen.dart';
+import '../../Screen User/fitur/daily_activity_screen.dart';
 import '../../Screen User/fitur/org_approval_screen.dart';
 import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Services/notification_service.dart';
@@ -510,23 +511,6 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     if (_hasCheckedOut) return Icons.check_circle;
     if (_hasCheckedIn) return Icons.logout;
     return Icons.login;
-  }
-
-  void _showComingSoonDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Coming Soon'),
-        content: const Text('Untuk saat ini masih dalam pengembangan.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Tutup'),
-          ),
-        ],
-      ),
-    );
   }
 
   // Expose untuk dipanggil dari parent widget jika diperlukan
@@ -1199,7 +1183,10 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       icon: Icons.today_outlined,
       label: 'Aktivitas Harian',
       color: const Color(0xFF795548),
-      onTap: _showComingSoonDialog,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DailyActivityScreen()),
+      ),
     ),
     ServiceIconData(
       icon: Icons.inventory,

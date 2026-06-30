@@ -1001,7 +1001,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
           // Detail sections
           _buildDetailSection('Informasi Personal', [
             _detailRow(
-              'ID Karyawan',
+              'NIP',
               emp.nomorKaryawan,
               Icons.badge,
               Colors.blue,
@@ -1330,7 +1330,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
                   controller: scrollCtrl,
                   children: [
                     _mobileDetailItem(
-                      'ID Karyawan',
+                      'NIP',
                       emp.nomorKaryawan,
                       Icons.badge,
                       Colors.blue,

@@ -122,16 +122,14 @@ class AdminNotificationRequest {
   });
 
   Map<String, dynamic> toJson() {
-    return {
-      'page': page,
-      'pageSize': pageSize,
-      'typeFilter': typeFilter,
-      'userIdFilter': userIdFilter,
-      'isReadFilter': isReadFilter,
-      'dateFrom': dateFrom?.toIso8601String(),
-      'dateTo': dateTo?.toIso8601String(),
-      'searchText': searchText,
-    };
+    final map = <String, dynamic>{'page': page, 'pageSize': pageSize};
+    if (typeFilter != null) map['typeFilter'] = typeFilter;
+    if (userIdFilter != null) map['userIdFilter'] = userIdFilter;
+    if (isReadFilter != null) map['isReadFilter'] = isReadFilter;
+    if (dateFrom != null) map['dateFrom'] = dateFrom!.toIso8601String();
+    if (dateTo != null) map['dateTo'] = dateTo!.toIso8601String();
+    if (searchText != null) map['searchText'] = searchText;
+    return map;
   }
 }
 
@@ -153,15 +151,28 @@ class AdminNotificationResponse {
   });
 
   factory AdminNotificationResponse.fromJson(Map<String, dynamic> json) {
+    final rawData = json['data'] ?? json['Data'] ?? [];
+    final rawStats = json['stats'] ?? json['Stats'];
     return AdminNotificationResponse(
-      data: (json['data'] as List)
+      data: (rawData as List)
           .map((item) => AdminNotification.fromJson(item))
           .toList(),
-      totalCount: json['totalCount'],
-      page: json['page'],
-      pageSize: json['pageSize'],
-      totalPages: json['totalPages'],
-      stats: AdminNotificationStats.fromJson(json['stats']),
+      totalCount: json['totalCount'] ?? json['TotalCount'] ?? 0,
+      page: json['page'] ?? json['Page'] ?? 1,
+      pageSize: json['pageSize'] ?? json['PageSize'] ?? 20,
+      totalPages: json['totalPages'] ?? json['TotalPages'] ?? 0,
+      stats: rawStats != null
+          ? AdminNotificationStats.fromJson(rawStats)
+          : AdminNotificationStats(
+              totalNotifications: 0,
+              unreadCount: 0,
+              readCount: 0,
+              importantCount: 0,
+              expiredCount: 0,
+              todayCount: 0,
+              weekCount: 0,
+              typeStats: [],
+            ),
     );
   }
 }
@@ -189,16 +200,17 @@ class AdminNotificationStats {
 
   factory AdminNotificationStats.fromJson(Map<String, dynamic> json) {
     return AdminNotificationStats(
-      totalNotifications: json['totalNotifications'],
-      unreadCount: json['unreadCount'],
-      readCount: json['readCount'],
-      importantCount: json['importantCount'],
-      expiredCount: json['expiredCount'],
-      todayCount: json['todayCount'],
-      weekCount: json['weekCount'],
-      typeStats: (json['typeStats'] as List)
-          .map((item) => NotificationTypeStats.fromJson(item))
-          .toList(),
+      totalNotifications: json['totalNotifications'] ?? json['TotalNotifications'] ?? 0,
+      unreadCount: json['unreadCount'] ?? json['UnreadCount'] ?? 0,
+      readCount: json['readCount'] ?? json['ReadCount'] ?? 0,
+      importantCount: json['importantCount'] ?? json['ImportantCount'] ?? 0,
+      expiredCount: json['expiredCount'] ?? json['ExpiredCount'] ?? 0,
+      todayCount: json['todayCount'] ?? json['TodayCount'] ?? 0,
+      weekCount: json['weekCount'] ?? json['WeekCount'] ?? 0,
+      typeStats: ((json['typeStats'] ?? json['TypeStats']) as List?)
+              ?.map((item) => NotificationTypeStats.fromJson(item))
+              .toList() ??
+          [],
     );
   }
 }

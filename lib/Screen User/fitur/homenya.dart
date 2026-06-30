@@ -21,6 +21,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 import '../../Services/notification_service.dart';
+import 'daily_activity_screen.dart';
 import 'org_approval_screen.dart';
 import 'profile fitur/halaman_calendar.dart';
 
@@ -214,12 +215,16 @@ class _HomePageState extends State<HomeScreen> {
       if (userID == null || userID!.isEmpty) return;
       int count = 0;
       await Future.wait([
-        TimeOffService.getPendingOrgReview(userID!).then((r) {
-          if (r.success && r.data != null) count += r.data!.length;
-        }).catchError((_) {}),
-        TimeOffService.getPendingHeadVerify(userID!).then((r) {
-          if (r.success && r.data != null) count += r.data!.length;
-        }).catchError((_) {}),
+        TimeOffService.getPendingOrgReview(userID!)
+            .then((r) {
+              if (r.success && r.data != null) count += r.data!.length;
+            })
+            .catchError((_) {}),
+        TimeOffService.getPendingHeadVerify(userID!)
+            .then((r) {
+              if (r.success && r.data != null) count += r.data!.length;
+            })
+            .catchError((_) {}),
       ]);
       if (mounted) setState(() => _pendingOrgCount = count);
     } catch (_) {}
@@ -827,7 +832,10 @@ class _HomePageState extends State<HomeScreen> {
         Icons.today_outlined,
         "Aktivitas Harian",
         const Color(0xFF795548),
-        onTap: () => _showComingSoonDialog(context),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const DailyActivityScreen()),
+        ),
       ),
       _buildServiceIconData(
         Icons.inventory,

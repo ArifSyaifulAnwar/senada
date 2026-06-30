@@ -583,11 +583,13 @@ class AdminStatisticsRequest {
 
   const AdminStatisticsRequest({this.adminId, this.year, this.month});
 
-  Map<String, dynamic> toJson() => {
-    'adminId': adminId,
-    'year': year,
-    'month': month,
-  };
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{};
+    if (adminId != null) map['adminId'] = adminId;
+    if (year != null) map['year'] = year;
+    if (month != null) map['month'] = month;
+    return map;
+  }
 }
 
 class AdminTimeOffListRequest {

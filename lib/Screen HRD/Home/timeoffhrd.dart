@@ -95,7 +95,6 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       if (mounted) setState(() => _webTabIndex = _tabController.index);
     });
     _loadUserData();
-    _loadWorkPeriods();
     _searchController.addListener(_applyFilters);
   }
 
@@ -104,10 +103,20 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     if (mounted && res.success && res.data != null) {
       setState(() {
         _workPeriods = res.data!;
-        // Default: semua periode (null = tidak filter)
         _selectedWorkPeriod = null;
       });
     }
+  }
+
+  WorkPeriodModel? get _activePeriod {
+    final today = DateTime.now();
+    final todayNorm = DateTime(today.year, today.month, today.day);
+    for (final p in _workPeriods) {
+      final start = DateTime(p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day);
+      final end = DateTime(p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day);
+      if (!todayNorm.isBefore(start) && !todayNorm.isAfter(end)) return p;
+    }
+    return null;
   }
 
   @override
@@ -131,6 +140,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       _currentUserId = prefs.getString('UserID');
       _currentUserName = prefs.getString('Name');
       if (_currentUserId != null && _currentUserName != null) {
+        await _loadWorkPeriods();
         await _loadAllData();
       } else {
         setState(() => _isLoading = false);
@@ -149,7 +159,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           await Future.wait([
             TimeOffAdminService.getAllTimeOffs(adminId: _currentUserId!),
             TimeOffAdminService.getUsersWithTimeOffs(adminId: _currentUserId!),
-            TimeOffAdminService.getAdminStatistics(),
+            TimeOffAdminService.getAdminStatistics(
+              year: _activePeriod?.tanggalMulai.year ?? DateTime.now().year,
+              month: _activePeriod?.tanggalMulai.month ?? DateTime.now().month,
+            ),
           ]).timeout(
             const Duration(seconds: 30),
             onTimeout: () => throw Exception('Request timeout.'),

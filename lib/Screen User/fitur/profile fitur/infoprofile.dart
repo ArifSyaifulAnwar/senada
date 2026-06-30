@@ -57,9 +57,23 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
   String manager = '';
   List<FileUserResponse> _userFiles = [];
   bool _isLoadingFiles = false;
-
+  bool _hasHRDFileAccess = false;
+  bool _isCheckingHRDAccess = true;
+  bool _isLoadingHRDFiles = false;
+  List<FileUserAdminResponse> _hrdAllFiles = [];
+  String _hrdSearchQuery = '';
+  String _hrdSelectedCategory = 'Semua';
   int _selectedTabIndex = 0;
-  final List<String> _tabs = ["Personal", "Profesional", "Dokumen"];
+  // final List<String> _tabs = ["Personal", "Profesional", "Dokumen"];
+  List<String> get _tabs {
+    if (_isCheckingHRDAccess) {
+      return ["Personal", "Profesional", "Dokumen"];
+    }
+    return _hasHRDFileAccess
+        ? ["Personal", "Profesional", "Dokumen", "File Karyawan"]
+        : ["Personal", "Profesional", "Dokumen"];
+  }
+
   String _searchQuery = '';
   String _sortBy = 'newest';
   List<FileCategory> _categories = [];
@@ -73,6 +87,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     super.initState();
     _selectedTabIndex = widget.initialTabIndex;
     _initProfile();
+    _checkHRDFileAccess();
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -82,6 +97,179 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
       curve: Curves.easeInOut,
     );
     _controller.forward();
+  }
+
+  Future<void> _checkHRDFileAccess() async {
+    if (!mounted) return;
+    setState(() => _isCheckingHRDAccess = true);
+
+    try {
+      if (_accessToken == null) await _getToken();
+
+      final prefs = await SharedPreferences.getInstance();
+      final requestUserId = prefs.getString('UserID') ?? '';
+
+      if (requestUserId.isEmpty) {
+        _safeSetState(() {
+          _hasHRDFileAccess = false;
+          _isCheckingHRDAccess = false;
+        });
+        return;
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/file/getAllHRD'),
+        headers: {
+          'Authorization': 'Bearer $_accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'RequestUserId': requestUserId}),
+      );
+
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body);
+        final data = body['Data'] ?? {};
+        final bool denied = data['AccessDenied'] ?? false;
+        final List<dynamic> filesJson = data['Files'] ?? [];
+
+        _safeSetState(() {
+          _hasHRDFileAccess = !denied;
+          _hrdAllFiles = filesJson
+              .map((e) => FileUserAdminResponse.fromJson(e))
+              .toList();
+        });
+      } else {
+        _safeSetState(() => _hasHRDFileAccess = false);
+      }
+    } catch (_) {
+      _safeSetState(() => _hasHRDFileAccess = false);
+    } finally {
+      _safeSetState(() => _isCheckingHRDAccess = false);
+    }
+  }
+
+  Future<void> _reloadHRDAllFiles() async {
+    if (!mounted) return;
+    setState(() => _isLoadingHRDFiles = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final requestUserId = prefs.getString('UserID') ?? '';
+      if (_accessToken == null) await _getToken();
+
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/file/getAllHRD'),
+        headers: {
+          'Authorization': 'Bearer $_accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'RequestUserId': requestUserId}),
+      );
+
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body);
+        final data = body['Data'] ?? {};
+        final List<dynamic> filesJson = data['Files'] ?? [];
+        _safeSetState(() {
+          _hrdAllFiles = filesJson
+              .map((e) => FileUserAdminResponse.fromJson(e))
+              .toList();
+        });
+      }
+    } catch (_) {
+    } finally {
+      _safeSetState(() => _isLoadingHRDFiles = false);
+    }
+  }
+
+  Future<Uint8List> _downloadHRDFileContent(int fileId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final requestUserId = prefs.getString('UserID') ?? '';
+
+    final response = await http.post(
+      Uri.parse('$baseURL/api/asn/file/downloadAdminHRD'),
+      headers: {
+        'Authorization': 'Bearer $_accessToken',
+        'Content-Type': 'application/json',
+      },
+      body: json.encode({'RequestUserId': requestUserId, 'FileId': fileId}),
+    );
+
+    if (response.statusCode == 200) return response.bodyBytes;
+    throw Exception('Gagal mengunduh file: ${response.statusCode}');
+  }
+
+  Future<void> _openHRDFile(FileUserAdminResponse file) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Memuat file...'),
+          ],
+        ),
+      ),
+    );
+    try {
+      final bytes = await _downloadHRDFileContent(file.id);
+      if (mounted) Navigator.pop(context);
+
+      if (file.fileType.startsWith('image/')) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (_) => Dialog(
+            backgroundColor: Colors.black87,
+            child: InteractiveViewer(
+              child: Image.memory(bytes, fit: BoxFit.contain),
+            ),
+          ),
+        );
+        return;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final safeName =
+          '${file.id}_${file.name.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')}';
+      final f = File('${dir.path}/$safeName');
+      await f.writeAsBytes(bytes);
+      await OpenFile.open(f.path);
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal membuka file: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  List<FileUserAdminResponse> get _filteredHRDFiles {
+    return _hrdAllFiles.where((f) {
+      final q = _hrdSearchQuery.toLowerCase();
+      final matchSearch =
+          q.isEmpty ||
+          f.name.toLowerCase().contains(q) ||
+          f.employeeName.toLowerCase().contains(q) ||
+          f.fileCategory.toLowerCase().contains(q);
+      final matchCat =
+          _hrdSelectedCategory == 'Semua' ||
+          f.fileCategory == _hrdSelectedCategory;
+      return matchSearch && matchCat;
+    }).toList();
+  }
+
+  List<String> get _hrdCategories {
+    final set = <String>{'Semua'};
+    for (final f in _hrdAllFiles) {
+      if (f.fileCategory.isNotEmpty) set.add(f.fileCategory);
+    }
+    return set.toList();
   }
 
   // ─── semua method API tidak berubah ──────────────────────────────
@@ -1118,11 +1306,10 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
                     borderRadius: BorderRadius.circular(25),
                   ),
                   child: Row(
-                    children: [
-                      _buildTabButton(_tabs[0], 0),
-                      _buildTabButton(_tabs[1], 1),
-                      _buildTabButton(_tabs[2], 2),
-                    ],
+                    children: List.generate(
+                      _tabs.length,
+                      (i) => _buildTabButton(_tabs[i], i),
+                    ),
                   ),
                 ),
               ),
@@ -1142,6 +1329,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
       child: GestureDetector(
         onTap: () {
           if (index == 2 && _selectedTabIndex != 2) _loadUserFiles();
+          if (index == 3 && _selectedTabIndex != 3) _reloadHRDAllFiles();
           _safeSetState(() => _selectedTabIndex = index);
         },
         child: AnimatedContainer(
@@ -1182,9 +1370,146 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
         return _buildProfessionalTab();
       case 2:
         return _buildDocumentsTab();
+      case 3:
+        return _buildHRDAllFilesTab();
       default:
         return _buildPersonalTab();
     }
+  }
+
+  Widget _buildHRDAllFilesTab() {
+    if (_isLoadingHRDFiles) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWeb = constraints.maxWidth >= 768;
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  TextField(
+                    onChanged: (v) => setState(() => _hrdSearchQuery = v),
+                    decoration: InputDecoration(
+                      hintText: 'Cari nama file / nama karyawan / kategori...',
+                      prefixIcon: const Icon(Icons.search),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 36,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: _hrdCategories.map((c) {
+                        final sel = c == _hrdSelectedCategory;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(c),
+                            selected: sel,
+                            onSelected: (_) =>
+                                setState(() => _hrdSelectedCategory = c),
+                            selectedColor: const Color(0xFF007AFF),
+                            labelStyle: TextStyle(
+                              color: sel ? Colors.white : Colors.black87,
+                              fontSize: 12,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _filteredHRDFiles.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Tidak ada file',
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: isWeb ? 24 : 14,
+                      ),
+                      itemCount: _filteredHRDFiles.length,
+                      itemBuilder: (_, i) {
+                        final f = _filteredHRDFiles[i];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade200),
+                          ),
+                          child: ListTile(
+                            onTap: () => _openHRDFile(f),
+                            leading: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: _getFileColor(
+                                  f.fileType,
+                                ).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                _getFileIcon(f.fileType),
+                                color: _getFileColor(f.fileType),
+                              ),
+                            ),
+                            title: Text(
+                              f.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${f.employeeName} • ${f.jobPosition}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF007AFF),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                Text(
+                                  '${f.fileCategory} • ${DateFormat('dd/MM/yyyy').format(f.uploadedAt)}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[500],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: const Icon(Icons.chevron_right, size: 18),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────

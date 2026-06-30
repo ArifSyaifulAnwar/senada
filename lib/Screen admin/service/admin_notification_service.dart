@@ -8,18 +8,33 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminNotificationService {
-  static const String _baseUrl = '$baseURL/admin/notifications';
+  static const String _baseUrl = '$baseURL/api/admin/notifications';
 
-  Future<String?> _getAuthToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('auth_token');
+  static Future<String?> _getToken() async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/auth/token'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data.containsKey('access_token') && data['access_token'] != null) {
+          return data['access_token'];
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Map<String, String>> _getHeaders() async {
-    final token = await _getAuthToken();
+    final token = await _getToken();
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${token ?? ''}',
@@ -39,10 +54,12 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['success']) {
-          return AdminNotificationResponse.fromJson(jsonResponse['data']);
+        if (jsonResponse['Success'] == true || jsonResponse['success'] == true) {
+          return AdminNotificationResponse.fromJson(
+            jsonResponse['Data'] ?? jsonResponse['data'],
+          );
         } else {
-          throw Exception(jsonResponse['message']);
+          throw Exception(jsonResponse['Message'] ?? jsonResponse['message']);
         }
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
@@ -61,17 +78,19 @@ class AdminNotificationService {
   Future<AdminNotificationStats> getNotificationStats() async {
     try {
       final headers = await _getHeaders();
-      final response = await http.get(
+      final response = await http.post(
         Uri.parse('$_baseUrl/stats'),
         headers: headers,
       );
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['success']) {
-          return AdminNotificationStats.fromJson(jsonResponse['data']);
+        if (jsonResponse['Success'] == true || jsonResponse['success'] == true) {
+          return AdminNotificationStats.fromJson(
+            jsonResponse['Data'] ?? jsonResponse['data'],
+          );
         } else {
-          throw Exception(jsonResponse['message']);
+          throw Exception(jsonResponse['Message'] ?? jsonResponse['message']);
         }
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
@@ -98,13 +117,13 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        return jsonResponse['success'];
+        return jsonResponse['Success'] == true || jsonResponse['success'] == true;
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
       } else {
         final jsonResponse = jsonDecode(response.body);
         throw Exception(
-          jsonResponse['message'] ?? 'Failed to create notification',
+          jsonResponse['Message'] ?? jsonResponse['message'] ?? 'Failed to create notification',
         );
       }
     } on SocketException {
@@ -118,14 +137,13 @@ class AdminNotificationService {
 
   Future<bool> uploadNotificationPdf(int notificationId, File pdfFile) async {
     try {
-      final headers = await _getMultipartHeaders();
+      final token = await _getToken();
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('$_baseUrl/upload-pdf'),
+        Uri.parse('$_baseUrl/upload-pdf/$notificationId'),
       );
 
-      request.headers.addAll(headers);
-      request.fields['notificationId'] = notificationId.toString();
+      request.headers['Authorization'] = 'Bearer ${token ?? ''}';
       request.files.add(
         await http.MultipartFile.fromPath('pdfFile', pdfFile.path),
       );
@@ -135,12 +153,12 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(responseBody);
-        return jsonResponse['success'];
+        return jsonResponse['Success'] == true || jsonResponse['success'] == true;
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
       } else {
         final jsonResponse = jsonDecode(responseBody);
-        throw Exception(jsonResponse['message'] ?? 'Failed to upload PDF');
+        throw Exception(jsonResponse['Message'] ?? jsonResponse['message'] ?? 'Failed to upload PDF');
       }
     } on SocketException {
       throw Exception('No internet connection');
@@ -161,13 +179,11 @@ class AdminNotificationService {
       );
 
       if (response.statusCode == 200) {
-        // Request storage permission
         final status = await Permission.storage.request();
         if (!status.isGranted) {
           throw Exception('Storage permission denied');
         }
 
-        // Get downloads directory
         Directory? downloadsDirectory;
         if (Platform.isAndroid) {
           downloadsDirectory = Directory('/storage/emulated/0/Download');
@@ -179,11 +195,8 @@ class AdminNotificationService {
           throw Exception('Cannot access downloads directory');
         }
 
-        // Create file path
         final filePath = '${downloadsDirectory.path}/$fileName';
         final file = File(filePath);
-
-        // Write file
         await file.writeAsBytes(response.bodyBytes);
         return file;
       } else if (response.statusCode == 401) {
@@ -198,11 +211,6 @@ class AdminNotificationService {
     } catch (e) {
       throw Exception('Error downloading PDF: $e');
     }
-  }
-
-  Future<Map<String, String>> _getMultipartHeaders() async {
-    final token = await _getAuthToken();
-    return {'Authorization': 'Bearer ${token ?? ''}'};
   }
 
   // File picker helper for PDF
@@ -226,7 +234,6 @@ class AdminNotificationService {
     }
   }
 
-  // Validation helpers
   bool isValidPdfFile(File file) {
     final extension = file.path.split('.').last.toLowerCase();
     return extension == 'pdf';
@@ -247,7 +254,7 @@ class AdminNotificationService {
   Future<bool> updateNotification(UpdateNotificationRequest request) async {
     try {
       final headers = await _getHeaders();
-      final response = await http.put(
+      final response = await http.post(
         Uri.parse('$_baseUrl/update'),
         headers: headers,
         body: jsonEncode(request.toJson()),
@@ -255,13 +262,13 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        return jsonResponse['success'];
+        return jsonResponse['Success'] == true || jsonResponse['success'] == true;
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
       } else {
         final jsonResponse = jsonDecode(response.body);
         throw Exception(
-          jsonResponse['message'] ?? 'Failed to update notification',
+          jsonResponse['Message'] ?? jsonResponse['message'] ?? 'Failed to update notification',
         );
       }
     } on SocketException {
@@ -283,13 +290,13 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        return jsonResponse['success'];
+        return jsonResponse['Success'] == true || jsonResponse['success'] == true;
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
       } else {
         final jsonResponse = jsonDecode(response.body);
         throw Exception(
-          jsonResponse['message'] ?? 'Failed to delete notification',
+          jsonResponse['Message'] ?? jsonResponse['message'] ?? 'Failed to delete notification',
         );
       }
     } on SocketException {
@@ -311,10 +318,12 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['success']) {
-          return AdminNotification.fromJson(jsonResponse['data']);
+        if (jsonResponse['Success'] == true || jsonResponse['success'] == true) {
+          return AdminNotification.fromJson(
+            jsonResponse['Data'] ?? jsonResponse['data'],
+          );
         } else {
-          throw Exception(jsonResponse['message']);
+          throw Exception(jsonResponse['Message'] ?? jsonResponse['message']);
         }
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
@@ -342,12 +351,13 @@ class AdminNotificationService {
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['success']) {
-          return (jsonResponse['data'] as List)
+        if (jsonResponse['Success'] == true || jsonResponse['success'] == true) {
+          final data = jsonResponse['Data'] ?? jsonResponse['data'];
+          return (data as List)
               .map((item) => UserForNotification.fromJson(item))
               .toList();
         } else {
-          throw Exception(jsonResponse['message']);
+          throw Exception(jsonResponse['Message'] ?? jsonResponse['message']);
         }
       } else if (response.statusCode == 401) {
         throw Exception('Unauthorized - Token expired');
@@ -363,81 +373,8 @@ class AdminNotificationService {
     }
   }
 
+  // Endpoint /types tidak ada di API — return list kosong agar filter "Semua" tetap berfungsi
   Future<List<NotificationTypeOption>> getNotificationTypes() async {
-    try {
-      final headers = await _getHeaders();
-      final response = await http.get(
-        Uri.parse('$_baseUrl/types'),
-        headers: headers,
-      );
-
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['success']) {
-          return (jsonResponse['data'] as List)
-              .map((item) => NotificationTypeOption.fromJson(item))
-              .toList();
-        } else {
-          throw Exception(jsonResponse['message']);
-        }
-      } else if (response.statusCode == 401) {
-        throw Exception('Unauthorized - Token expired');
-      } else {
-        throw Exception(
-          'Failed to load notification types: ${response.statusCode}',
-        );
-      }
-    } on SocketException {
-      throw Exception('No internet connection');
-    } on FormatException {
-      throw Exception('Invalid response format');
-    } catch (e) {
-      throw Exception('Error loading notification types: $e');
-    }
-  }
-
-  Future<bool> createLeaveNotification({
-    required String userId,
-    required String leaveId,
-    required String leaveType,
-    required DateTime startDate,
-    required DateTime endDate,
-    required String reason,
-  }) async {
-    try {
-      final headers = await _getHeaders();
-      final requestBody = {
-        'userId': userId,
-        'leaveId': leaveId,
-        'leaveType': leaveType,
-        'startDate': startDate.toIso8601String(),
-        'endDate': endDate.toIso8601String(),
-        'reason': reason,
-      };
-
-      final response = await http.post(
-        Uri.parse('$_baseUrl/create-leave'),
-        headers: headers,
-        body: jsonEncode(requestBody),
-      );
-
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        return jsonResponse['success'];
-      } else if (response.statusCode == 401) {
-        throw Exception('Unauthorized - Token expired');
-      } else {
-        final jsonResponse = jsonDecode(response.body);
-        throw Exception(
-          jsonResponse['message'] ?? 'Failed to create leave notification',
-        );
-      }
-    } on SocketException {
-      throw Exception('No internet connection');
-    } on FormatException {
-      throw Exception('Invalid response format');
-    } catch (e) {
-      throw Exception('Error creating leave notification: $e');
-    }
+    return [];
   }
 }
