@@ -27,7 +27,7 @@ import '../../Screen User/fitur/daily_activity_screen.dart';
 import '../../Screen User/fitur/org_approval_screen.dart';
 import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Services/notification_service.dart';
-import '../notifikasi_broadcast_screen.dart';
+// import '../notifikasi_broadcast_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Model
@@ -1156,15 +1156,15 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         ),
       ),
     ),
-    ServiceIconData(
-      icon: Icons.campaign_rounded,
-      label: 'Broadcast',
-      color: const Color(0xFF6366F1),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const BroadcastNotifScreen()),
-      ),
-    ),
+    // ServiceIconData(
+    //   icon: Icons.campaign_rounded,
+    //   label: 'Broadcast',
+    //   color: const Color(0xFF6366F1),
+    //   onTap: () => Navigator.push(
+    //     context,
+    //     MaterialPageRoute(builder: (_) => const BroadcastNotifScreen()),
+    //   ),
+    // ),
     ServiceIconData(
       icon: Icons.groups_rounded,
       label: 'Persetujuan',

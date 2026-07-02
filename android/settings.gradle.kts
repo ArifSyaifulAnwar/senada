@@ -25,6 +25,9 @@ plugins {
 
     // Kotlin plugin (upgrade ini)
     id("org.jetbrains.kotlin.android") version "2.3.10" apply false
+
+    // Google Services (Firebase)
+    id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
 include(":app")

@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SignInScreen extends StatefulWidget {
@@ -123,6 +124,9 @@ class _SignInScreenState extends State<SignInScreen>
                   responseData['FotoProfil'] ?? '',
                 );
                 await prefs.setString('Role', role);
+
+                // Upload FCM token ke backend setelah login berhasil
+                FcmService.uploadToken();
 
                 _navigateByRole(role);
               }

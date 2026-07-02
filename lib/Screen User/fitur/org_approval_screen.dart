@@ -12,7 +12,7 @@ import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io' show File;
-
+import '../../Services/attendance_outside_radius_service.dart';
 import '../../Services/asset_service.dart' hide ApiResponse;
 import 'asset_screen.dart';
 
@@ -195,6 +195,65 @@ class PendingOrgItem {
   );
 }
 
+class OutsideRadiusPendingItem {
+  final int id;
+  final String userId;
+  final String userName;
+  final String? userEmail;
+  final String attendanceType; // checkin / checkout
+  final double latitude;
+  final double longitude;
+  final double? distanceFromOffice;
+  final String? nearestOfficeName;
+  final double? detScore;
+  final double? bestDistance;
+  final DateTime submittedAt;
+
+  const OutsideRadiusPendingItem({
+    required this.id,
+    required this.userId,
+    required this.userName,
+    this.userEmail,
+    required this.attendanceType,
+    required this.latitude,
+    required this.longitude,
+    this.distanceFromOffice,
+    this.nearestOfficeName,
+    this.detScore,
+    this.bestDistance,
+    required this.submittedAt,
+  });
+
+  factory OutsideRadiusPendingItem.fromJson(Map<String, dynamic> j) {
+    return OutsideRadiusPendingItem(
+      id: ((j['Id'] ?? j['id'] ?? 0) as num).toInt(),
+      userId: j['UserId']?.toString() ?? j['userId']?.toString() ?? '',
+      userName: j['UserName']?.toString() ?? j['userName']?.toString() ?? '-',
+      userEmail: j['UserEmail']?.toString() ?? j['userEmail']?.toString(),
+      attendanceType:
+          j['AttendanceType']?.toString() ??
+          j['attendanceType']?.toString() ??
+          'checkin',
+      latitude: ((j['Latitude'] ?? j['latitude'] ?? 0) as num).toDouble(),
+      longitude: ((j['Longitude'] ?? j['longitude'] ?? 0) as num).toDouble(),
+      distanceFromOffice:
+          ((j['DistanceFromOffice'] ?? j['distanceFromOffice']) as num?)
+              ?.toDouble(),
+      nearestOfficeName:
+          j['NearestOfficeName']?.toString() ??
+          j['nearestOfficeName']?.toString(),
+      detScore: ((j['DetScore'] ?? j['detScore']) as num?)?.toDouble(),
+      bestDistance: ((j['BestDistance'] ?? j['bestDistance']) as num?)
+          ?.toDouble(),
+      submittedAt:
+          DateTime.tryParse(
+            (j['SubmittedAt'] ?? j['submittedAt'] ?? '').toString(),
+          ) ??
+          DateTime.now(),
+    );
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 class OrgApprovalScreen extends StatefulWidget {
   final String userId;
@@ -205,6 +264,8 @@ class OrgApprovalScreen extends StatefulWidget {
 
 class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
   List<PendingOrgItem> _items = [];
+  List<OutsideRadiusPendingItem> _outsideRadiusItems = [];
+  int _processingOutsideRadiusId = -1;
   bool _isLoading = true;
   String _errorMsg = '';
   int _processingId = -1;
@@ -294,6 +355,22 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
             }
           })
           .catchError((_) {}),
+      AttendanceOutsideRadiusService.getList(status: 'Pending')
+          .then((r) {
+            if (r['success'] == true && mounted) {
+              final rawList = (r['data'] as List?) ?? [];
+              setState(() {
+                _outsideRadiusItems = rawList
+                    .map(
+                      (e) => OutsideRadiusPendingItem.fromJson(
+                        Map<String, dynamic>.from(e),
+                      ),
+                    )
+                    .toList();
+              });
+            }
+          })
+          .catchError((_) {}),
     ]);
 
     all.sort((a, b) => b.daysWaiting.compareTo(a.daysWaiting));
@@ -350,7 +427,9 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     }
   }
 
-  int get totalPending => _items.length + _assetItems.length;
+  // int get totalPending => _items.length + _assetItems.length;
+  int get totalPending =>
+      _items.length + _assetItems.length + _outsideRadiusItems.length;
   // int get totalPending => _items.length;
 
   // ── Approve / Reject ──────────────────────────────────────────────────────
@@ -647,7 +726,10 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
       );
     }
     if (_errorMsg.isNotEmpty) return _buildError();
-    if (_items.isEmpty && _assetItems.isEmpty) return _buildEmpty();
+    // if (_items.isEmpty && _assetItems.isEmpty) return _buildEmpty();
+    if (_items.isEmpty && _assetItems.isEmpty && _outsideRadiusItems.isEmpty) {
+      return _buildEmpty();
+    }
 
     final grouped = <PendingType, List<PendingOrgItem>>{};
     for (final item in _items) {
@@ -667,8 +749,56 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
           _assetSectionHeader(_assetItems.length),
           const SizedBox(height: 8),
           ..._assetItems.map(_buildAssetCard),
+          const SizedBox(height: 8),
+        ],
+        if (_outsideRadiusItems.isNotEmpty) ...[
+          _outsideRadiusSectionHeader(_outsideRadiusItems.length),
+          const SizedBox(height: 8),
+          ..._outsideRadiusItems.map(_buildOutsideRadiusCard),
         ],
       ],
+    );
+  }
+
+  Widget _outsideRadiusSectionHeader(int count) {
+    const c = _outsideRadiusColor;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.location_off_rounded, size: 15, color: c),
+          const SizedBox(width: 8),
+          const Text(
+            'Absensi Luar Radius',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: c,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: c,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '$count',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -712,6 +842,256 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildOutsideRadiusCard(OutsideRadiusPendingItem item) {
+    const c = _outsideRadiusColor;
+    final isProcessing = _processingOutsideRadiusId == item.id;
+    final isCheckIn = item.attendanceType == 'checkin';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: const BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      item.userName.isNotEmpty
+                          ? item.userName[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.userName,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                      Text(
+                        DateFormat(
+                          'dd MMM yyyy, HH:mm',
+                        ).format(item.submittedAt),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isCheckIn ? Colors.blue[50] : Colors.red[50],
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isCheckIn ? Colors.blue[200]! : Colors.red[200]!,
+                    ),
+                  ),
+                  child: Text(
+                    isCheckIn ? 'Check In' : 'Check Out',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: isCheckIn ? Colors.blue[700] : Colors.red[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: c.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: c.withOpacity(0.12)),
+              ),
+              child: Column(
+                children: [
+                  _row(
+                    Icons.location_on_outlined,
+                    item.nearestOfficeName != null
+                        ? 'Terdekat: ${item.nearestOfficeName}'
+                        : 'Kantor terdekat tidak diketahui',
+                    c,
+                  ),
+                  if (item.distanceFromOffice != null) ...[
+                    const SizedBox(height: 5),
+                    _row(
+                      Icons.social_distance_rounded,
+                      'Jarak: ${item.distanceFromOffice!.toStringAsFixed(0)} meter dari kantor',
+                      c,
+                    ),
+                  ],
+                  if (item.detScore != null) ...[
+                    const SizedBox(height: 5),
+                    _row(
+                      Icons.face_retouching_natural_rounded,
+                      'Confidence wajah: ${(item.detScore! * 100).toStringAsFixed(1)}%',
+                      c,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (isProcessing)
+              const Center(
+                child: SizedBox(
+                  height: 24,
+                  width: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(c),
+                  ),
+                ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _rejectOutsideRadius(item),
+                      icon: const Icon(Icons.close_rounded, size: 14),
+                      label: const Text(
+                        'Tolak',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red[600],
+                        side: BorderSide(color: Colors.red[300]!),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _approveOutsideRadius(item),
+                      icon: const Icon(Icons.check_rounded, size: 14),
+                      label: const Text(
+                        'Setujui',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: c,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static const Color _outsideRadiusColor = Color(0xFFF97316);
+  Future<void> _approveOutsideRadius(OutsideRadiusPendingItem item) async {
+    final confirm = await _confirmDialog(
+      'Setujui absensi ${item.attendanceType == 'checkin' ? 'Check In' : 'Check Out'} '
+      '${item.userName} yang dilakukan di luar radius kantor?',
+      _outsideRadiusColor,
+    );
+    if (!confirm) return;
+
+    setState(() => _processingOutsideRadiusId = item.id);
+    try {
+      final res = await AttendanceOutsideRadiusService.approve(
+        id: item.id,
+        reviewedBy: widget.userId,
+      );
+      if (res['success'] == true) {
+        _snack('✅ Absensi berhasil disetujui', err: false);
+        setState(() => _outsideRadiusItems.removeWhere((i) => i.id == item.id));
+      } else {
+        _snack(res['message'] ?? 'Gagal menyetujui', err: true);
+      }
+    } catch (e) {
+      _snack('Gagal: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _processingOutsideRadiusId = -1);
+    }
+  }
+
+  Future<void> _rejectOutsideRadius(OutsideRadiusPendingItem item) async {
+    final reason = await _rejectDialog(item.userName);
+    if (reason == null) return;
+
+    setState(() => _processingOutsideRadiusId = item.id);
+    try {
+      final res = await AttendanceOutsideRadiusService.reject(
+        id: item.id,
+        reviewedBy: widget.userId,
+        reviewNotes: reason,
+      );
+      if (res['success'] == true) {
+        _snack('❌ Absensi ditolak, karyawan harus absen ulang', err: false);
+        setState(() => _outsideRadiusItems.removeWhere((i) => i.id == item.id));
+      } else {
+        _snack(res['message'] ?? 'Gagal menolak', err: true);
+      }
+    } catch (e) {
+      _snack('Gagal: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _processingOutsideRadiusId = -1);
+    }
   }
 
   Widget _buildAssetCard(AssetRequestModel item) {
@@ -1451,12 +1831,13 @@ class _DetailSheetState extends State<_DetailSheet> {
     }
 
     final ft = _fullTimeOff;
-    final hasTextLaporan = ft != null && (
-      (ft.hasilPerjalanan?.isNotEmpty == true) ||
-      (ft.laporanKepada?.isNotEmpty == true) ||
-      (ft.penyelesaian?.isNotEmpty == true)
-    );
-    final hasFileLaporan = ft != null &&
+    final hasTextLaporan =
+        ft != null &&
+        ((ft.hasilPerjalanan?.isNotEmpty == true) ||
+            (ft.laporanKepada?.isNotEmpty == true) ||
+            (ft.penyelesaian?.isNotEmpty == true));
+    final hasFileLaporan =
+        ft != null &&
         (ft.laporanFileName != null || ft.anggaranFileName != null);
     final laporanSubmitted = ft != null && ft.laporanSubmittedAt != null;
 

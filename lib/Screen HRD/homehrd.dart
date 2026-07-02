@@ -1,10 +1,12 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:absensikaryawan/Screen%20HRD/Home/homenyahrd.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 
 import 'package:absensikaryawan/Screen%20admin/Home/profileadmin.dart';
 import 'package:flutter/material.dart';
+import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Screen User/Screen HRD/hrd_listkaryawan.dart';
@@ -37,6 +39,22 @@ class _HomePageHRDState extends State<HomePageHRD> {
   void initState() {
     super.initState();
     _loadData = _loadUserEmail();
+    _handlePendingNotification();
+  }
+
+  void _handlePendingNotification() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final type = FcmService.consumePendingNavigation();
+      if (type == 'late_attendance' || type == 'belum_absen') {
+        setState(() => myCurrentIndex = 1); // tab Riwayat Absensi
+      } else if (type == 'reimbursement_new') {
+        setState(() => myCurrentIndex = 0); // pastikan di tab Home
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanHRDReimbursement()),
+        );
+      }
+    });
   }
 
   @override

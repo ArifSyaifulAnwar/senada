@@ -13,8 +13,7 @@ import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../../Services/dlservice.dart';
+import '../../Services/attendance_outside_radius_service.dart';
 
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -550,9 +549,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           children: [
             const Text(
               'Anda berada di luar radius kantor terdekat.\n\n'
-              'Apakah Anda sedang dinas luar? '
-              'Absensi Anda akan dicatat sebagai DINAS LUAR '
-              'dan memerlukan persetujuan atasan serta upload bukti kegiatan.',
+              'Absensi Anda akan diajukan ke Head HRD untuk disetujui '
+              'terlebih dahulu sebelum tercatat resmi.',
               style: TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 12),
@@ -564,7 +562,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                 border: Border.all(color: Colors.orange[200]!),
               ),
               child: const Text(
-                '⚠️ Bukti dinas luar wajib diupload setelah disetujui atasan.',
+                '⚠️ Jika ditolak, Anda harus melakukan absen ulang.',
                 style: TextStyle(fontSize: 12),
               ),
             ),
@@ -581,30 +579,35 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _submitAsDinasLuar(userId, imageBase64);
+              _submitOutsideRadiusApproval(userId, imageBase64);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.orange[700],
               foregroundColor: Colors.white,
             ),
-            child: const Text('Ya, Dinas Luar'),
+            child: const Text('Ajukan ke Head HRD'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _submitAsDinasLuar(String userId, String imageBase64) async {
+  Future<void> _submitOutsideRadiusApproval(
+    String userId,
+    String imageBase64,
+  ) async {
     setState(() {
       _isProcessingFace = true;
-      _faceVerificationMessage = '📋 Mengirim absensi dinas luar...';
+      _faceVerificationMessage = '📋 Mengirim pengajuan ke Head HRD...';
     });
 
-    final result = await DinasLuarService.submit(
+    final result = await AttendanceOutsideRadiusService.submit(
       userId: userId,
       attendanceType: _isCheckOut ? 'checkout' : 'checkin',
       latitude: _currentPosition?.latitude ?? 0,
       longitude: _currentPosition?.longitude ?? 0,
+      distanceFromOffice: _nearestOfficeLocation?['distance'],
+      nearestOfficeId: _nearestOfficeLocation?['id'],
       faceImageBase64: imageBase64,
     );
 
@@ -613,16 +616,16 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       _isProcessingFace = false;
       _isAttendanceSubmitted = result['success'] ?? false;
       _faceVerificationMessage = result['success'] == true
-          ? '✅ Absensi dinas luar dikirim!\nMenunggu persetujuan atasan.'
+          ? '✅ Pengajuan terkirim!\nMenunggu persetujuan Head HRD.'
           : '❌ ${result['message']}';
     });
 
     if (result['success'] == true) {
-      _showDinasLuarSuccessDialog(result['request_id']);
+      _showOutsideRadiusSuccessDialog(result['request_id']);
     }
   }
 
-  void _showDinasLuarSuccessDialog(int? requestId) {
+  void _showOutsideRadiusSuccessDialog(int? requestId) {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -633,7 +636,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           children: [
             Icon(Icons.pending_actions, color: Colors.orange, size: 28),
             SizedBox(width: 8),
-            Text('Dinas Luar Terkirim', style: TextStyle(fontSize: 16)),
+            Text('Menunggu Persetujuan', style: TextStyle(fontSize: 16)),
           ],
         ),
         content: Column(
@@ -641,7 +644,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Absensi dinas luar Anda berhasil dikirim.',
+              'Pengajuan absen luar radius Anda berhasil dikirim.',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
@@ -651,17 +654,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             const SizedBox(height: 12),
-            _stepInfo('1', 'Menunggu persetujuan atasan', Colors.orange),
+            _stepInfo('1', 'Menunggu persetujuan Head HRD', Colors.orange),
             const SizedBox(height: 6),
             _stepInfo(
               '2',
-              'Setelah disetujui, Anda akan diminta upload bukti',
-              Colors.blue,
-            ),
-            const SizedBox(height: 6),
-            _stepInfo(
-              '3',
-              'Setelah upload bukti, absensi tercatat otomatis',
+              'Setelah disetujui, absensi tercatat otomatis',
               Colors.green,
             ),
           ],

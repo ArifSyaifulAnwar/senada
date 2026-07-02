@@ -1,6 +1,3 @@
-// Screen User/fitur/all_employee_activities_screen.dart
-// ignore_for_file: use_build_context_synchronously, deprecated_member_use
-
 import 'dart:io' show File;
 import 'dart:typed_data';
 
@@ -38,10 +35,29 @@ class _AllEmployeeActivitiesScreenState
   String _searchQuery = '';
   String _categoryFilter = 'Semua';
 
+  // Null berarti semua tanggal. Data tetap langsung dimuat ketika halaman dibuka.
+  DateTime? _startDate;
+  DateTime? _endDate;
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  String get _dateFilterLabel {
+    if (_startDate == null || _endDate == null) {
+      return 'Semua tanggal';
+    }
+
+    if (DateUtils.isSameDay(_startDate, _endDate)) {
+      return _formatDate(_startDate!);
+    }
+
+    return '${_formatDate(_startDate!)} - ${_formatDate(_endDate!)}';
   }
 
   Future<void> _loadData() async {
@@ -50,7 +66,10 @@ class _AllEmployeeActivitiesScreenState
       _accessDenied = false;
     });
 
-    final result = await DailyActivityService.getAllActivitiesHRD();
+    final result = await DailyActivityService.getAllActivitiesHRD(
+      startDate: _startDate,
+      endDate: _endDate,
+    );
     if (!mounted) return;
 
     setState(() {
@@ -61,17 +80,66 @@ class _AllEmployeeActivitiesScreenState
     });
   }
 
+  Future<void> _pickDateRange() async {
+    final now = _dateOnly(DateTime.now());
+
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024, 1, 1),
+      lastDate: now,
+      initialDateRange: _startDate != null && _endDate != null
+          ? DateTimeRange(start: _startDate!, end: _endDate!)
+          : null,
+      helpText: 'Pilih rentang tanggal aktivitas',
+      confirmText: 'Terapkan',
+      cancelText: 'Batal',
+    );
+
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      _startDate = _dateOnly(picked.start);
+      _endDate = _dateOnly(picked.end);
+    });
+
+    // Saat pengguna memilih tanggal, data langsung dimuat ulang.
+    await _loadData();
+  }
+
+  Future<void> _clearDateFilter() async {
+    if (_startDate == null && _endDate == null) return;
+
+    setState(() {
+      _startDate = null;
+      _endDate = null;
+    });
+
+    // Saat filter dihapus, semua data yang berhak diakses dimuat kembali.
+    await _loadData();
+  }
+
   List<DailyActivityHRDItem> get _filteredActivities {
     return _activities.where((a) {
       final q = _searchQuery.toLowerCase();
+      final activityDate = _dateOnly(a.activityDate);
+
       final matchSearch =
           q.isEmpty ||
           a.employeeName.toLowerCase().contains(q) ||
           a.description.toLowerCase().contains(q) ||
           a.categoryLabel.toLowerCase().contains(q);
+
       final matchCategory =
           _categoryFilter == 'Semua' || a.categoryLabel == _categoryFilter;
-      return matchSearch && matchCategory;
+
+      // Filter lokal sebagai pengaman agar hasil tetap benar walaupun API lama
+      // belum menerapkan StartDate dan EndDate di query database.
+      final matchStart =
+          _startDate == null || !activityDate.isBefore(_dateOnly(_startDate!));
+      final matchEnd =
+          _endDate == null || !activityDate.isAfter(_dateOnly(_endDate!));
+
+      return matchSearch && matchCategory && matchStart && matchEnd;
     }).toList();
   }
 
@@ -213,6 +281,8 @@ class _AllEmployeeActivitiesScreenState
   }
 
   Widget _buildFilters() {
+    final hasDateFilter = _startDate != null || _endDate != null;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
@@ -231,12 +301,61 @@ class _AllEmployeeActivitiesScreenState
             ),
           ),
           const SizedBox(height: 10),
+
+          // Filter tanggal. Begitu rentang dipilih, _pickDateRange memuat data
+          // baru dari server secara otomatis.
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isLoading ? null : _pickDateRange,
+                  icon: const Icon(Icons.calendar_month_rounded, size: 18),
+                  label: Text(
+                    _dateFilterLabel,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF007AFF),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    side: const BorderSide(color: Color(0xFFBFDBFE)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+              if (hasDateFilter) ...[
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: 'Hapus filter tanggal',
+                  child: OutlinedButton(
+                    onPressed: _isLoading ? null : _clearDateFilter,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.redAccent,
+                      padding: const EdgeInsets.all(12),
+                      minimumSize: const Size(44, 44),
+                      side: BorderSide(color: Colors.red.shade100),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Icon(Icons.clear_rounded, size: 18),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 10),
           SizedBox(
             height: 36,
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: _categoryOptions.map((c) {
                 final sel = c == _categoryFilter;
+
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
@@ -251,6 +370,14 @@ class _AllEmployeeActivitiesScreenState
                   ),
                 );
               }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${_filteredActivities.length} aktivitas ditemukan',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             ),
           ),
         ],
@@ -301,7 +428,7 @@ class _AllEmployeeActivitiesScreenState
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF007AFF).withOpacity(0.1),
+                        color: const Color(0xFF007AFF).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(9),
                       ),
                       child: Icon(
@@ -408,7 +535,7 @@ class _AllEmployeeActivitiesScreenState
                             radius: 20,
                             backgroundColor: const Color(
                               0xFF007AFF,
-                            ).withOpacity(0.1),
+                            ).withValues(alpha: 0.1),
                             child: Text(
                               item.employeeName.isNotEmpty
                                   ? item.employeeName[0].toUpperCase()
@@ -576,7 +703,7 @@ class _AllEmployeeActivitiesScreenState
                       width: 38,
                       height: 38,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF007AFF).withOpacity(0.1),
+                        color: const Color(0xFF007AFF).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(

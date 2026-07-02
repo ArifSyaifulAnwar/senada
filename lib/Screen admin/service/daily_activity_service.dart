@@ -1,6 +1,7 @@
 // Services/daily_activity_service.dart
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,6 +14,7 @@ class DailyActivityService {
 
   static Future<void> _ensureToken({bool forceRefresh = false}) async {
     if (_accessToken != null && !forceRefresh) return;
+
     try {
       final response = await http
           .post(
@@ -21,6 +23,7 @@ class DailyActivityService {
             body: {'grant_type': 'password', 'password': 'ASN_DBS'},
           )
           .timeout(const Duration(seconds: 15));
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         _accessToken = data['access_token'];
@@ -42,15 +45,27 @@ class DailyActivityService {
     'Content-Type': 'application/json',
   };
 
-  /// Wrapper untuk semua POST request yang otomatis refresh token + retry sekali kalau 401
+  /// Format tanggal aman untuk API/SQL Server: yyyy-MM-dd.
+  /// Jangan kirim toIso8601String agar tidak terdampak jam atau timezone.
+  static String _apiDate(DateTime value) {
+    final date = DateTime(value.year, value.month, value.day);
+
+    return '${date.year.toString().padLeft(4, '0')}'
+        '-${date.month.toString().padLeft(2, '0')}'
+        '-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Wrapper POST dengan refresh token dan retry sekali bila 401.
   static Future<http.Response> _authedPost(String url, {String? body}) async {
     await _ensureToken();
+
     var response = await http
         .post(Uri.parse(url), headers: _headers(), body: body)
         .timeout(const Duration(seconds: 30));
 
     if (response.statusCode == 401) {
       await _ensureToken(forceRefresh: true);
+
       response = await http
           .post(Uri.parse(url), headers: _headers(), body: body)
           .timeout(const Duration(seconds: 30));
@@ -61,6 +76,7 @@ class DailyActivityService {
 
   static Future<Uint8List?> downloadAttachmentBytes(int attachmentId) async {
     final userId = await _userId();
+
     try {
       final response = await _authedPost(
         '$baseURL/api/dailyactivity/attachment/download',
@@ -69,12 +85,14 @@ class DailyActivityService {
           'AttachmentId': attachmentId,
         }),
       );
+
       if (response.statusCode == 200) return response.bodyBytes;
     } catch (_) {}
+
     return null;
   }
 
-  /// Ambil daftar kategori aktivitas (master data dari tabel) — endpoint POST
+  /// Ambil daftar kategori aktivitas dari master data.
   static Future<List<DailyActivityCategory>> getCategories() async {
     try {
       final response = await _authedPost(
@@ -84,13 +102,15 @@ class DailyActivityService {
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
         final List<dynamic> data = body['Data'] ?? body['data'] ?? [];
+
         return data.map((e) => DailyActivityCategory.fromJson(e)).toList();
       }
     } catch (_) {}
+
     return [];
   }
 
-  /// Ambil daftar lokasi kantor — endpoint POST di DailyActivityController
+  /// Ambil daftar lokasi kantor.
   static Future<List<OfficeLocation>> getOfficeLocations() async {
     try {
       final response = await _authedPost(
@@ -100,13 +120,15 @@ class DailyActivityService {
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
         final List<dynamic> data = body['data'] ?? body['Data'] ?? [];
+
         return data.map((e) => OfficeLocation.fromJson(e)).toList();
       }
     } catch (_) {}
+
     return [];
   }
 
-  /// Simpan aktivitas baru + lampiran (base64)
+  /// Simpan aktivitas baru dan lampirannya.
   static Future<bool> createActivity({
     required DateTime activityDate,
     required int categoryId,
@@ -143,7 +165,7 @@ class DailyActivityService {
     }
   }
 
-  /// Ambil semua aktivitas milik user yang login
+  /// Ambil semua aktivitas user yang sedang login.
   static Future<List<DailyActivityItem>> getMyActivities() async {
     final userId = await _userId();
 
@@ -156,13 +178,15 @@ class DailyActivityService {
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
         final List<dynamic> data = body['Data'] ?? body['data'] ?? [];
+
         return data.map((e) => DailyActivityItem.fromJson(e)).toList();
       }
     } catch (_) {}
+
     return [];
   }
 
-  /// Download isi file lampiran untuk preview
+  /// Download isi file lampiran untuk preview user sendiri.
   static Future<List<int>?> downloadAttachment(int attachmentId) async {
     final userId = await _userId();
 
@@ -177,22 +201,41 @@ class DailyActivityService {
 
       if (response.statusCode == 200) return response.bodyBytes;
     } catch (_) {}
+
     return null;
   }
-  // Services/daily_activity_service.dart — tambahkan method ini di dalam class DailyActivityService
 
-  /// Ambil semua aktivitas karyawan di company yang sama (khusus HRD/Direktur)
-  static Future<Map<String, dynamic>> getAllActivitiesHRD() async {
+  /// Ambil seluruh aktivitas perusahaan untuk HRD/Direktur.
+  ///
+  /// [startDate] dan [endDate] opsional. Jika keduanya null, API mengambil
+  /// seluruh data yang diizinkan. Jika terisi, API memfilter ActivityDate
+  /// secara inklusif (tanggal awal sampai tanggal akhir).
+  static Future<Map<String, dynamic>> getAllActivitiesHRD({
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final userId = await _userId();
+
+    final requestBody = <String, dynamic>{'RequestUserId': userId};
+
+    if (startDate != null) {
+      requestBody['StartDate'] = _apiDate(startDate);
+    }
+
+    if (endDate != null) {
+      requestBody['EndDate'] = _apiDate(endDate);
+    }
+
     try {
       final response = await _authedPost(
         '$baseURL/api/dailyactivity/getAllHRD',
-        body: json.encode({'RequestUserId': userId}),
+        body: json.encode(requestBody),
       );
 
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
-        final data = body['Data'] ?? {};
+        final data = body['Data'] ?? body['data'] ?? <String, dynamic>{};
+
         final bool denied = data['AccessDenied'] ?? false;
         final String? message = data['Message'] ?? body['Message'];
         final List<dynamic> activitiesJson = data['Activities'] ?? [];
@@ -206,16 +249,18 @@ class DailyActivityService {
         };
       }
     } catch (_) {}
+
     return {
       'accessDenied': true,
-      'message': 'Gagal memuat data',
+      'message': 'Gagal memuat data aktivitas.',
       'activities': <DailyActivityHRDItem>[],
     };
   }
 
-  /// Download attachment milik karyawan lain (khusus HRD/Direktur)
+  /// Download attachment milik karyawan lain, khusus HRD/Direktur.
   static Future<Uint8List?> downloadAttachmentBytesHRD(int attachmentId) async {
     final userId = await _userId();
+
     try {
       final response = await _authedPost(
         '$baseURL/api/dailyactivity/attachment/downloadHRD',
@@ -224,8 +269,10 @@ class DailyActivityService {
           'AttachmentId': attachmentId,
         }),
       );
+
       if (response.statusCode == 200) return response.bodyBytes;
     } catch (_) {}
+
     return null;
   }
 }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "746938916742",
+    "project_id": "senada-app",
+    "storage_bucket": "senada-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:746938916742:android:435366913fe68306e2d607",
+        "android_client_info": {
+          "package_name": "com.asn.sdb.senada"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAep-QkRRJGSm9e_iWejP8GUlU04mdP0LE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

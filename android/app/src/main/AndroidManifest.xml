@@ -65,6 +65,14 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- FCM: icon & warna notifikasi default -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="senada_high_importance" />
+
     </application>
 
     <queries>
