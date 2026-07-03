@@ -6,9 +6,12 @@ import 'config.dart';
 class CompanyCalendarEvent {
   final int id;
   final DateTime tanggal;
-  final String tipe; // 'LIBUR' | 'WFH' | 'INFO'
+  final String tipe;
   final String keterangan;
   final String createdBy;
+  final bool hasAttachment;
+  final String? attachmentFileName;
+  final String? attachmentContentType;
 
   const CompanyCalendarEvent({
     required this.id,
@@ -16,6 +19,9 @@ class CompanyCalendarEvent {
     required this.tipe,
     required this.keterangan,
     required this.createdBy,
+    this.hasAttachment = false,
+    this.attachmentFileName,
+    this.attachmentContentType,
   });
 
   factory CompanyCalendarEvent.fromJson(Map<String, dynamic> j) =>
@@ -27,26 +33,26 @@ class CompanyCalendarEvent {
         tipe: j['Tipe'] ?? j['tipe'] ?? '',
         keterangan: j['Keterangan'] ?? j['keterangan'] ?? '',
         createdBy: j['CreatedBy'] ?? j['created_by'] ?? '',
+        hasAttachment: j['HasAttachment'] ?? j['hasAttachment'] ?? false,
+        attachmentFileName: j['AttachmentFileName'] ?? j['attachmentFileName'],
+        attachmentContentType:
+            j['AttachmentContentType'] ?? j['attachmentContentType'],
       );
 
   bool get isLibur => tipe == 'LIBUR';
   bool get isWfh => tipe == 'WFH';
   bool get isInfo => tipe == 'INFO';
-
-  /// Apakah tipe ini block absen / tanggal merah
   bool get blocksAttendance => isLibur;
-
-  /// Apakah hanya informasi (tidak tanggal merah, tidak disable absen)
   bool get isInfoOnly => isInfo;
 
   Color get tipeColor {
     switch (tipe) {
       case 'LIBUR':
-        return const Color(0xFFEF4444); // merah
+        return const Color(0xFFEF4444);
       case 'WFH':
-        return const Color(0xFF10B981); // hijau
+        return const Color(0xFF10B981);
       case 'INFO':
-        return const Color(0xFF3B82F6); // biru
+        return const Color(0xFF3B82F6);
       default:
         return const Color(0xFF6B7280);
     }
@@ -352,9 +358,13 @@ class CompanyCalendarService {
   static Future<Map<String, dynamic>> save({
     int? id,
     required String tanggal,
-    required String tipe, // 'LIBUR' | 'WFH' | 'INFO'
+    required String tipe,
     required String keterangan,
     required String createdBy,
+    String? attachmentBase64,
+    String? attachmentFileName,
+    String? attachmentContentType,
+    bool removeAttachment = false,
   }) async {
     if (!['LIBUR', 'WFH', 'INFO'].contains(tipe)) {
       return {'success': false, 'message': 'Tipe tidak valid: $tipe'};
@@ -371,9 +381,13 @@ class CompanyCalendarService {
               'tipe': tipe,
               'keterangan': keterangan,
               'createdBy': createdBy,
+              'attachmentBase64': attachmentBase64,
+              'attachmentFileName': attachmentFileName,
+              'attachmentContentType': attachmentContentType,
+              'removeAttachment': removeAttachment,
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 60));
 
       final body = json.decode(res.body);
       final success = body['Success'] ?? body['success'] ?? false;
@@ -385,6 +399,24 @@ class CompanyCalendarService {
       };
     } catch (e) {
       return {'success': false, 'message': 'Koneksi bermasalah: $e'};
+    }
+  }
+
+  // Method baru — download bytes attachment untuk preview
+  static Future<List<int>?> downloadAttachment(int eventId) async {
+    try {
+      final token = await _getToken();
+      final res = await http
+          .get(
+            Uri.parse('$baseURL/api/calendar/attachment/view/$eventId'),
+            headers: {if (token != null) 'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (res.statusCode == 200) return res.bodyBytes;
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 

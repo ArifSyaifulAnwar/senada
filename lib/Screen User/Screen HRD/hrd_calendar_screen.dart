@@ -3,6 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../Services/company_calendar_service.dart';
+import 'dart:typed_data';
+import 'dart:convert' show base64Encode;
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io' show File;
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../../Services/web_download.dart';
 
 class HrdCalendarScreen extends StatefulWidget {
   const HrdCalendarScreen({super.key});
@@ -267,6 +276,12 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
       text: existing?.keterangan ?? '',
     );
 
+    Uint8List? newAttachmentBytes;
+    String? newAttachmentFileName;
+    String? newAttachmentContentType;
+    bool keepExistingAttachment = existing?.hasAttachment ?? false;
+    bool removeAttachment = false;
+
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -278,203 +293,567 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
             existing == null ? 'Tambah Event Kalender' : 'Edit Event',
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Tanggal ──────────────────────────────────────
-                const Text(
-                  'Tanggal',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: selectedDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
-                      builder: (_, child) => Theme(
-                        data: Theme.of(context).copyWith(
-                          colorScheme: const ColorScheme.light(
-                            primary: Color(0xFF6366F1),
-                          ),
-                        ),
-                        child: child!,
-                      ),
-                    );
-                    if (picked != null) setDlg(() => selectedDate = picked);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.calendar_today,
-                          size: 16,
-                          color: Color(0xFF6366F1),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          DateFormat(
-                            'EEEE, dd MMMM yyyy',
-                            'id_ID',
-                          ).format(selectedDate),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 320,
+              maxHeight: MediaQuery.of(context).size.height * 0.65,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Tanggal ──────────────────────────────────────
+                  const Text(
+                    'Tanggal',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-
-                // ── Tipe: LIBUR | WFH | INFO ──────────────────────
-                const Text(
-                  'Tipe',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: ['LIBUR', 'WFH', 'INFO'].map((tipe) {
-                    final sel = selectedTipe == tipe;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => setDlg(() => selectedTipe = tipe),
-                        child: Container(
-                          margin: const EdgeInsets.only(right: 6),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: sel
-                                ? _tipeColor(tipe).withOpacity(0.1)
-                                : const Color(0xFFF9FAFB),
-                            border: Border.all(
-                              color: sel
-                                  ? _tipeColor(tipe)
-                                  : const Color(0xFFE5E7EB),
-                              width: sel ? 2 : 1,
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2030),
+                        builder: (_, child) => Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: Color(0xFF6366F1),
                             ),
-                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: child!,
+                        ),
+                      );
+                      if (picked != null) setDlg(() => selectedDate = picked);
+                    },
+                    child: Container(
+                      width: 296,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.calendar_today,
+                            size: 16,
+                            color: Color(0xFF6366F1),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            DateFormat(
+                              'EEEE, dd MMMM yyyy',
+                              'id_ID',
+                            ).format(selectedDate),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── Tipe: LIBUR | WFH | INFO ──────────────────────
+                  const Text(
+                    'Tipe',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: 296,
+                    child: Row(
+                      children: ['LIBUR', 'WFH', 'INFO'].map((tipe) {
+                        final sel = selectedTipe == tipe;
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => setDlg(() => selectedTipe = tipe),
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 6),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: sel
+                                    ? _tipeColor(tipe).withOpacity(0.1)
+                                    : const Color(0xFFF9FAFB),
+                                border: Border.all(
+                                  color: sel
+                                      ? _tipeColor(tipe)
+                                      : const Color(0xFFE5E7EB),
+                                  width: sel ? 2 : 1,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    _tipeIcon(tipe),
+                                    size: 18,
+                                    color: sel ? _tipeColor(tipe) : Colors.grey,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    tipe,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: sel
+                                          ? _tipeColor(tipe)
+                                          : Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  // ── Info hint untuk tipe INFO ──────────────────────
+                  if (selectedTipe == 'INFO') ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: 296,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF3B82F6).withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFF3B82F6).withOpacity(0.2),
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 14,
+                            color: Color(0xFF3B82F6),
+                          ),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Info hanya sebagai pengumuman. Tidak mempengaruhi absen atau hari merah.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF3B82F6),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
+                  // ── Keterangan ────────────────────────────────────
+                  const Text(
+                    'Keterangan',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: 296,
+                    child: TextField(
+                      controller: keteranganCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        hintText: selectedTipe == 'INFO'
+                            ? 'Contoh: Ultah Direktur, Rapat All Hands...'
+                            : selectedTipe == 'WFH'
+                            ? 'Contoh: WFH seluruh karyawan...'
+                            : 'Contoh: Hari Raya Idul Fitri...',
+                        hintStyle: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF9CA3AF),
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFE5E7EB),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFE5E7EB),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF6366F1),
+                          ),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.all(12),
+                      ),
+                    ),
+                  ),
+
+                  // ── Lampiran (opsional) ────────────────────────────
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Lampiran (opsional)',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+
+                  Builder(
+                    builder: (_) {
+                      const boxW = 296.0;
+                      final isNewImage =
+                          newAttachmentBytes != null &&
+                          (newAttachmentContentType?.startsWith('image/') ??
+                              false);
+                      final hasExisting =
+                          keepExistingAttachment &&
+                          !removeAttachment &&
+                          newAttachmentBytes == null;
+
+                      // ── Ada file baru yang dipilih ──
+                      if (newAttachmentBytes != null) {
+                        return Container(
+                          width: boxW,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE5E7EB)),
+                            color: const Color(0xFFF9FAFB),
                           ),
                           child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(
-                                _tipeIcon(tipe),
-                                size: 18,
-                                color: sel ? _tipeColor(tipe) : Colors.grey,
+                              if (isNewImage)
+                                ClipRRect(
+                                  borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(12),
+                                  ),
+                                  child: Container(
+                                    width: boxW,
+                                    height: 160,
+                                    color: const Color(0xFFF3F4F6),
+                                    child: Image.memory(
+                                      newAttachmentBytes!,
+                                      width: boxW,
+                                      height: 160,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        width: boxW,
+                                        height: 160,
+                                        color: Colors.grey[200],
+                                        child: const Icon(
+                                          Icons.broken_image,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              else
+                                Container(
+                                  width: boxW,
+                                  height: 70,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFFEF3C7),
+                                    borderRadius: BorderRadius.vertical(
+                                      top: Radius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Center(
+                                    child: Icon(
+                                      Icons.picture_as_pdf_rounded,
+                                      size: 32,
+                                      color: Color(0xFFD97706),
+                                    ),
+                                  ),
+                                ),
+                              Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isNewImage
+                                          ? Icons.image_rounded
+                                          : Icons.insert_drive_file_rounded,
+                                      size: 15,
+                                      color: const Color(0xFF6366F1),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        newAttachmentFileName ?? 'File dipilih',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    GestureDetector(
+                                      onTap: () => setDlg(() {
+                                        newAttachmentBytes = null;
+                                        newAttachmentFileName = null;
+                                        newAttachmentContentType = null;
+                                      }),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red[50],
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          Icons.close_rounded,
+                                          size: 14,
+                                          color: Colors.red[600],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                tipe,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: sel ? _tipeColor(tipe) : Colors.grey,
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  10,
+                                  0,
+                                  10,
+                                  10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: () =>
+                                            _pickCalendarAttachment(
+                                              ctx,
+                                              setDlg,
+                                              (b, name, type) {
+                                                newAttachmentBytes = b;
+                                                newAttachmentFileName = name;
+                                                newAttachmentContentType = type;
+                                                removeAttachment = false;
+                                              },
+                                            ),
+                                        icon: const Icon(
+                                          Icons.swap_horiz_rounded,
+                                          size: 15,
+                                        ),
+                                        label: const Text(
+                                          'Ganti File',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(
+                                            0xFF6366F1,
+                                          ),
+                                          side: const BorderSide(
+                                            color: Color(0xFF6366F1),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 8,
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
+                        );
+                      }
 
-                // ── Info hint untuk tipe INFO ──────────────────────
-                if (selectedTipe == 'INFO') ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF3B82F6).withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: const Color(0xFF3B82F6).withOpacity(0.2),
-                      ),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          size: 14,
-                          color: Color(0xFF3B82F6),
-                        ),
-                        SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Info hanya sebagai pengumuman. Tidak mempengaruhi absen atau hari merah.',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF3B82F6),
+                      // ── Ada lampiran tersimpan dari sebelumnya (edit mode) ──
+                      if (hasExisting) {
+                        final existingIsImage =
+                            (existing?.attachmentContentType?.startsWith(
+                              'image/',
+                            ) ??
+                            false);
+                        return Container(
+                          width: boxW,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF3B82F6).withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: const Color(0xFF3B82F6).withOpacity(0.2),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    existingIsImage
+                                        ? Icons.image_rounded
+                                        : Icons.attach_file_rounded,
+                                    size: 16,
+                                    color: const Color(0xFF3B82F6),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      existing?.attachmentFileName ??
+                                          'Lampiran tersimpan',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () =>
+                                        setDlg(() => removeAttachment = true),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red[50],
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 14,
+                                        color: Colors.red[600],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _pickCalendarAttachment(
+                                        ctx,
+                                        setDlg,
+                                        (b, name, type) {
+                                          newAttachmentBytes = b;
+                                          newAttachmentFileName = name;
+                                          newAttachmentContentType = type;
+                                          removeAttachment = false;
+                                        },
+                                      ),
+                                      icon: const Icon(
+                                        Icons.swap_horiz_rounded,
+                                        size: 15,
+                                      ),
+                                      label: const Text(
+                                        'Ganti File',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: const Color(
+                                          0xFF3B82F6,
+                                        ),
+                                        side: const BorderSide(
+                                          color: Color(0xFF3B82F6),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      // ── Belum ada lampiran sama sekali ──
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _pickCalendarAttachment(
+                                ctx,
+                                setDlg,
+                                (b, name, type) {
+                                  newAttachmentBytes = b;
+                                  newAttachmentFileName = name;
+                                  newAttachmentContentType = type;
+                                  removeAttachment = false;
+                                },
+                              ),
+                              icon: const Icon(
+                                Icons.add_photo_alternate_outlined,
+                                size: 17,
+                              ),
+                              label: const Text(
+                                'Pilih Gambar / File',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF6366F1),
+                                side: const BorderSide(
+                                  color: Color(0xFF6366F1),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
-                const SizedBox(height: 16),
-
-                // ── Keterangan ────────────────────────────────────
-                const Text(
-                  'Keterangan',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: keteranganCtrl,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    hintText: selectedTipe == 'INFO'
-                        ? 'Contoh: Ultah Direktur, Rapat All Hands...'
-                        : selectedTipe == 'WFH'
-                        ? 'Contoh: WFH seluruh karyawan...'
-                        : 'Contoh: Hari Raya Idul Fitri...',
-                    hintStyle: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFF6366F1)),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.all(12),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           actions: [
@@ -495,6 +874,12 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                   tipe: selectedTipe,
                   keterangan: keteranganCtrl.text.trim(),
                   createdBy: _hrdUserId ?? '',
+                  attachmentBase64: newAttachmentBytes != null
+                      ? base64Encode(newAttachmentBytes!)
+                      : null,
+                  attachmentFileName: newAttachmentFileName,
+                  attachmentContentType: newAttachmentContentType,
+                  removeAttachment: removeAttachment,
                 );
                 if (result['success'] == true) {
                   _snack(
@@ -520,6 +905,116 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         ),
       ),
     );
+  }
+
+  Future<void> _pickCalendarAttachment(
+    BuildContext dialogCtx,
+    StateSetter setDlg,
+    void Function(Uint8List bytes, String fileName, String contentType)
+    onPicked,
+  ) async {
+    final source = await showModalBottomSheet<String>(
+      context: dialogCtx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 4),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(
+                'Pilih lampiran',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Divider(),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.photo_library, color: Colors.green[600]),
+              ),
+              title: const Text(
+                'Galeri / Foto',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () => Navigator.pop(dialogCtx, 'gallery'),
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.insert_drive_file, color: Colors.orange[600]),
+              ),
+              title: const Text(
+                'File Dokumen (PDF)',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () => Navigator.pop(dialogCtx, 'document'),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    Uint8List? bytes;
+    String? fileName;
+    String? contentType;
+
+    if (source == 'gallery') {
+      final img = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        imageQuality: 85,
+      );
+      if (img == null) return;
+      bytes = await img.readAsBytes();
+      fileName = img.name.isNotEmpty ? img.name : 'image.jpg';
+      final ext = fileName.contains('.')
+          ? fileName.split('.').last.toLowerCase()
+          : 'jpg';
+      contentType = 'image/$ext';
+    } else {
+      final r = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+        withData: true,
+      );
+      if (r == null || r.files.isEmpty) return;
+      bytes = r.files.first.bytes;
+      fileName = r.files.first.name;
+      final ext = fileName.contains('.')
+          ? fileName.split('.').last.toLowerCase()
+          : '';
+      contentType = ext == 'pdf' ? 'application/pdf' : 'image/$ext';
+    }
+
+    if (bytes == null) return;
+    if (bytes.length > 10 * 1024 * 1024) {
+      _snack('Ukuran maksimal 10MB', err: true);
+      return;
+    }
+
+    setDlg(() => onPicked(bytes!, fileName!, contentType!));
   }
 
   // ── DELETE ────────────────────────────────────────────────────────
@@ -754,8 +1249,14 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
   );
 
   Widget _buildPeriodCard(WorkPeriod period) {
-    final startLabel = DateFormat('dd MMM yyyy', 'id_ID').format(period.tanggalMulai);
-    final endLabel = DateFormat('dd MMM yyyy', 'id_ID').format(period.tanggalSelesai);
+    final startLabel = DateFormat(
+      'dd MMM yyyy',
+      'id_ID',
+    ).format(period.tanggalMulai);
+    final endLabel = DateFormat(
+      'dd MMM yyyy',
+      'id_ID',
+    ).format(period.tanggalSelesai);
     final monthName = _monthNames[period.bulan - 1];
     final isActive = _isActivePeriod(period);
     final stats = _calculateStats(period);
@@ -788,7 +1289,9 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF6366F1).withOpacity(isActive ? 0.15 : 0.08),
+                    color: const Color(
+                      0xFF6366F1,
+                    ).withOpacity(isActive ? 0.15 : 0.08),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -879,14 +1382,22 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete, size: 16, color: Color(0xFFEF4444)),
+                          Icon(
+                            Icons.delete,
+                            size: 16,
+                            color: Color(0xFFEF4444),
+                          ),
                           SizedBox(width: 8),
                           Text('Hapus'),
                         ],
                       ),
                     ),
                   ],
-                  child: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+                  child: const Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: Colors.grey,
+                  ),
                 ),
               ],
             ),
@@ -932,7 +1443,11 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                       ],
                     ),
                   ),
-                  Container(width: 1, height: 36, color: const Color(0xFFE5E7EB)),
+                  Container(
+                    width: 1,
+                    height: 36,
+                    color: const Color(0xFFE5E7EB),
+                  ),
                   // Total hari
                   Expanded(
                     child: Column(
@@ -955,7 +1470,11 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                       ],
                     ),
                   ),
-                  Container(width: 1, height: 36, color: const Color(0xFFE5E7EB)),
+                  Container(
+                    width: 1,
+                    height: 36,
+                    color: const Color(0xFFE5E7EB),
+                  ),
                   // Weekend
                   Expanded(
                     child: Column(
@@ -978,7 +1497,11 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                       ],
                     ),
                   ),
-                  Container(width: 1, height: 36, color: const Color(0xFFE5E7EB)),
+                  Container(
+                    width: 1,
+                    height: 36,
+                    color: const Color(0xFFE5E7EB),
+                  ),
                   // Hari libur
                   Expanded(
                     child: Column(
@@ -1585,6 +2108,45 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                           ),
                         ),
                       ],
+                      // ── Indikator lampiran (BARU) ──────────────
+                      if (event.hasAttachment) ...[
+                        const SizedBox(width: 6),
+                        GestureDetector(
+                          onTap: () => _previewCalendarAttachment(event),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF6366F1).withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                color: const Color(0xFF6366F1).withOpacity(0.2),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.attach_file,
+                                  size: 10,
+                                  color: const Color(0xFF6366F1),
+                                ),
+                                const SizedBox(width: 2),
+                                Text(
+                                  'Lampiran',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: const Color(0xFF6366F1),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -1641,6 +2203,138 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         ),
       ),
     );
+  }
+
+  Future<void> _previewCalendarAttachment(CompanyCalendarEvent event) async {
+    _snack('Membuka lampiran...');
+
+    final bytes = await CompanyCalendarService.downloadAttachment(event.id);
+    if (bytes == null || bytes.isEmpty) {
+      _snack('Gagal memuat lampiran', err: true);
+      return;
+    }
+
+    final fileName = event.attachmentFileName ?? 'lampiran';
+    final contentType = event.attachmentContentType ?? '';
+    final isImg =
+        contentType.startsWith('image/') ||
+        [
+          '.jpg',
+          '.jpeg',
+          '.png',
+        ].any((e) => fileName.toLowerCase().endsWith(e));
+    final isPdf =
+        contentType == 'application/pdf' ||
+        fileName.toLowerCase().endsWith('.pdf');
+
+    if (!mounted) return;
+
+    if (isImg) {
+      showDialog(
+        context: context,
+        barrierColor: Colors.black87,
+        builder: (ctx) {
+          final screenW = MediaQuery.of(ctx).size.width;
+          final screenH = MediaQuery.of(ctx).size.height;
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.zero,
+            child: Stack(
+              children: [
+                GestureDetector(
+                  onTap: () => Navigator.of(ctx).pop(),
+                  child: Container(
+                    width: screenW,
+                    height: screenH,
+                    color: Colors.transparent,
+                  ),
+                ),
+                Center(
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: screenW * 0.95,
+                      maxHeight: screenH * 0.85,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF1F2937),
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(12),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  fileName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () => Navigator.of(ctx).pop(),
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Flexible(
+                          child: ClipRRect(
+                            borderRadius: const BorderRadius.vertical(
+                              bottom: Radius.circular(12),
+                            ),
+                            child: InteractiveViewer(
+                              minScale: 0.5,
+                              maxScale: 5.0,
+                              child: Image.memory(
+                                Uint8List.fromList(bytes),
+                                fit: BoxFit.contain,
+                                width: screenW * 0.95,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } else if (isPdf) {
+      if (kIsWeb) {
+        previewFileWeb(Uint8List.fromList(bytes), fileName);
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+        await file.writeAsBytes(bytes);
+        final result = await OpenFile.open(file.path);
+        if (result.type != ResultType.done) {
+          _snack('Tidak dapat membuka PDF: ${result.message}', err: true);
+        }
+      }
+    } else {
+      _snack('Tipe file tidak didukung untuk preview', err: true);
+    }
   }
 
   // ── TAB 2: KALENDER GRID ──────────────────────────────────────────
