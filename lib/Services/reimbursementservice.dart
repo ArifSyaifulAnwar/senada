@@ -208,7 +208,14 @@ class ReimbursementService {
 
   /// Submit reimbursement + upload semua attachment secara berurutan.
   /// Mengembalikan (success, message, failedFiles, reimbursementId).
-  Future<({bool success, String message, List<String> failedFiles, int? reimbursementId})>
+  Future<
+    ({
+      bool success,
+      String message,
+      List<String> failedFiles,
+      int? reimbursementId,
+    })
+  >
   submitWithAttachments({
     required String userId,
     required String title,
@@ -217,6 +224,7 @@ class ReimbursementService {
     required DateTime expenseDate,
     String? description,
     required List<PendingAttachmentFile> attachments,
+    String? financeTargetUserId,
   }) async {
     // 1. Submit reimbursement (file pertama → field lama untuk compat)
     final first = attachments.first;
@@ -232,6 +240,7 @@ class ReimbursementService {
       receiptFileName: first.fileName,
       receiptContentType: first.mimeType,
       status: 'pending',
+      financeTargetUserId: financeTargetUserId,
     );
 
     if (!submitResult.success || submitResult.reimbursementId == null) {
@@ -418,6 +427,26 @@ class ReimbursementService {
     return {'Authorization': 'Bearer $token'};
   }
 
+  Future<List<FinanceUserOption>> getFinanceUsers() async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/finance-users'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+        if (jsonData['success'] == true) {
+          final List<dynamic> dataList = jsonData['data'] ?? [];
+          return dataList.map((e) => FinanceUserOption.fromJson(e)).toList();
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   // Submit reimbursement dengan file
   // Submit reimbursement dengan file - Updated version
   Future<ReimbursementResponse> submitReimbursement({
@@ -427,32 +456,29 @@ class ReimbursementService {
     required double amount,
     required DateTime expenseDate,
     String? description,
-
-    // Dipakai Flutter Web dan mobile terbaru: file dikirim sebagai bytes.
     Uint8List? receiptBytes,
     String? receiptFileName,
     String? receiptContentType,
-
-    // Tetap disediakan agar pemanggil lama di Android/iOS tidak langsung rusak.
     File? receiptFile,
-
     String status = 'pending',
+    String? financeTargetUserId,
   }) async {
     try {
       final uri = Uri.parse('$baseURL/api/asn/reimbursement/submit');
       final request = http.MultipartRequest('POST', uri);
 
-      // Add headers
       final headers = await _getMultipartHeaders();
       request.headers.addAll(headers);
 
-      // Add fields
       request.fields['userId'] = userId;
       request.fields['title'] = title;
       request.fields['category'] = category;
       request.fields['amount'] = amount.toString();
       request.fields['expenseDate'] = expenseDate.toIso8601String();
       request.fields['status'] = status;
+      if (financeTargetUserId != null && financeTargetUserId.isNotEmpty) {
+        request.fields['financeTargetUserId'] = financeTargetUserId; // ← BARU
+      }
 
       if (description != null && description.isNotEmpty) {
         request.fields['description'] = description;

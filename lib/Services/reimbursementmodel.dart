@@ -45,7 +45,8 @@ class ReimbursementData {
   final String? paymentNotes;
 
   final int daysSinceSubmitted;
-
+  final String? financeTargetUserId;
+  final String? financeTargetUserName;
   const ReimbursementData({
     required this.id,
     required this.userId,
@@ -79,6 +80,8 @@ class ReimbursementData {
     this.paymentProofUploadedBy,
     this.paymentNotes,
     required this.daysSinceSubmitted,
+    this.financeTargetUserId,
+    this.financeTargetUserName,
   });
 
   factory ReimbursementData.fromJson(Map<String, dynamic> json) {
@@ -217,6 +220,20 @@ class ReimbursementData {
           alternatives: const ['days_since_submitted'],
         ),
       ),
+      financeTargetUserId: _nullableString(
+        _read(
+          json,
+          'financeTargetUserId',
+          alternatives: const ['finance_target_user_id'],
+        ),
+      ),
+      financeTargetUserName: _nullableString(
+        _read(
+          json,
+          'financeTargetUserName',
+          alternatives: const ['finance_target_user_name'],
+        ),
+      ),
     );
   }
 
@@ -289,6 +306,8 @@ class ReimbursementData {
     DateTime? paymentProofUploadedAt,
     String? paymentProofUploadedBy,
     String? paymentNotes,
+    String? financeTargetUserId, // ← BARU
+    String? financeTargetUserName,
   }) {
     return ReimbursementData(
       id: id,
@@ -326,6 +345,9 @@ class ReimbursementData {
           paymentProofUploadedBy ?? this.paymentProofUploadedBy,
       paymentNotes: paymentNotes ?? this.paymentNotes,
       daysSinceSubmitted: daysSinceSubmitted,
+      financeTargetUserId: financeTargetUserId ?? this.financeTargetUserId,
+      financeTargetUserName:
+          financeTargetUserName ?? this.financeTargetUserName,
     );
   }
 }
@@ -415,6 +437,40 @@ class ReimbursementCategory {
       description: _nullableString(_read(json, 'description')),
     );
   }
+}
+
+class FinanceUserOption {
+  final String userId;
+  final String name;
+  final String? jobPosition;
+
+  const FinanceUserOption({
+    required this.userId,
+    required this.name,
+    this.jobPosition,
+  });
+
+  factory FinanceUserOption.fromJson(Map<String, dynamic> json) {
+    return FinanceUserOption(
+      userId: _financeUserRead(json, 'userId') ?? '',
+      name: _financeUserRead(json, 'name') ?? '',
+      jobPosition: _financeUserRead(json, 'jobPosition'),
+    );
+  }
+}
+
+// Helper baca JSON case-insensitive, karena API bisa balikin
+// PascalCase (UserId, Name) atau camelCase (userId, name).
+String? _financeUserRead(Map<String, dynamic> json, String key) {
+  if (json.containsKey(key)) return json[key]?.toString();
+
+  final pascal = '${key[0].toUpperCase()}${key.substring(1)}';
+  if (json.containsKey(pascal)) return json[pascal]?.toString();
+
+  final lowerKeys = {
+    for (final entry in json.entries) entry.key.toLowerCase(): entry.value,
+  };
+  return lowerKeys[key.toLowerCase()]?.toString();
 }
 
 class ReimbursementStatistics {

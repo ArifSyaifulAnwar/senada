@@ -69,20 +69,12 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     if (!mounted) return;
     setState(() => _isCheckingRole = true);
     try {
-      final tok = await _getToken();
-      final res = await http.post(
-        Uri.parse('$baseURL/api/asn/reimbursement/is-head-finance'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $tok',
-        },
-        body: json.encode({'userId': userId}),
-      );
-      if (res.statusCode == 200 && mounted) {
-        final body = json.decode(res.body) as Map<String, dynamic>;
-        setState(() => _isHeadFinance = body['isHeadFinance'] == true);
-      }
-    } catch (_) {}
+      final financeUsers = await _reimbursementService.getFinanceUsers();
+      final isFinanceStaff = financeUsers.any((u) => u.userId == userId);
+      if (mounted) setState(() => _isHeadFinance = isFinanceStaff);
+    } catch (_) {
+      // Kalau gagal load, biarkan tombol tidak muncul (aman, fail-closed)
+    }
     if (mounted) setState(() => _isCheckingRole = false);
   }
 
@@ -1070,6 +1062,46 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                   ),
                 ],
               ),
+              // Badge "Ditujukan ke Finance" — hanya tampil kalau data
+              // punya finance_target_user_id terisi (fitur pilih Finance
+              // saat submit). Reimbursement lama tanpa target tidak
+              // menampilkan badge ini sama sekali.
+              if (item.financeTargetUserName != null &&
+                  item.financeTargetUserName!.trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B5CF6).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.account_balance_wallet_outlined,
+                        size: 14,
+                        color: Color(0xFF8B5CF6),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Ditujukan ke: ${item.financeTargetUserName}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF7C3AED),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

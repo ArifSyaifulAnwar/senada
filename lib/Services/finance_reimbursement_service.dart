@@ -4,7 +4,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:absensikaryawan/Services/config.dart';
-import 'package:absensikaryawan/Services/reimbursementservice.dart' show ReimbursementAttachmentMeta;
+import 'package:absensikaryawan/Services/reimbursementservice.dart'
+    show ReimbursementAttachmentMeta;
 import 'package:http/http.dart' as http;
 
 import '../models/finance_reimbursement_model.dart';
@@ -21,12 +22,17 @@ class FinanceReimbursementService {
   static Future<List<FinanceReimbursementItem>> getList({
     String? status,
     String? searchKeyword,
+    String? viewerUserId, // ← BARU
   }) async {
     final response = await http
         .post(
           Uri.parse('$baseURL/api/asn/reimbursement/finance/list'),
           headers: await _headers(),
-          body: jsonEncode({'status': status, 'searchKeyword': searchKeyword}),
+          body: jsonEncode({
+            'status': status,
+            'searchKeyword': searchKeyword,
+            'viewerUserId': viewerUserId, // ← BARU
+          }),
         )
         .timeout(_timeout);
 
@@ -54,7 +60,6 @@ class FinanceReimbursementService {
         )
         .toList();
   }
-  
 
   /// Bukti yang diunggah user ketika mengajukan reimbursement.
   static Future<FinanceReimbursementAttachment> downloadUserReceipt({

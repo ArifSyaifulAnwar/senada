@@ -62,7 +62,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   List<Map<String, dynamic>> _officeLocations = [];
   Map<String, dynamic>? _nearestOfficeLocation;
   Position? _currentPosition;
-
+  bool _isLocationKnown = false;
   Timer? _locationTimer;
   StreamSubscription<Position>? _positionStream;
 
@@ -507,8 +507,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           _showSuccessDialog(verifyResult);
         } else {
           final reason = verifyResult['message'] ?? "Verifikasi gagal";
-          if (reason.contains('luar radius') ||
-              reason.contains('radius kantor')) {
+          final lowerReason = reason.toLowerCase();
+          if (lowerReason.contains('radius')) {
             _handleOutsideRadius(userId, imageBase64);
           } else {
             _scheduleAutoRetry(reason);
@@ -758,7 +758,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Future<void> _getCurrentLocation() async {
     if (!mounted) return;
-    setState(() => _isLoadingLocation = true);
+    setState(() {
+      _isLoadingLocation = true;
+      _isLocationKnown = false; // ← BARU: reset saat mulai load ulang
+    });
     _locationTimer?.cancel();
 
     try {
@@ -809,11 +812,17 @@ class _AbsensiScreenState extends State<AbsensiScreen>
                     "(${distance.toStringAsFixed(0)}m dari batas "
                     "${allowedRadius.toStringAsFixed(0)}m)";
           _isLoadingLocation = false;
+          // Lokasi sudah didapat, WALAUPUN di luar radius.
+          // Tombol tetap aktif — server yang akan memutuskan apakah
+          // ini butuh persetujuan Head HRD atau tidak.
+          _isLocationKnown = true; // ← BARU
         });
       } else {
         setState(() {
           _locationInfo = "Tidak ada kantor terdekat yang ditemukan";
           _isLoadingLocation = false;
+          _isLocationKnown =
+              true; // ← BARU: tetap izinkan absen, server yang validasi
         });
       }
     } catch (e) {
@@ -822,6 +831,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         setState(() {
           _locationInfo = "Error: ${e.toString()}";
           _isLoadingLocation = false;
+          _isLocationKnown =
+              false; // ← BARU: kalau GPS error/permission ditolak, tetap block
         });
       }
     }
@@ -902,6 +913,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     setState(() {
       _locationInfo = "Memuat lokasi...";
       _isLoadingLocation = true;
+      _isLocationKnown = false; // ← BARU
       _capturedImage = null;
       _capturedImageBytes = null;
       _isAttendanceSubmitted = false;
@@ -1348,7 +1360,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     final bool isInside =
         _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
     final bool canTakePhoto =
-        !_isProcessingFace && !_isAutoRetrying && isInside && !_isWeekend;
+        !_isProcessingFace &&
+        !_isAutoRetrying &&
+        _isLocationKnown &&
+        !_isWeekend;
 
     final String label = _isProcessingFace
         ? "Memproses..."
@@ -1359,6 +1374,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               ? "Absen (Lembur)"
               : _isWfh
               ? "Absen WFH"
+              : !isInside
+              ? "Ambil Foto (Luar Radius)"
               : "Ambil Foto"
         : _isAttendanceSubmitted
         ? "Foto Ulang"
@@ -1369,6 +1386,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         : _isWfh
         ? const Color(0xFF10B981)
         : _isHariLibur
+        ? Colors.orange[700]!
+        : !isInside
         ? Colors.orange[700]!
         : accentColor;
 
@@ -1750,8 +1769,14 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isInside =
         _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
+    // canTakePhoto sekarang pakai _isLocationKnown, bukan isInside.
+    // Artinya tombol tetap aktif walau di luar radius — server yang
+    // memutuskan apakah butuh persetujuan Head HRD atau tidak.
     final bool canTakePhoto =
-        !_isProcessingFace && !_isAutoRetrying && isInside && !_isWeekend;
+        !_isProcessingFace &&
+        !_isAutoRetrying &&
+        _isLocationKnown &&
+        !_isWeekend;
 
     final String label = _isProcessingFace
         ? "Memproses..."
@@ -1762,6 +1787,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               ? "Absen (Lembur)"
               : _isWfh
               ? "Absen WFH"
+              : !isInside
+              ? "Ambil Foto (Luar Radius)"
               : "Ambil Foto"
         : _isAttendanceSubmitted
         ? "Foto Ulang"
@@ -1772,6 +1799,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         : _isWfh
         ? const Color(0xFF10B981)
         : _isHariLibur
+        ? Colors.orange[700]!
+        : !isInside
         ? Colors.orange[700]!
         : (_isCheckOut ? Colors.red[500]! : Colors.blue[600]!);
 

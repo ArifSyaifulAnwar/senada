@@ -3,7 +3,8 @@
 
 import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dart';
 import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.dart';
-import 'package:absensikaryawan/Services/reimbursementservice.dart' show ReimbursementAttachmentMeta;
+import 'package:absensikaryawan/Services/reimbursementservice.dart'
+    show ReimbursementAttachmentMeta;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io' show File;
@@ -2102,7 +2103,8 @@ class _AdminReimbursementDetailModalState
       final response = await widget.adminService.reviewReimbursement(
         id: widget.item.id,
         status: status,
-        reviewedBy: widget.currentAdminName,
+        reviewedBy:
+            widget.currentAdminId, // sebelumnya: widget.currentAdminName
         reviewNotes: _reviewNotesController.text.trim().isNotEmpty
             ? _reviewNotesController.text.trim()
             : null,
@@ -2124,32 +2126,6 @@ class _AdminReimbursementDetailModalState
     }
   }
 
-  Future<void> _markAsPaid() async {
-    setState(() {
-      _isProcessing = true;
-    });
-
-    try {
-      final response = await widget.adminService.markReimbursementPaid(
-        id: widget.item.id,
-        paidBy: widget.currentAdminName,
-      );
-
-      if (response.success) {
-        Navigator.of(context).pop();
-        widget.onActionCompleted();
-        _showSuccessSnackBar(response.message);
-      } else {
-        _showErrorSnackBar(response.message);
-      }
-    } catch (e) {
-      _showErrorSnackBar('Terjadi kesalahan: $e');
-    } finally {
-      setState(() {
-        _isProcessing = false;
-      });
-    }
-  }
 
   void _showSuccessSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2310,18 +2286,22 @@ class _AdminReimbursementDetailModalState
 
                   // Bukti pembayaran user diambil melalui POST lalu
                   // dirender dari response bytes menggunakan Image.memory.
-                  if (widget.item.hasReceipt || _attachmentMetas.isNotEmpty || _isLoadingAttachmentList) ...[
+                  if (widget.item.hasReceipt ||
+                      _attachmentMetas.isNotEmpty ||
+                      _isLoadingAttachmentList) ...[
                     _buildInfoSection(
                       _attachmentMetas.length > 1
                           ? 'Bukti Pembayaran (${_attachmentMetas.length} file)'
                           : 'Bukti Pembayaran',
                       [
-                        if (_attachmentMetas.isEmpty && !_isLoadingAttachmentList)
+                        if (_attachmentMetas.isEmpty &&
+                            !_isLoadingAttachmentList)
                           _buildDetailRow(
                             'File',
                             widget.item.receiptFilename ?? 'receipt',
                           ),
-                        if (_attachmentMetas.isEmpty && !_isLoadingAttachmentList)
+                        if (_attachmentMetas.isEmpty &&
+                            !_isLoadingAttachmentList)
                           const SizedBox(height: 12),
                         _buildAttachmentsViewer(),
                       ],
@@ -2524,20 +2504,35 @@ class _AdminReimbursementDetailModalState
         ],
       );
     } else if (widget.item.status == 'approved') {
-      return SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: _markAsPaid,
-          icon: const Icon(Icons.payments),
-          label: const Text('Tandai Sebagai Dibayar'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF3B82F6),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+      // Pembayaran hanya boleh diselesaikan Head Finance dengan bukti
+      // transfer (lihat halaman Finance Reimbursement). Admin sengaja
+      // TIDAK diberi tombol mark-as-paid langsung di sini, supaya tidak
+      // ada jalur yang melewati validasi Head Finance + wajib bukti.
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7ED),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFFDBA74)),
+        ),
+        child: const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.info_outline, color: Color(0xFFB45309), size: 20),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Reimbursement ini sudah disetujui dan menunggu pembayaran. '
+                'Pembayaran hanya bisa diselesaikan oleh Head Finance melalui '
+                'menu Finance dengan mengunggah bukti transfer.',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Color(0xFF9A3412),
+                  height: 1.4,
+                ),
+              ),
             ),
-          ),
+          ],
         ),
       );
     } else {

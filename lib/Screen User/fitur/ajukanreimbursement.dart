@@ -30,7 +30,9 @@ class _HalamanAjukanReimbursementState
   final TextEditingController _jumlahController = TextEditingController();
   final TextEditingController _tanggalController = TextEditingController();
   final TextEditingController _keteranganController = TextEditingController();
-
+  List<FinanceUserOption> _financeUsers = [];
+  String? _selectedFinanceUserId;
+  bool _isLoadingFinanceUsers = true;
   final ReimbursementService _reimbursementService = ReimbursementService();
 
   String _selectedCategory = '';
@@ -47,6 +49,101 @@ class _HalamanAjukanReimbursementState
     _initializeNotifications();
     _loadUserData();
     _loadCategories();
+    _loadFinanceUsers();
+  }
+
+  Future<void> _loadFinanceUsers() async {
+    try {
+      final users = await _reimbursementService.getFinanceUsers();
+      setState(() {
+        _financeUsers = users;
+        _isLoadingFinanceUsers = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingFinanceUsers = false);
+      _showErrorSnackBar('Gagal memuat daftar Finance');
+    }
+  }
+
+  Widget _buildFinanceTargetDropdown() {
+    if (_isLoadingFinanceUsers) {
+      return Container(
+        height: 60,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.grey[100],
+        ),
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+
+    if (_financeUsers.isEmpty) {
+      return Container(
+        height: 60,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.grey[100],
+          border: Border.all(color: Colors.red[300]!),
+        ),
+        child: Center(
+          child: Text(
+            'Gagal memuat daftar Finance',
+            style: TextStyle(color: Colors.red[600]),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: DropdownButtonFormField<String>(
+        value: _selectedFinanceUserId,
+        decoration: _buildModernInputDecoration(
+          labelText: 'Tujukan ke Finance',
+          prefixIcon: Icon(
+            Icons.account_balance_wallet_outlined,
+            color: Colors.grey[600],
+            size: 20,
+          ),
+        ),
+        items: _financeUsers.map((f) {
+          return DropdownMenuItem<String>(
+            value: f.userId,
+            child: Text(
+              f.jobPosition != null && f.jobPosition!.isNotEmpty
+                  ? '${f.name} (${f.jobPosition})'
+                  : f.name,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: _getResponsiveFontSize(context, 14),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          );
+        }).toList(),
+        onChanged: (value) {
+          setState(() => _selectedFinanceUserId = value);
+        },
+        validator: (value) {
+          if (value == null || value.isEmpty) {
+            return 'Pilih tujuan Finance';
+          }
+          return null;
+        },
+        dropdownColor: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[600]),
+      ),
+    );
   }
 
   static Future<String?> _getToken() async {
@@ -361,6 +458,7 @@ class _HalamanAjukanReimbursementState
             ? null
             : _keteranganController.text.trim(),
         attachments: _selectedFiles,
+        financeTargetUserId: _selectedFinanceUserId, // ← BARU
       );
 
       setState(() {
@@ -694,7 +792,9 @@ class _HalamanAjukanReimbursementState
       }
 
       if (bytes.length > maxSize) {
-        _showErrorSnackBar('Ukuran file terlalu besar. Maksimal 10MB per file.');
+        _showErrorSnackBar(
+          'Ukuran file terlalu besar. Maksimal 10MB per file.',
+        );
         return;
       }
 
@@ -728,12 +828,14 @@ class _HalamanAjukanReimbursementState
       }
 
       setState(() {
-        _selectedFiles.add(PendingAttachmentFile(
-          bytes: bytes,
-          fileName: fileName,
-          extension: extension,
-          mimeType: mimeType,
-        ));
+        _selectedFiles.add(
+          PendingAttachmentFile(
+            bytes: bytes,
+            fileName: fileName,
+            extension: extension,
+            mimeType: mimeType,
+          ),
+        );
       });
     } catch (e) {
       _showErrorSnackBar('Gagal memproses file: $e');
@@ -787,7 +889,8 @@ class _HalamanAjukanReimbursementState
     return _formKey.currentState?.validate() == true &&
         _selectedFiles.isNotEmpty &&
         _selectedDate != null &&
-        _selectedCategory.isNotEmpty;
+        _selectedCategory.isNotEmpty &&
+        _selectedFinanceUserId != null;
   }
 
   // =============================================
@@ -1376,6 +1479,10 @@ class _HalamanAjukanReimbursementState
                         ),
                       ),
                     ),
+                    SizedBox(height: _getResponsivePadding(context, 16)),
+
+                    // Finance Target Dropdown
+                    _buildFinanceTargetDropdown(),
                     SizedBox(height: _getResponsivePadding(context, 24)),
 
                     // File Upload Section
