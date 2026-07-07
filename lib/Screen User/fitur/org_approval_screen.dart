@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'dart:io' show File;
 import '../../Services/attendance_outside_radius_service.dart';
 import '../../Services/asset_service.dart' hide ApiResponse;
+import '../../Services/inventory_service.dart' hide ApiResponse;
 import 'asset_screen.dart';
 
 // ── Tipe pending ──────────────────────────────────────────────────────────────
@@ -272,6 +273,8 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
   PendingType? _processingType;
   List<AssetRequestModel> _assetItems = [];
   int _processingAssetId = -1;
+  List<InventoryRequestModel> _inventoryRequestItems = [];
+  int _processingInventoryRequestId = -1;
 
   @override
   void initState() {
@@ -355,6 +358,15 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
             }
           })
           .catchError((_) {}),
+
+      // ── Persetujuan Inventaris (Head HRD only) ───────────────────────────
+      InventoryService.getPendingInventoryRequests(userId: widget.userId)
+          .then((r) {
+            if (r.success && r.data != null && mounted) {
+              setState(() => _inventoryRequestItems = r.data!);
+            }
+          })
+          .catchError((_) {}),
       AttendanceOutsideRadiusService.getList(status: 'Pending')
           .then((r) {
             if (r['success'] == true && mounted) {
@@ -427,9 +439,58 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     }
   }
 
+  Future<void> _approveInventoryRequest(InventoryRequestModel item) async {
+    final confirm = await _confirmDialog(
+      'Setujui peminjaman "${item.namaBarang}" oleh ${item.userName}?',
+      const Color(0xFF0EA5E9),
+    );
+    if (!confirm) return;
+    await _doInventoryRequestAction(item, 'Approved', null);
+  }
+
+  Future<void> _rejectInventoryRequest(InventoryRequestModel item) async {
+    final reason = await _rejectDialog(item.userName ?? '-');
+    if (reason == null) return;
+    await _doInventoryRequestAction(item, 'Rejected', reason);
+  }
+
+  Future<void> _doInventoryRequestAction(
+    InventoryRequestModel item,
+    String status,
+    String? reason,
+  ) async {
+    setState(() => _processingInventoryRequestId = item.id);
+    try {
+      final res = await InventoryService.reviewInventoryRequest(
+        id: item.id,
+        reviewedBy: widget.userId,
+        status: status,
+        rejectionReason: reason,
+      );
+      if (res.success) {
+        _snack(
+          status == 'Approved' ? '✅ Berhasil disetujui' : '❌ Berhasil ditolak',
+          err: false,
+        );
+        setState(
+          () => _inventoryRequestItems.removeWhere((i) => i.id == item.id),
+        );
+      } else {
+        _snack(res.message, err: true);
+      }
+    } catch (e) {
+      _snack('Gagal: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _processingInventoryRequestId = -1);
+    }
+  }
+
   // int get totalPending => _items.length + _assetItems.length;
   int get totalPending =>
-      _items.length + _assetItems.length + _outsideRadiusItems.length;
+      _items.length +
+      _assetItems.length +
+      _outsideRadiusItems.length +
+      _inventoryRequestItems.length;
   // int get totalPending => _items.length;
 
   // ── Approve / Reject ──────────────────────────────────────────────────────
@@ -727,7 +788,10 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
     }
     if (_errorMsg.isNotEmpty) return _buildError();
     // if (_items.isEmpty && _assetItems.isEmpty) return _buildEmpty();
-    if (_items.isEmpty && _assetItems.isEmpty && _outsideRadiusItems.isEmpty) {
+    if (_items.isEmpty &&
+        _assetItems.isEmpty &&
+        _outsideRadiusItems.isEmpty &&
+        _inventoryRequestItems.isEmpty) {
       return _buildEmpty();
     }
 
@@ -749,6 +813,12 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
           _assetSectionHeader(_assetItems.length),
           const SizedBox(height: 8),
           ..._assetItems.map(_buildAssetCard),
+          const SizedBox(height: 8),
+        ],
+        if (_inventoryRequestItems.isNotEmpty) ...[
+          _inventoryRequestSectionHeader(_inventoryRequestItems.length),
+          const SizedBox(height: 8),
+          ..._inventoryRequestItems.map(_buildInventoryRequestCard),
           const SizedBox(height: 8),
         ],
         if (_outsideRadiusItems.isNotEmpty) ...[
@@ -840,6 +910,278 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _inventoryRequestSectionHeader(int count) {
+    const c = Color(0xFF0EA5E9);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.devices_other_rounded, size: 15, color: c),
+          const SizedBox(width: 8),
+          const Text(
+            'Persetujuan Inventaris',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: c,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: c,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '$count',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInventoryRequestCard(InventoryRequestModel item) {
+    const c = Color(0xFF0EA5E9);
+    final isProcessing = _processingInventoryRequestId == item.id;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: const BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      (item.userName?.isNotEmpty == true)
+                          ? item.userName![0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.userName ?? '-',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                      if (item.userJob?.isNotEmpty == true)
+                        Text(
+                          item.userJob!,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF6B7280),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Text(
+                    DateFormat('dd MMM').format(item.createdAt),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: c.withOpacity(0.04),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: c.withOpacity(0.12)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.devices_other_rounded,
+                        size: 12,
+                        color: c.withOpacity(0.8),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${item.namaBarang}${item.kodeAset != null ? " (${item.kodeAset})" : ""}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: c,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.date_range_rounded,
+                        size: 12,
+                        color: c.withOpacity(0.7),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Durasi: ${DateFormat('dd MMM yyyy').format(item.tanggalPinjam)} '
+                          '→ ${DateFormat('dd MMM yyyy').format(item.tanggalRencanaKembali)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF374151),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (item.catatan?.isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  item.catatan!,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF374151),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            if (isProcessing)
+              const Center(
+                child: SizedBox(
+                  height: 24,
+                  width: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(c),
+                  ),
+                ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _rejectInventoryRequest(item),
+                      icon: const Icon(Icons.close_rounded, size: 14),
+                      label: const Text(
+                        'Tolak',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red[600],
+                        side: BorderSide(color: Colors.red[300]!),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _approveInventoryRequest(item),
+                      icon: const Icon(Icons.check_rounded, size: 14),
+                      label: const Text(
+                        'Setujui',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: c,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }

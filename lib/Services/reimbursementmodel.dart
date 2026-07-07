@@ -243,6 +243,7 @@ class ReimbursementData {
     const knownStatuses = {
       'pending',
       'pending_finance',
+      'revision',
       'approved',
       'rejected',
       'paid',
@@ -264,6 +265,8 @@ class ReimbursementData {
         return const Color(0xFFF59E0B);
       case 'pending_finance':
         return const Color(0xFF8B5CF6);
+      case 'revision':
+        return const Color(0xFFF97316);
       case 'approved':
         return const Color(0xFF10B981);
       case 'rejected':
@@ -689,6 +692,8 @@ String _statusLabel(String value) {
       return 'Menunggu Persetujuan HRD';
     case 'pending_finance':
       return 'Menunggu Persetujuan Finance';
+    case 'revision':
+      return 'Perlu Revisi';
     case 'approved':
       return 'Menunggu Pembayaran Finance';
     case 'rejected':

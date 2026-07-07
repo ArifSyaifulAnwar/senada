@@ -1069,6 +1069,121 @@ class ReimbursementService {
     }
   }
 
+  /// Update reimbursement yang statusnya "revision" (HRD minta revisi) lalu
+  /// balikkan ke status pending. Tidak menangani file — attachment lama/baru
+  /// dikelola lewat uploadAttachment/deleteAttachment yang sudah ada.
+  Future<ReimbursementResponse> updateReimbursement({
+    required int id,
+    required String userId,
+    required String title,
+    required String category,
+    required double amount,
+    required DateTime expenseDate,
+    String? description,
+    String? financeTargetUserId,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final requestBody = {
+        'id': id,
+        'userId': userId,
+        'title': title,
+        'category': category,
+        'amount': amount,
+        'expenseDate': expenseDate.toIso8601String(),
+        'description': description,
+        'financeTargetUserId': financeTargetUserId,
+      };
+
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/update'),
+        headers: headers,
+        body: json.encode(requestBody),
+      );
+
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+        return ReimbursementResponse.fromJson(jsonData);
+      } else {
+        final errorData = json.decode(response.body);
+        return ReimbursementResponse(
+          success: false,
+          message: errorData['message'] ?? 'Terjadi kesalahan',
+        );
+      }
+    } catch (e) {
+      return ReimbursementResponse(
+        success: false,
+        message: 'Terjadi kesalahan: $e',
+      );
+    }
+  }
+
+  /// Update reimbursement (mode edit & ajukan ulang) + upload attachment baru
+  /// (kalau ada). Attachment lama yang tidak dihapus dibiarkan apa adanya.
+  Future<
+    ({bool success, String message, List<String> failedFiles})
+  >
+  updateWithAttachments({
+    required int id,
+    required String userId,
+    required String title,
+    required String category,
+    required double amount,
+    required DateTime expenseDate,
+    String? description,
+    String? financeTargetUserId,
+    required List<PendingAttachmentFile> newAttachments,
+    int startingSortOrder = 1,
+  }) async {
+    final updateResult = await updateReimbursement(
+      id: id,
+      userId: userId,
+      title: title,
+      category: category,
+      amount: amount,
+      expenseDate: expenseDate,
+      description: description,
+      financeTargetUserId: financeTargetUserId,
+    );
+
+    if (!updateResult.success) {
+      return (
+        success: false,
+        message: updateResult.message,
+        failedFiles: <String>[],
+      );
+    }
+
+    final failedFiles = <String>[];
+    for (int i = 0; i < newAttachments.length; i++) {
+      final file = newAttachments[i];
+      final result = await uploadAttachment(
+        reimbursementId: id,
+        userId: userId,
+        fileBytes: file.bytes,
+        fileName: file.fileName,
+        contentType: file.mimeType,
+        sortOrder: startingSortOrder + i,
+      );
+
+      if (!result.success) {
+        failedFiles.add(file.fileName);
+      }
+    }
+
+    if (failedFiles.isEmpty) {
+      return (success: true, message: updateResult.message, failedFiles: <String>[]);
+    }
+
+    return (
+      success: true,
+      message:
+          '${updateResult.message} (${failedFiles.length} file gagal diupload)',
+      failedFiles: failedFiles,
+    );
+  }
+
   // Mark as paid
   Future<ReimbursementResponse> markAsPaid({
     required int id,

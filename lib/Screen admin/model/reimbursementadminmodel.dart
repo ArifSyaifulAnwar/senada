@@ -35,6 +35,10 @@ class AdminReimbursementData {
   final String? receiptFilename;
   final String? receiptContentType;
 
+  // Finance tujuan yang dipilih karyawan saat mengajukan reimbursement.
+  final String? financeTargetUserId;
+  final String? financeTargetUserName;
+
   // ===== FIELD BARU NOMOR 7: BUKTI TRANSFER FINANCE =====
   final bool hasPaymentProof;
   final String? paymentProofFilename;
@@ -71,6 +75,8 @@ class AdminReimbursementData {
     required this.hasReceipt,
     this.receiptFilename,
     this.receiptContentType,
+    this.financeTargetUserId,
+    this.financeTargetUserName,
     required this.hasPaymentProof,
     this.paymentProofFilename,
     this.paymentProofContentType,
@@ -147,6 +153,7 @@ class AdminReimbursementData {
         const knownStatuses = {
           'pending',
           'pending_finance',
+          'revision',
           'approved',
           'rejected',
           'paid',
@@ -190,6 +197,20 @@ class AdminReimbursementData {
           json,
           'receiptContentType',
           alternatives: const ['receipt_content_type'],
+        ),
+      ),
+      financeTargetUserId: _adminNullableString(
+        _adminRead(
+          json,
+          'financeTargetUserId',
+          alternatives: const ['finance_target_user_id'],
+        ),
+      ),
+      financeTargetUserName: _adminNullableString(
+        _adminRead(
+          json,
+          'financeTargetUserName',
+          alternatives: const ['finance_target_user_name'],
         ),
       ),
 
@@ -251,6 +272,8 @@ class AdminReimbursementData {
         return const Color(0xFFF59E0B);
       case 'pending_finance':
         return const Color(0xFF8B5CF6);
+      case 'revision':
+        return const Color(0xFFF97316);
       case 'approved':
         return const Color(0xFF10B981);
       case 'rejected':
@@ -282,6 +305,9 @@ class AdminReimbursementData {
   bool get hasTransferProof =>
       hasPaymentProof ||
       (paymentProofFilename != null && paymentProofFilename!.trim().isNotEmpty);
+
+  bool get hasFinanceTarget =>
+      financeTargetUserName != null && financeTargetUserName!.trim().isNotEmpty;
 }
 
 class AdminResponse {
@@ -609,6 +635,8 @@ String _adminStatusLabel(String value) {
       return 'Menunggu Persetujuan HRD';
     case 'pending_finance':
       return 'Menunggu Persetujuan Finance';
+    case 'revision':
+      return 'Perlu Revisi';
     case 'approved':
       return 'Menunggu Pembayaran Finance';
     case 'rejected':

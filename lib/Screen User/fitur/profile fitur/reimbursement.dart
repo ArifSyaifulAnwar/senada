@@ -445,6 +445,16 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     if (result == true) _loadReimbursements();
   }
 
+  void _navigateToEditReimbursement(ReimbursementData item) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HalamanAjukanReimbursement(existingItem: item),
+      ),
+    );
+    if (result == true) _loadReimbursements();
+  }
+
   // ── Finance Panel Button ──────────────────────────────────────────────
   Widget _buildFinancePanelButton() {
     // Tidak tampil: sedang loading role, atau bukan Head Finance
@@ -1096,6 +1106,64 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
                             color: Color(0xFF7C3AED),
                           ),
                           overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              // Kalau HRD minta revisi: tampilkan alasannya + tombol edit
+              // supaya karyawan bisa perbaiki dan ajukan ulang.
+              if (item.normalizedStatus == 'revision') ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF97316).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFFF97316).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item.reviewNotes != null &&
+                          item.reviewNotes!.trim().isNotEmpty) ...[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.info_outline,
+                              size: 16,
+                              color: Color(0xFFC2410C),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Alasan Revisi: ${item.reviewNotes!.trim()}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFC2410C),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _navigateToEditReimbursement(item),
+                          icon: const Icon(Icons.edit_note, size: 18),
+                          label: const Text('Edit & Ajukan Ulang'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFC2410C),
+                            side: const BorderSide(color: Color(0xFFF97316)),
+                          ),
                         ),
                       ),
                     ],

@@ -118,6 +118,105 @@ class AssetReportEmployeeModel {
       );
 }
 
+class AssetReportHeaderModel {
+  final String? karyawanUserId;
+  final String? headHrdUserId;
+  final String namaKaryawan;
+  final String? jobPosition;
+  final String? organization;
+  final int tahun;
+  final int bulan;
+  final DateTime tanggalMulai;
+  final DateTime tanggalSelesai;
+  final String? periodeKeterangan;
+  final String? namaHeadHrd;
+
+  const AssetReportHeaderModel({
+    this.karyawanUserId,
+    this.headHrdUserId,
+    required this.namaKaryawan,
+    this.jobPosition,
+    this.organization,
+    required this.tahun,
+    required this.bulan,
+    required this.tanggalMulai,
+    required this.tanggalSelesai,
+    this.periodeKeterangan,
+    this.namaHeadHrd,
+  });
+
+  factory AssetReportHeaderModel.fromJson(Map<String, dynamic> j) =>
+      AssetReportHeaderModel(
+        karyawanUserId: (j['KaryawanUserId'] ?? j['karyawanUserId'])
+            ?.toString(),
+        headHrdUserId: (j['HeadHrdUserId'] ?? j['headHrdUserId'])?.toString(),
+        namaKaryawan: (j['NamaKaryawan'] ?? j['namaKaryawan'] ?? '')
+            .toString(),
+        jobPosition: (j['JobPosition'] ?? j['jobPosition'])?.toString(),
+        organization: (j['Organization'] ?? j['organization'])?.toString(),
+        tahun: ((j['Tahun'] ?? j['tahun'] ?? 0) as num).toInt(),
+        bulan: ((j['Bulan'] ?? j['bulan'] ?? 0) as num).toInt(),
+        tanggalMulai:
+            DateTime.tryParse(
+              (j['TanggalMulai'] ?? j['tanggalMulai'] ?? '').toString(),
+            ) ??
+            DateTime.now(),
+        tanggalSelesai:
+            DateTime.tryParse(
+              (j['TanggalSelesai'] ?? j['tanggalSelesai'] ?? '').toString(),
+            ) ??
+            DateTime.now(),
+        periodeKeterangan: (j['PeriodeKeterangan'] ?? j['periodeKeterangan'])
+            ?.toString(),
+        namaHeadHrd: (j['NamaHeadHrd'] ?? j['namaHeadHrd'])?.toString(),
+      );
+}
+
+class AssetReportDetailItemModel {
+  final int id;
+  final DateTime approvedAt;
+  final String namaBarang;
+  final String? kategori;
+  final String jenis; // dipinjam | diambil
+  final int jumlah;
+  final String? officeName;
+  final String status;
+
+  const AssetReportDetailItemModel({
+    required this.id,
+    required this.approvedAt,
+    required this.namaBarang,
+    this.kategori,
+    required this.jenis,
+    required this.jumlah,
+    this.officeName,
+    required this.status,
+  });
+
+  factory AssetReportDetailItemModel.fromJson(Map<String, dynamic> j) =>
+      AssetReportDetailItemModel(
+        id: ((j['Id'] ?? j['id'] ?? 0) as num).toInt(),
+        approvedAt:
+            DateTime.tryParse(
+              (j['ApprovedAt'] ?? j['approvedAt'] ?? '').toString(),
+            ) ??
+            DateTime.now(),
+        namaBarang: (j['NamaBarang'] ?? j['namaBarang'] ?? '').toString(),
+        kategori: (j['Kategori'] ?? j['kategori'])?.toString(),
+        jenis: (j['Jenis'] ?? j['jenis'] ?? '').toString(),
+        jumlah: ((j['Jumlah'] ?? j['jumlah'] ?? 0) as num).toInt(),
+        officeName: (j['OfficeName'] ?? j['officeName'])?.toString(),
+        status: (j['Status'] ?? j['status'] ?? '').toString(),
+      );
+}
+
+class AssetReportDetailResult {
+  final AssetReportHeaderModel header;
+  final List<AssetReportDetailItemModel> details;
+
+  const AssetReportDetailResult({required this.header, required this.details});
+}
+
 class AssetItemModel {
   final int id;
   final String namaBarang;
@@ -1095,6 +1194,51 @@ class AssetService {
         msg = (_get(body, 'message') ?? msg) as String;
       } catch (_) {}
       return ApiResponse(success: false, message: msg);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  /// Ambil data laporan sebagai JSON (tanpa generate dokumen) — supaya HRD
+  /// bisa lihat detail transaksi karyawan langsung di app tanpa unduh PDF.
+  static Future<ApiResponse<AssetReportDetailResult>> getReportDetail({
+    required String userId,
+    required int workPeriodId,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/report-detail'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId, 'workPeriodId': workPeriodId}),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final success = (_get(body, 'success') ?? false) == true;
+      final message = (_get(body, 'message') ?? '') as String;
+
+      AssetReportDetailResult? result;
+      final data = _get(body, 'data');
+      if (data is Map) {
+        final h = data['header'];
+        final d = data['details'];
+        if (h is Map) {
+          result = AssetReportDetailResult(
+            header: AssetReportHeaderModel.fromJson(
+              Map<String, dynamic>.from(h),
+            ),
+            details: d is List
+                ? d
+                      .map(
+                        (e) => AssetReportDetailItemModel.fromJson(
+                          e as Map<String, dynamic>,
+                        ),
+                      )
+                      .toList()
+                : [],
+          );
+        }
+      }
+
+      return ApiResponse(success: success, message: message, data: result);
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }

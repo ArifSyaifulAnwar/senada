@@ -129,13 +129,20 @@ class _AssetScreenState extends State<AssetScreen>
   bool _isLoadingReportEmployees = false;
   bool _isGeneratingReport = false;
 
-  // Inventaris (Head HRD only)
+  // Inventaris (Head HRD only — kelola & assign)
   List<InventoryItemModel> _inventoryItems = [];
   bool _isLoadingInventory = false;
   String? _inventoryStatusFilter; // null = semua
   int? _exportingItemId;
 
-  int get _tabCount => 2 + (_canManageStock ? 1 : 0) + (_isHeadHrd ? 2 : 0);
+  // Ajukan Peminjaman Inventaris (semua user)
+  List<InventoryItemModel> _availableInventoryItems = [];
+  bool _isLoadingAvailableInventory = false;
+  List<InventoryRequestModel> _myInventoryRequests = [];
+  bool _isLoadingMyInventoryRequests = false;
+  int? _downloadingInventoryLetterId;
+
+  int get _tabCount => 4 + (_canManageStock ? 1 : 0) + (_isHeadHrd ? 2 : 0);
 
   @override
   void initState() {
@@ -162,7 +169,34 @@ class _AssetScreenState extends State<AssetScreen>
       _loadCatalog(),
       _loadMyRequests(),
       _loadOffices(),
+      _loadAvailableInventoryItems(),
+      _loadMyInventoryRequests(),
     ]);
+  }
+
+  Future<void> _loadAvailableInventoryItems() async {
+    setState(() => _isLoadingAvailableInventory = true);
+    final res = await InventoryService.getAllItems(
+      userId: widget.userId,
+      status: 'Tersedia',
+    );
+    if (mounted) {
+      setState(() {
+        if (res.success && res.data != null) _availableInventoryItems = res.data!;
+        _isLoadingAvailableInventory = false;
+      });
+    }
+  }
+
+  Future<void> _loadMyInventoryRequests() async {
+    setState(() => _isLoadingMyInventoryRequests = true);
+    final res = await InventoryService.getMyRequests(userId: widget.userId);
+    if (mounted) {
+      setState(() {
+        if (res.success && res.data != null) _myInventoryRequests = res.data!;
+        _isLoadingMyInventoryRequests = false;
+      });
+    }
   }
 
   Future<void> _loadOffices() async {
@@ -271,6 +305,41 @@ class _AssetScreenState extends State<AssetScreen>
         _isLoadingReportEmployees = false;
       });
     }
+  }
+
+  Future<void> _showReportDetail(AssetReportEmployeeModel emp) async {
+    if (_selectedReportPeriod == null) {
+      _snack('Pilih periode terlebih dahulu', err: true);
+      return;
+    }
+    final period = _selectedReportPeriod!;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) =>
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+
+    final res = await AssetService.getReportDetail(
+      userId: emp.userId,
+      workPeriodId: period.id,
+    );
+
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+
+    if (!res.success || res.data == null) {
+      _snack(res.message, err: true);
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AssetReportDetailSheet(result: res.data!),
+    );
   }
 
   Future<void> _generateReport() async {
@@ -641,6 +710,8 @@ class _AssetScreenState extends State<AssetScreen>
       _loadCategories(),
       _loadCatalog(),
       _loadMyRequests(),
+      _loadAvailableInventoryItems(),
+      _loadMyInventoryRequests(),
       if (_canManageStock) _loadAllItems(),
       if (_isHeadHrd) _loadReportPeriods(),
       if (_isHeadHrd) _loadInventoryItems(),
@@ -663,6 +734,63 @@ class _AssetScreenState extends State<AssetScreen>
         },
       ),
     );
+  }
+
+  void _openInventoryRequestForm({InventoryItemModel? presetItem}) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _InventoryRequestForm(
+        userId: widget.userId,
+        availableItems: _availableInventoryItems,
+        presetItem: presetItem,
+        onSubmitted: () {
+          _loadAvailableInventoryItems();
+          _loadMyInventoryRequests();
+        },
+      ),
+    );
+  }
+
+  Future<void> _downloadInventoryLetter(InventoryRequestModel req) async {
+    setState(() => _downloadingInventoryLetterId = req.id);
+    final res = await InventoryService.generateHandoverDoc(
+      inventoryItemId: req.inventoryItemId,
+      userId: widget.userId,
+    );
+    if (!mounted) return;
+    setState(() => _downloadingInventoryLetterId = null);
+
+    if (!res.success || res.data == null) {
+      _snack(res.message, err: true);
+      return;
+    }
+
+    final fileName =
+        'BA_Serah_Terima_${(req.kodeAset ?? req.inventoryItemId.toString()).replaceAll('/', '_')}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+    final bytes = res.data!;
+
+    try {
+      if (kIsWeb) {
+        downloadFileWeb(bytes, fileName);
+        _snack('Surat berhasil diunduh');
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsBytes(bytes);
+        final result = await OpenFile.open(file.path);
+        if (result.type != ResultType.done) {
+          _snack(
+            'File tersimpan, tapi tidak bisa dibuka otomatis: ${result.message}',
+          );
+        } else {
+          _snack('Surat berhasil dibuat');
+        }
+      }
+    } catch (e) {
+      _snack('Gagal menyimpan file: $e', err: true);
+    }
   }
 
   void _openStockForm({AssetItemModel? existing}) {
@@ -864,6 +992,8 @@ class _AssetScreenState extends State<AssetScreen>
                   tabs: [
                     const Tab(text: 'Katalog'),
                     const Tab(text: 'Pengajuan Saya'),
+                    const Tab(text: 'Ajukan Inventaris'),
+                    const Tab(text: 'Inventaris Saya'),
                     if (_canManageStock) const Tab(text: 'Kelola Stok'),
                     if (_isHeadHrd) const Tab(text: 'Laporan'),
                     if (_isHeadHrd) const Tab(text: 'Inventaris'),
@@ -878,6 +1008,8 @@ class _AssetScreenState extends State<AssetScreen>
           children: [
             _buildCatalogTab(),
             _buildMyRequestsTab(),
+            _buildAvailableInventoryTab(),
+            _buildMyInventoryRequestsTab(),
             if (_canManageStock) _buildStockManagementTab(),
             if (_isHeadHrd) _buildReportTab(),
             if (_isHeadHrd) _buildInventoryTab(),
@@ -887,17 +1019,19 @@ class _AssetScreenState extends State<AssetScreen>
       floatingActionButton: AnimatedBuilder(
         animation: _tabController!,
         builder: (_, __) {
-          final stockTabIndex = _canManageStock ? 2 : -1;
+          const ajukanInventarisTabIndex = 2;
+          const inventarisSayaTabIndex = 3;
+          final stockTabIndex = _canManageStock ? 4 : -1;
           final reportTabIndex = _isHeadHrd
-              ? (2 + (_canManageStock ? 1 : 0))
+              ? (4 + (_canManageStock ? 1 : 0))
               : -1;
           final inventoryTabIndex = _isHeadHrd
-              ? (3 + (_canManageStock ? 1 : 0))
+              ? (5 + (_canManageStock ? 1 : 0))
               : -1;
           final idx = _tabController!.index;
 
-          if (idx == reportTabIndex) {
-            // Tab Laporan tidak butuh FAB — generate via tombol di body
+          if (idx == reportTabIndex || idx == inventarisSayaTabIndex) {
+            // Tab ini tidak butuh FAB — aksi lewat tombol di body
             return const SizedBox.shrink();
           }
 
@@ -909,6 +1043,22 @@ class _AssetScreenState extends State<AssetScreen>
               icon: const Icon(Icons.add_rounded, color: Colors.white),
               label: const Text(
                 'Tambah Inventaris',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            );
+          }
+
+          if (idx == ajukanInventarisTabIndex) {
+            return FloatingActionButton.extended(
+              onPressed: _openInventoryRequestForm,
+              backgroundColor: const Color(0xFF0EA5E9),
+              elevation: 3,
+              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              label: const Text(
+                'Ajukan',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
@@ -1473,6 +1623,374 @@ class _AssetScreenState extends State<AssetScreen>
       ),
     ),
   );
+
+  // ── TAB: Ajukan Inventaris (semua user) ──────────────────────────────────
+  Widget _buildAvailableInventoryTab() {
+    if (_isLoadingAvailableInventory) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF0EA5E9)),
+      );
+    }
+    if (_availableInventoryItems.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _loadAvailableInventoryItems,
+        child: ListView(children: [_buildEmptyAvailableInventory()]),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAvailableInventoryItems,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        itemCount: _availableInventoryItems.length,
+        itemBuilder: (_, i) =>
+            _buildAvailableInventoryCard(_availableInventoryItems[i]),
+      ),
+    );
+  }
+
+  Widget _buildEmptyAvailableInventory() => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE0F2FE),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.devices_other_rounded,
+              size: 48,
+              color: Color(0xFF0EA5E9),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Belum Ada Barang Tersedia',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF374151),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Barang Inventaris yang berstatus Tersedia akan muncul di sini.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildAvailableInventoryCard(InventoryItemModel item) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0EA5E9).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                item.kategoriIcon,
+                color: const Color(0xFF0EA5E9),
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.namaBarang,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${item.kodeAset} • ${item.kategori}',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
+                  ),
+                  if (item.officeName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      item.officeName!,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () =>
+                          _openInventoryRequestForm(presetItem: item),
+                      icon: const Icon(Icons.send_rounded, size: 15),
+                      label: const Text('Ajukan Peminjaman'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0EA5E9),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── TAB: Inventaris Saya (semua user) ────────────────────────────────────
+  Widget _buildMyInventoryRequestsTab() {
+    if (_isLoadingMyInventoryRequests) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF0EA5E9)),
+      );
+    }
+    if (_myInventoryRequests.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _loadMyInventoryRequests,
+        child: ListView(children: [_buildEmptyMyInventoryRequests()]),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadMyInventoryRequests,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        itemCount: _myInventoryRequests.length,
+        itemBuilder: (_, i) =>
+            _buildMyInventoryRequestCard(_myInventoryRequests[i]),
+      ),
+    );
+  }
+
+  Widget _buildEmptyMyInventoryRequests() => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE0F2FE),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.receipt_long_rounded,
+              size: 48,
+              color: Color(0xFF0EA5E9),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Belum Ada Pengajuan Inventaris',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF374151),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Ajukan peminjaman barang Inventaris via tab "Ajukan Inventaris"',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildMyInventoryRequestCard(InventoryRequestModel req) {
+    final Color statusColor = req.isApproved
+        ? const Color(0xFF10B981)
+        : req.isRejected
+        ? const Color(0xFFEF4444)
+        : const Color(0xFFD97706);
+    final String statusLabel = req.isApproved
+        ? 'Disetujui'
+        : req.isRejected
+        ? 'Ditolak'
+        : 'Menunggu';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    req.namaBarang,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: statusColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (req.kodeAset != null) ...[
+              const SizedBox(height: 3),
+              Text(
+                req.kodeAset!,
+                style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.date_range_rounded, size: 11, color: Colors.grey[500]),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    'Durasi: ${DateFormat('dd MMM yyyy').format(req.tanggalPinjam)} '
+                    '→ ${DateFormat('dd MMM yyyy').format(req.tanggalRencanaKembali)}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (req.catatan?.isNotEmpty == true) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  req.catatan!,
+                  style: const TextStyle(fontSize: 11.5, color: Color(0xFF374151)),
+                ),
+              ),
+            ],
+            if (req.isRejected && req.rejectionReason != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      size: 13,
+                      color: Color(0xFFDC2626),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        req.rejectionReason!,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            if (req.isApproved) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _downloadingInventoryLetterId == req.id
+                      ? null
+                      : () => _downloadInventoryLetter(req),
+                  icon: _downloadingInventoryLetterId == req.id
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.description_rounded, size: 16),
+                  label: const Text('Unduh Surat'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0EA5E9),
+                    side: const BorderSide(color: Color(0xFF0EA5E9)),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
   // ── TAB 3: Kelola Stok ───────────────────────────────────────────────────
   Widget _buildStockManagementTab() {
@@ -2073,8 +2591,18 @@ class _AssetScreenState extends State<AssetScreen>
                           ),
                         ),
                       ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        tooltip: 'Lihat Detail',
+                        icon: const Icon(
+                          Icons.visibility_outlined,
+                          size: 19,
+                          color: Color(0xFF6B7280),
+                        ),
+                        onPressed: () => _showReportDetail(emp),
+                      ),
                       if (selected) ...[
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                         const Icon(
                           Icons.check_circle_rounded,
                           color: Color(0xFF4F46E5),
@@ -5340,4 +5868,662 @@ class _CatalogDisplayItem {
   }
 
   bool get isLowStock => totalStok <= 5;
+}
+
+class _InventoryRequestForm extends StatefulWidget {
+  final String userId;
+  final List<InventoryItemModel> availableItems;
+  final InventoryItemModel? presetItem;
+  final VoidCallback onSubmitted;
+
+  const _InventoryRequestForm({
+    required this.userId,
+    required this.availableItems,
+    this.presetItem,
+    required this.onSubmitted,
+  });
+
+  @override
+  State<_InventoryRequestForm> createState() => _InventoryRequestFormState();
+}
+
+class _InventoryRequestFormState extends State<_InventoryRequestForm> {
+  InventoryItemModel? _selectedItem;
+  DateTime? _tanggalPinjam = DateTime.now();
+  DateTime? _tanggalRencanaKembali;
+  final _catatanCtrl = TextEditingController();
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedItem = widget.presetItem;
+  }
+
+  @override
+  void dispose() {
+    _catatanCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate({required bool isPinjam}) async {
+    final initial =
+        (isPinjam ? _tanggalPinjam : _tanggalRencanaKembali) ??
+        _tanggalPinjam ??
+        DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isPinjam) {
+        _tanggalPinjam = picked;
+      } else {
+        _tanggalRencanaKembali = picked;
+      }
+    });
+  }
+
+  Future<void> _submit() async {
+    if (_selectedItem == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pilih barang Inventaris terlebih dahulu')),
+      );
+      return;
+    }
+    if (_tanggalPinjam == null || _tanggalRencanaKembali == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pilih tanggal pinjam dan rencana kembali'),
+        ),
+      );
+      return;
+    }
+    if (!_tanggalRencanaKembali!.isAfter(_tanggalPinjam!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tanggal rencana kembali harus setelah tanggal pinjam'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    final res = await InventoryService.createInventoryRequest(
+      inventoryItemId: _selectedItem!.id,
+      userId: widget.userId,
+      tanggalPinjam: _tanggalPinjam!,
+      tanggalRencanaKembali: _tanggalRencanaKembali!,
+      catatan: _catatanCtrl.text.trim().isEmpty
+          ? null
+          : _catatanCtrl.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    if (res.success) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res.message),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
+      widget.onSubmitted();
+    } else {
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res.message),
+          backgroundColor: const Color(0xFFEF4444),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.8,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, scrollCtrl) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0EA5E9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.devices_other_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Ajukan Peminjaman Inventaris',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                children: [
+                  const Text(
+                    'Barang',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  if (widget.presetItem != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Text(
+                        '${widget.presetItem!.namaBarang} (${widget.presetItem!.kodeAset})',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<InventoryItemModel>(
+                          value: _selectedItem,
+                          isExpanded: true,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          hint: Text(
+                            'Pilih barang...',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                          items: widget.availableItems
+                              .map(
+                                (i) => DropdownMenuItem(
+                                  value: i,
+                                  child: Text(
+                                    '${i.namaBarang} (${i.kodeAset})',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) => setState(() => _selectedItem = v),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'Durasi Peminjaman',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => _pickDate(isPinjam: true),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today_rounded,
+                                  size: 15,
+                                  color: Colors.grey[500],
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Tanggal Pinjam',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          color: Colors.grey[500],
+                                        ),
+                                      ),
+                                      Text(
+                                        _tanggalPinjam != null
+                                            ? DateFormat(
+                                                'dd MMM yyyy',
+                                              ).format(_tanggalPinjam!)
+                                            : 'Pilih tanggal',
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: _tanggalPinjam != null
+                                              ? const Color(0xFF1F2937)
+                                              : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => _pickDate(isPinjam: false),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today_rounded,
+                                  size: 15,
+                                  color: Colors.grey[500],
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Rencana Kembali',
+                                        style: TextStyle(
+                                          fontSize: 9.5,
+                                          color: Colors.grey[500],
+                                        ),
+                                      ),
+                                      Text(
+                                        _tanggalRencanaKembali != null
+                                            ? DateFormat(
+                                                'dd MMM yyyy',
+                                              ).format(_tanggalRencanaKembali!)
+                                            : 'Pilih tanggal',
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: _tanggalRencanaKembali != null
+                                              ? const Color(0xFF1F2937)
+                                              : Colors.grey[400],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  const Text(
+                    'Catatan (Opsional)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _catatanCtrl,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      hintText: 'Tambahkan catatan jika perlu',
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isSubmitting ? null : _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0EA5E9),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : const Text(
+                              'Ajukan Peminjaman',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AssetReportDetailSheet extends StatelessWidget {
+  final AssetReportDetailResult result;
+
+  const _AssetReportDetailSheet({required this.result});
+
+  String _translateStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return 'Disetujui';
+      case 'dikembalikan':
+        return 'Dikembalikan';
+      case 'rejected':
+        return 'Ditolak';
+      case 'pending':
+        return 'Menunggu';
+      default:
+        return status.isEmpty ? '-' : status;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final header = result.header;
+    final details = result.details;
+    const c = Color(0xFF4F46E5);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, scrollCtrl) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      gradient: _heroGradient,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.description_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          header.namaKaryawan,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (header.jobPosition?.isNotEmpty == true)
+                          Text(
+                            header.jobPosition!,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: c.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: c.withOpacity(0.15)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _detailInfoRow(
+                          'Periode',
+                          '${DateFormat('dd MMM yyyy').format(header.tanggalMulai)} '
+                              '- ${DateFormat('dd MMM yyyy').format(header.tanggalSelesai)}',
+                        ),
+                        if (header.organization?.isNotEmpty == true)
+                          _detailInfoRow('Departemen', header.organization!),
+                        _detailInfoRow(
+                          'Total Transaksi',
+                          '${details.length}',
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Riwayat Transaksi',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (details.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'Tidak ada transaksi pada periode ini.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    )
+                  else
+                    ...details.map(
+                      (item) => Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE5E7EB)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item.namaBarang,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: c.withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    _translateStatus(item.status),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: c,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${item.jenis == 'diambil' ? 'Diambil' : 'Dipinjam'} • '
+                              '${item.jumlah} unit'
+                              '${item.kategori?.isNotEmpty == true ? ' • ${item.kategori}' : ''}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${DateFormat('dd MMM yyyy').format(item.approvedAt)}'
+                              '${item.officeName?.isNotEmpty == true ? ' • ${item.officeName}' : ''}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailInfoRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 100,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

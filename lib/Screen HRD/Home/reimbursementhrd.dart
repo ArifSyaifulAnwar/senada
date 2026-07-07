@@ -58,6 +58,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   final List<String> _statusOptions = [
     'Semua Status',
     'Pending',
+    'Revision',
     'Pending_Finance',
     'Approved',
     'Rejected',
@@ -365,7 +366,11 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
         return item.title.toLowerCase().contains(searchKeyword) ||
             item.category.toLowerCase().contains(searchKeyword) ||
             item.userName.toLowerCase().contains(searchKeyword) ||
-            (item.description?.toLowerCase().contains(searchKeyword) ?? false);
+            (item.description?.toLowerCase().contains(searchKeyword) ?? false) ||
+            (item.financeTargetUserName?.toLowerCase().contains(
+                  searchKeyword,
+                ) ??
+                false);
       }).toList();
     }
 
@@ -2198,6 +2203,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     switch (status.toLowerCase()) {
       case 'pending':
         return 'Menunggu HRD';
+      case 'revision':
+        return 'Perlu Revisi';
       case 'pending_finance':
         return 'Menunggu Finance';
       case 'approved':
@@ -2352,6 +2359,32 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                   ),
                 ],
               ),
+
+              if (item.hasFinanceTarget) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.account_balance,
+                      size: 14,
+                      color: Color(0xFF8B5CF6),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Diajukan ke Finance: ${item.financeTargetUserName}',
+                        style: TextStyle(
+                          fontSize: _getResponsiveFontSize(context, 12),
+                          color: const Color(0xFF8B5CF6),
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
 
               const SizedBox(height: 12),
 

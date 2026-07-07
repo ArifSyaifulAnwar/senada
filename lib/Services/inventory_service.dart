@@ -143,6 +143,86 @@ class InventoryItemModel {
   );
 }
 
+class InventoryRequestModel {
+  final int id;
+  final int inventoryItemId;
+  final String? kodeAset;
+  final String namaBarang;
+  final String? kategori;
+  final String? userId;
+  final String? userName;
+  final String? userJob;
+  final DateTime tanggalPinjam;
+  final DateTime tanggalRencanaKembali;
+  final String? catatan;
+  final String status; // Pending | Approved | Rejected
+  final String? reviewedBy;
+  final DateTime? reviewedAt;
+  final String? rejectionReason;
+  final DateTime createdAt;
+
+  const InventoryRequestModel({
+    required this.id,
+    required this.inventoryItemId,
+    this.kodeAset,
+    required this.namaBarang,
+    this.kategori,
+    this.userId,
+    this.userName,
+    this.userJob,
+    required this.tanggalPinjam,
+    required this.tanggalRencanaKembali,
+    this.catatan,
+    required this.status,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.rejectionReason,
+    required this.createdAt,
+  });
+
+  bool get isPending => status == 'Pending';
+  bool get isApproved => status == 'Approved';
+  bool get isRejected => status == 'Rejected';
+
+  factory InventoryRequestModel.fromJson(
+    Map<String, dynamic> j,
+  ) => InventoryRequestModel(
+    id: ((j['Id'] ?? j['id'] ?? 0) as num).toInt(),
+    inventoryItemId:
+        ((j['InventoryItemId'] ?? j['inventoryItemId'] ?? 0) as num).toInt(),
+    kodeAset: (j['KodeAset'] ?? j['kodeAset'])?.toString(),
+    namaBarang: (j['NamaBarang'] ?? j['namaBarang'] ?? '').toString(),
+    kategori: (j['Kategori'] ?? j['kategori'])?.toString(),
+    userId: (j['UserId'] ?? j['userId'])?.toString(),
+    userName: (j['UserName'] ?? j['userName'])?.toString(),
+    userJob: (j['UserJob'] ?? j['userJob'])?.toString(),
+    tanggalPinjam:
+        DateTime.tryParse(
+          (j['TanggalPinjam'] ?? j['tanggalPinjam'] ?? '').toString(),
+        ) ??
+        DateTime.now(),
+    tanggalRencanaKembali:
+        DateTime.tryParse(
+          (j['TanggalRencanaKembali'] ?? j['tanggalRencanaKembali'] ?? '')
+              .toString(),
+        ) ??
+        DateTime.now(),
+    catatan: (j['Catatan'] ?? j['catatan'])?.toString(),
+    status: (j['Status'] ?? j['status'] ?? 'Pending').toString(),
+    reviewedBy: (j['ReviewedBy'] ?? j['reviewedBy'])?.toString(),
+    reviewedAt: (j['ReviewedAt'] ?? j['reviewedAt']) != null
+        ? DateTime.tryParse((j['ReviewedAt'] ?? j['reviewedAt']).toString())
+        : null,
+    rejectionReason: (j['RejectionReason'] ?? j['rejectionReason'])
+        ?.toString(),
+    createdAt:
+        DateTime.tryParse(
+          (j['CreatedAt'] ?? j['createdAt'] ?? '').toString(),
+        ) ??
+        DateTime.now(),
+  );
+}
+
 class InventoryHandoverLogModel {
   final int id;
   final String aksi;
@@ -494,6 +574,124 @@ class InventoryService {
       final success = (_get(body, 'success') ?? false) == true;
       final message = (_get(body, 'message') ?? '') as String;
       return ApiResponse(success: success, message: message);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  /// Karyawan ajukan peminjaman barang Inventaris (dibawa pulang, ada durasi).
+  static Future<ApiResponse<Map<String, dynamic>>> createInventoryRequest({
+    required int inventoryItemId,
+    required String userId,
+    required DateTime tanggalPinjam,
+    required DateTime tanggalRencanaKembali,
+    String? catatan,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/request-create'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'inventoryItemId': inventoryItemId,
+          'userId': userId,
+          'tanggalPinjam': tanggalPinjam.toIso8601String(),
+          'tanggalRencanaKembali': tanggalRencanaKembali.toIso8601String(),
+          'catatan': catatan,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final success = (_get(body, 'success') ?? false) == true;
+      final message = (_get(body, 'message') ?? '') as String;
+
+      Map<String, dynamic> resultData = {};
+      final data = _get(body, 'data');
+      if (data is Map) resultData = Map<String, dynamic>.from(data);
+
+      return ApiResponse(success: success, message: message, data: resultData);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  /// Head HRD approve/reject pengajuan peminjaman Inventaris.
+  static Future<ApiResponse<void>> reviewInventoryRequest({
+    required int id,
+    required String reviewedBy,
+    required String status, // "Approved" | "Rejected"
+    String? rejectionReason,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/request-review'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({
+          'id': id,
+          'reviewedBy': reviewedBy,
+          'status': status,
+          'rejectionReason': rejectionReason,
+        }),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final success = (_get(body, 'success') ?? false) == true;
+      final message = (_get(body, 'message') ?? '') as String;
+      return ApiResponse(success: success, message: message);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  /// Riwayat pengajuan peminjaman Inventaris milik sendiri.
+  static Future<ApiResponse<List<InventoryRequestModel>>> getMyRequests({
+    required String userId,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/request-get-my'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final success = (_get(body, 'success') ?? false) == true;
+      final message = (_get(body, 'message') ?? '') as String;
+
+      List<InventoryRequestModel> items = [];
+      final data = _get(body, 'data');
+      if (data is Map && data['items'] is List) {
+        items = (data['items'] as List)
+            .map(
+              (e) => InventoryRequestModel.fromJson(e as Map<String, dynamic>),
+            )
+            .toList();
+      }
+      return ApiResponse(success: success, message: message, data: items);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
+    }
+  }
+
+  /// Antrian pengajuan peminjaman Inventaris untuk Head HRD.
+  static Future<ApiResponse<List<InventoryRequestModel>>>
+  getPendingInventoryRequests({required String userId}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseURL$_base/request-get-pending'),
+        headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final success = (_get(body, 'success') ?? false) == true;
+      final message = (_get(body, 'message') ?? '') as String;
+
+      List<InventoryRequestModel> items = [];
+      final data = _get(body, 'data');
+      if (data is Map && data['items'] is List) {
+        items = (data['items'] as List)
+            .map(
+              (e) => InventoryRequestModel.fromJson(e as Map<String, dynamic>),
+            )
+            .toList();
+      }
+      return ApiResponse(success: success, message: message, data: items);
     } catch (e) {
       return ApiResponse(success: false, message: 'Koneksi bermasalah: $e');
     }

@@ -459,7 +459,22 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     List<AdminTimeOffData> f = List<AdminTimeOffData>.from(_allTimeOffs);
 
     if (_selectedStatus != null && _selectedStatus != 'Semua Status') {
-      f = f.where((i) => i.status == _selectedStatus).toList();
+      if (_selectedStatus == 'Pending') {
+        // "Menunggu Review" = status apa pun yang masih dalam kategori
+        // pending (lihat _pendingLikeStatuses), bukan cuma literal 'Pending'.
+        f = f
+            .where(
+              (i) => _pendingLikeStatuses.contains(i.status.toLowerCase()),
+            )
+            .toList();
+      } else {
+        f = f
+            .where(
+              (i) =>
+                  i.status.toLowerCase() == _selectedStatus!.toLowerCase(),
+            )
+            .toList();
+      }
     }
 
     if (_selectedUserId != null) {
@@ -779,20 +794,27 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     );
   }
 
-  int get _pendingCountLive => _allTimeOffs.where((i) {
-    final s = i.status.toLowerCase();
-    return s == 'pending' ||
-        s == 'pending hrd' ||
-        s == 'pending director' ||
-        s == 'menunggu hrd' ||
-        s == 'menunggu director' ||
-        s == 'menunggu org' ||
-        s == 'menunggu laporan' ||
-        s == 'menunggu verifikasi head' ||
-        s == 'menunggu verifikasi hrd' ||
-        s == 'menunggu transfer' ||
-        s == 'pending finance';
-  }).length;
+  // Dipakai bersama oleh _pendingCountLive (kartu statistik) DAN _applyFilters
+  // (filter dropdown "Menunggu Review") — supaya keduanya selalu konsisten.
+  // Sebelumnya statistik pakai daftar status longgar ini, tapi filter list
+  // cuma cocokkan exact 'Pending', jadi kartu bilang 8 tapi list nya 0.
+  static const Set<String> _pendingLikeStatuses = {
+    'pending',
+    'pending hrd',
+    'pending director',
+    'menunggu hrd',
+    'menunggu director',
+    'menunggu org',
+    'menunggu laporan',
+    'menunggu verifikasi head',
+    'menunggu verifikasi hrd',
+    'menunggu transfer',
+    'pending finance',
+  };
+
+  int get _pendingCountLive => _allTimeOffs
+      .where((i) => _pendingLikeStatuses.contains(i.status.toLowerCase()))
+      .length;
 
   int get _approvedCountLive => _allTimeOffs.where((i) {
     final s = i.status.toLowerCase();

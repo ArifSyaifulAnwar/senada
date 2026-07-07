@@ -2126,6 +2126,39 @@ class _AdminReimbursementDetailModalState
     }
   }
 
+  Future<void> _requestRevision() async {
+    if (_reviewNotesController.text.trim().isEmpty) {
+      _showErrorSnackBar('Catatan wajib diisi untuk meminta revisi.');
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      final response = await widget.adminService.requestRevision(
+        id: widget.item.id,
+        reviewedBy: widget.currentAdminId,
+        reviewNotes: _reviewNotesController.text.trim(),
+      );
+
+      if (response.success) {
+        Navigator.of(context).pop();
+        widget.onActionCompleted();
+        _showSuccessSnackBar(response.message);
+      } else {
+        _showErrorSnackBar(response.message);
+      }
+    } catch (e) {
+      _showErrorSnackBar('Terjadi kesalahan: $e');
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
+  }
+
 
   void _showSuccessSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2257,6 +2290,12 @@ class _AdminReimbursementDetailModalState
                     if (widget.item.userJob != null &&
                         widget.item.userJob!.trim().isNotEmpty)
                       _buildDetailRow('Pekerjaan', widget.item.userJob!),
+                    _buildDetailRow(
+                      'Diajukan ke Finance',
+                      widget.item.hasFinanceTarget
+                          ? widget.item.financeTargetUserName!
+                          : 'Belum ditentukan',
+                    ),
                   ]),
 
                   const SizedBox(height: 20),
@@ -2379,7 +2418,7 @@ class _AdminReimbursementDetailModalState
                   // Review Notes Input (for pending items)
                   if (widget.item.status == 'pending') ...[
                     const Text(
-                      'Catatan Review (Opsional)',
+                      'Catatan Review (Opsional, wajib untuk Minta Revisi)',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -2391,7 +2430,8 @@ class _AdminReimbursementDetailModalState
                       controller: _reviewNotesController,
                       maxLines: 3,
                       decoration: InputDecoration(
-                        hintText: 'Tambahkan catatan untuk keputusan review...',
+                        hintText:
+                            'Tambahkan catatan untuk keputusan review, atau jelaskan apa yang perlu direvisi...',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -2468,32 +2508,53 @@ class _AdminReimbursementDetailModalState
 
   Widget _buildActionButtons() {
     if (widget.item.status == 'pending') {
-      return Row(
+      return Column(
         children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () => _reviewReimbursement('rejected'),
-              icon: const Icon(Icons.close),
-              label: const Text('Tolak'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEF4444),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _reviewReimbursement('rejected'),
+                  icon: const Icon(Icons.close),
+                  label: const Text('Tolak'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFEF4444),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _reviewReimbursement('approved'),
+                  icon: const Icon(Icons.check),
+                  label: const Text('Setujui → Finance'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: () => _reviewReimbursement('approved'),
-              icon: const Icon(Icons.check),
-              label: const Text('Setujui → Finance'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF10B981),
-                foregroundColor: Colors.white,
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _requestRevision,
+              icon: const Icon(Icons.edit_note),
+              label: const Text('Minta Revisi'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFF97316),
+                side: const BorderSide(color: Color(0xFFF97316)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),

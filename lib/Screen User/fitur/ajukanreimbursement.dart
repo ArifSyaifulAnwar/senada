@@ -16,7 +16,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class HalamanAjukanReimbursement extends StatefulWidget {
-  const HalamanAjukanReimbursement({super.key});
+  /// Kalau diisi, form ini jadi mode "Edit & Ajukan Ulang" untuk reimbursement
+  /// yang statusnya "Perlu Revisi" alih-alih membuat pengajuan baru.
+  final ReimbursementData? existingItem;
+
+  const HalamanAjukanReimbursement({super.key, this.existingItem});
 
   @override
   _HalamanAjukanReimbursementState createState() =>
@@ -43,13 +47,67 @@ class _HalamanAjukanReimbursementState
   String? _currentUserId;
   DateTime? _selectedDate;
 
+  bool get _isEditMode => widget.existingItem != null;
+  List<ReimbursementAttachmentMeta> _existingAttachments = [];
+  bool _isLoadingExistingAttachments = false;
+
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
-    _loadUserData();
     _loadCategories();
     _loadFinanceUsers();
+    if (_isEditMode) _prefillFromExistingItem();
+    _loadUserData().then((_) {
+      if (_isEditMode) _loadExistingAttachments();
+    });
+  }
+
+  void _prefillFromExistingItem() {
+    final item = widget.existingItem!;
+    _judulController.text = item.title;
+    _jumlahController.text = item.amount
+        .toStringAsFixed(item.amount % 1 == 0 ? 0 : 2);
+    _keteranganController.text = item.description ?? '';
+    _selectedCategory = item.category;
+    _selectedDate = item.expenseDate;
+    _tanggalController.text = DateFormat(
+      'dd MMMM yyyy',
+    ).format(item.expenseDate);
+    _selectedFinanceUserId = item.financeTargetUserId;
+  }
+
+  Future<void> _loadExistingAttachments() async {
+    setState(() => _isLoadingExistingAttachments = true);
+    try {
+      final attachments = await _reimbursementService.getAttachments(
+        reimbursementId: widget.existingItem!.id,
+        userId: _currentUserId,
+      );
+      setState(() {
+        _existingAttachments = attachments;
+        _isLoadingExistingAttachments = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingExistingAttachments = false);
+    }
+  }
+
+  Future<void> _removeExistingAttachment(
+    ReimbursementAttachmentMeta attachment,
+  ) async {
+    if (_currentUserId == null) return;
+    final result = await _reimbursementService.deleteAttachment(
+      attachmentId: attachment.id,
+      userId: _currentUserId!,
+    );
+    if (result.success) {
+      setState(() {
+        _existingAttachments.removeWhere((a) => a.id == attachment.id);
+      });
+    } else {
+      _showErrorSnackBar(result.message);
+    }
   }
 
   Future<void> _loadFinanceUsers() async {
@@ -420,7 +478,10 @@ class _HalamanAjukanReimbursementState
       return;
     }
 
-    if (_selectedFiles.isEmpty) {
+    final hasAttachment = _isEditMode
+        ? (_selectedFiles.isNotEmpty || _existingAttachments.isNotEmpty)
+        : _selectedFiles.isNotEmpty;
+    if (!hasAttachment) {
       _showErrorSnackBar('Harap upload minimal 1 bukti pembayaran');
       return;
     }
@@ -445,6 +506,35 @@ class _HalamanAjukanReimbursementState
 
       if (amount == null || amount <= 0) {
         throw Exception('Jumlah tidak valid');
+      }
+
+      if (_isEditMode) {
+        final response = await _reimbursementService.updateWithAttachments(
+          id: widget.existingItem!.id,
+          userId: _currentUserId!,
+          title: _judulController.text.trim(),
+          category: _selectedCategory,
+          amount: amount,
+          expenseDate: _selectedDate!,
+          description: _keteranganController.text.trim().isEmpty
+              ? null
+              : _keteranganController.text.trim(),
+          financeTargetUserId: _selectedFinanceUserId,
+          newAttachments: _selectedFiles,
+          startingSortOrder: _existingAttachments.length + 1,
+        );
+
+        setState(() {
+          _isSubmitting = false;
+        });
+
+        if (response.success) {
+          _showSuccessSnackBar(response.message);
+          Navigator.pop(context, true);
+        } else {
+          _showErrorSnackBar(response.message);
+        }
+        return;
       }
 
       // Submit reimbursement + upload semua attachment
@@ -628,7 +718,12 @@ class _HalamanAjukanReimbursementState
       final categories = await _reimbursementService.getCategories();
       setState(() {
         _categories = categories;
-        if (categories.isNotEmpty) {
+        final hasExistingCategory =
+            _isEditMode &&
+            categories.any((c) => c.name == widget.existingItem!.category);
+        if (hasExistingCategory) {
+          _selectedCategory = widget.existingItem!.category;
+        } else if (categories.isNotEmpty && _selectedCategory.isEmpty) {
           _selectedCategory = categories.first.name;
         }
         _isLoadingCategories = false;
@@ -886,8 +981,11 @@ class _HalamanAjukanReimbursementState
   }
 
   bool _isFormValid() {
+    final hasAttachment = _isEditMode
+        ? (_selectedFiles.isNotEmpty || _existingAttachments.isNotEmpty)
+        : _selectedFiles.isNotEmpty;
     return _formKey.currentState?.validate() == true &&
-        _selectedFiles.isNotEmpty &&
+        hasAttachment &&
         _selectedDate != null &&
         _selectedCategory.isNotEmpty &&
         _selectedFinanceUserId != null;
@@ -1046,6 +1144,79 @@ class _HalamanAjukanReimbursementState
         borderRadius: BorderRadius.circular(16),
         icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[600]),
       ),
+    );
+  }
+
+  Widget _buildExistingAttachments() {
+    if (_isLoadingExistingAttachments) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (_existingAttachments.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Lampiran Sebelumnya',
+          style: TextStyle(
+            fontSize: _getResponsiveFontSize(context, 13),
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[700],
+          ),
+        ),
+        const SizedBox(height: 8),
+        ..._existingAttachments.map((attachment) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[300]!),
+              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  attachment.isImage
+                      ? Icons.image_outlined
+                      : Icons.picture_as_pdf_outlined,
+                  color: Colors.grey[500],
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    attachment.fileName,
+                    style: TextStyle(
+                      fontSize: _getResponsiveFontSize(context, 13),
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.close,
+                    size: 18,
+                    color: Colors.redAccent,
+                  ),
+                  onPressed: () => _removeExistingAttachment(attachment),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
     );
   }
 
@@ -1277,7 +1448,7 @@ class _HalamanAjukanReimbursementState
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: Text(
-          'Ajukan Reimbursement',
+          _isEditMode ? 'Edit & Ajukan Ulang' : 'Ajukan Reimbursement',
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w700,
@@ -1311,6 +1482,54 @@ class _HalamanAjukanReimbursementState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (_isEditMode &&
+                  (widget.existingItem!.reviewNotes?.trim().isNotEmpty ??
+                      false)) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7ED),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFFDBA74)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.info_outline,
+                        color: Color(0xFFB45309),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Alasan Revisi dari HRD',
+                              style: TextStyle(
+                                fontSize: _getResponsiveFontSize(context, 13),
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF9A3412),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.existingItem!.reviewNotes!.trim(),
+                              style: TextStyle(
+                                fontSize: _getResponsiveFontSize(context, 13),
+                                color: const Color(0xFF9A3412),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: _getResponsivePadding(context, 16)),
+              ],
               Container(
                 padding: EdgeInsets.all(_getResponsivePadding(context, 20)),
                 decoration: BoxDecoration(
@@ -1574,6 +1793,13 @@ class _HalamanAjukanReimbursementState
 
                           SizedBox(height: _getResponsivePadding(context, 16)),
 
+                          if (_isEditMode) ...[
+                            _buildExistingAttachments(),
+                            SizedBox(
+                              height: _getResponsivePadding(context, 16),
+                            ),
+                          ],
+
                           _buildFilePreview(),
 
                           // Text(
@@ -1698,7 +1924,9 @@ class _HalamanAjukanReimbursementState
                                   Icon(Icons.send_rounded, size: 20),
                                   SizedBox(width: 8),
                                   Text(
-                                    'Ajukan Reimbursement',
+                                    _isEditMode
+                                        ? 'Ajukan Ulang'
+                                        : 'Ajukan Reimbursement',
                                     style: TextStyle(
                                       fontSize: _getResponsiveFontSize(
                                         context,

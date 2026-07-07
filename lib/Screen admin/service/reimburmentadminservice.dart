@@ -196,6 +196,45 @@ class AdminReimbursementService {
     }
   }
 
+  // Minta karyawan merevisi pengajuan (balik ke karyawan untuk diedit).
+  Future<AdminResponse> requestRevision({
+    required int id,
+    required String reviewedBy,
+    required String reviewNotes,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final request = AdminReimbursementReviewRequest(
+        id: id,
+        status: 'revision',
+        reviewedBy: reviewedBy,
+        reviewNotes: reviewNotes,
+      );
+
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/reimbursement/admin/request-revision'),
+        headers: headers,
+        body: json.encode(request.toJson()),
+      );
+
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+        return AdminResponse.fromJson(jsonData);
+      } else {
+        final errorData = json.decode(response.body);
+        return AdminResponse(
+          success: false,
+          message: errorData['message'] ?? 'Terjadi kesalahan server',
+        );
+      }
+    } catch (e) {
+      return AdminResponse(
+        success: false,
+        message: 'Terjadi kesalahan jaringan: $e',
+      );
+    }
+  }
+
   // Mark reimbursement as paid - TIDAK BERUBAH
   Future<AdminResponse> markReimbursementPaid({
     required int id,

@@ -129,7 +129,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     }
 
     final totalBelumAbsen = _tidakHadirList.length;
-    final totalDiproses = totalBelumAbsen > 5 ? 5 : totalBelumAbsen;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -137,8 +136,9 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Kirim Pengingat WA?'),
         content: Text(
-          'Sistem akan memproses pengingat WhatsApp untuk $totalDiproses dari $totalBelumAbsen karyawan yang belum absen.\n\n'
-          'Pengiriman dibatasi maksimal 5 orang per klik agar akun WhatsApp lebih aman dan tidak terdeteksi spam.',
+          'Sistem akan mengirim pengingat WhatsApp ke semua $totalBelumAbsen karyawan yang belum absen.\n\n'
+          'Pesan dikirim bertahap (beberapa per kelompok, dengan jeda) di background selama beberapa menit '
+          'agar akun WhatsApp tetap aman dan tidak terdeteksi spam. Tidak perlu diklik berulang.',
         ),
         actions: [
           TextButton(
