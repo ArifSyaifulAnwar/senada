@@ -24,7 +24,9 @@ bool _isReimbursementWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
 class HalamanHRDReimbursement extends StatefulWidget {
-  const HalamanHRDReimbursement({super.key});
+  final int? initialDetailId;
+
+  const HalamanHRDReimbursement({super.key, this.initialDetailId});
 
   @override
   _HalamanHRDReimbursementState createState() =>
@@ -42,6 +44,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   AdminReimbursementStatistics? _statistics;
 
   bool _isLoading = true;
+  bool _initialDetailHandled = false;
   String? _currentUserId;
   String? _currentUserName;
   String? _selectedStatus;
@@ -208,6 +211,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
         _applyFilters();
         _isLoading = false;
       });
+      _maybeOpenInitialDetail();
 
       // Show appropriate success message
       if (reimbursements.isNotEmpty) {
@@ -275,6 +279,25 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       _statistics = statistics;
       _applyFilters();
       _isLoading = false;
+    });
+    _maybeOpenInitialDetail();
+  }
+
+  // Kalau layar ini dibuka dari notifikasi (push atau lonceng in-app) yang
+  // menunjuk ke 1 reimbursement tertentu, otomatis buka detailnya begitu
+  // datanya sudah ke-load — sekali saja per kunjungan layar ini.
+  void _maybeOpenInitialDetail() {
+    if (_initialDetailHandled) return;
+    final id = widget.initialDetailId;
+    if (id == null) return;
+
+    final matches = _allReimbursements.where((r) => r.id == id);
+    if (matches.isEmpty) return;
+
+    _initialDetailHandled = true;
+    final item = matches.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showReimbursementDetail(item);
     });
   }
 
@@ -344,12 +367,22 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
     // Filter by status
     if (_selectedStatus != null && _selectedStatus != 'Semua Status') {
-      filtered = filtered
-          .where(
-            (item) =>
-                item.status.toLowerCase() == _selectedStatus!.toLowerCase(),
-          )
-          .toList();
+      if (_selectedStatus!.toLowerCase() == 'pending') {
+        // "Menunggu Review" mencakup semua yang masih dalam proses review
+        // (menunggu HRD ATAU sudah lolos HRD tapi masih menunggu Finance) —
+        // supaya konsisten dengan _pendingCountLive di kartu statistik.
+        filtered = filtered.where((item) {
+          final s = item.status.toLowerCase().replaceAll(' ', '_');
+          return s == 'pending' || s == 'pending_finance';
+        }).toList();
+      } else {
+        filtered = filtered
+            .where(
+              (item) =>
+                  item.status.toLowerCase() == _selectedStatus!.toLowerCase(),
+            )
+            .toList();
+      }
     }
 
     // Filter by user
@@ -1498,11 +1531,11 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                 ),
                 _buildStatCard(
                   title: 'Menunggu Review',
-                  value: stats.pendingCount.toString(),
+                  value: _pendingCountLive.toString(),
                   icon: Icons.pending_actions,
                   color: const Color(0xFFF59E0B),
-                  isHighlighted: stats.pendingCount > 5,
-                  urgent: stats.pendingCount > 10,
+                  isHighlighted: _pendingCountLive > 5,
+                  urgent: _pendingCountLive > 10,
                   onTap: () => _navigateToReimbursementsWithFilter('pending'),
                 ),
                 _buildStatCard(

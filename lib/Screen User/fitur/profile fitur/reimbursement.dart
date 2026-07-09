@@ -14,7 +14,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../home/halaman_finance_reimbursement.dart';
 
 class HalamanReimbursement extends StatefulWidget {
-  const HalamanReimbursement({super.key});
+  final int? initialDetailId;
+
+  const HalamanReimbursement({super.key, this.initialDetailId});
 
   @override
   _HalamanReimbursementState createState() => _HalamanReimbursementState();
@@ -26,6 +28,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
   List<ReimbursementData> _allReimbursements = [];
   List<ReimbursementData> _filteredReimbursements = [];
   bool _isLoading = true;
+  bool _initialDetailHandled = false;
   String? _currentUserId;
   String? _selectedStatus;
 
@@ -122,6 +125,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
 
       setState(() => _allReimbursements = data);
       _applyClientSideFilter();
+      _maybeOpenInitialDetail();
     } catch (e) {
       if (!mounted) return;
 
@@ -382,6 +386,24 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
         margin: const EdgeInsets.all(16),
       ),
     );
+  }
+
+  // Kalau layar ini dibuka dari notifikasi (push atau lonceng in-app) yang
+  // menunjuk ke 1 reimbursement tertentu, otomatis buka detailnya begitu
+  // datanya sudah ke-load — sekali saja per kunjungan layar ini.
+  void _maybeOpenInitialDetail() {
+    if (_initialDetailHandled) return;
+    final id = widget.initialDetailId;
+    if (id == null) return;
+
+    final matches = _allReimbursements.where((r) => r.id == id);
+    if (matches.isEmpty) return;
+
+    _initialDetailHandled = true;
+    final item = matches.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showDetail(item);
+    });
   }
 
   void _showDetail(ReimbursementData item) {

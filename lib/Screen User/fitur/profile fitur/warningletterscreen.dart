@@ -1,8 +1,16 @@
 // ignore_for_file: deprecated_member_use
 
+import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:absensikaryawan/Services/teguran_service.dart';
+import 'package:absensikaryawan/utils/web_file_download.dart';
 
 class WarningLetter {
+  final int id;
   final String noSurat;
   final String tanggal;
   final String judul;
@@ -10,43 +18,92 @@ class WarningLetter {
   final String level; // e.g. "Verbal", "SP1", "SP2", "SP3"
 
   WarningLetter({
+    required this.id,
     required this.noSurat,
     required this.tanggal,
     required this.judul,
     required this.deskripsi,
     required this.level,
   });
+
+  factory WarningLetter.fromTeguranData(TeguranData data) {
+    return WarningLetter(
+      id: data.id,
+      noSurat: data.noSurat,
+      tanggal: DateFormat('d MMMM yyyy', 'id_ID').format(data.tanggal),
+      judul: data.judul,
+      deskripsi: data.deskripsi ?? '-',
+      level: data.level,
+    );
+  }
 }
 
-class WarningLetterScreen extends StatelessWidget {
-  WarningLetterScreen({super.key});
+class WarningLetterScreen extends StatefulWidget {
+  final String userId;
 
-  final List<WarningLetter> warningList = [
-    WarningLetter(
-      noSurat: "SP/01/HRD/2024",
-      tanggal: "4 Juni 2024",
-      judul: "Terlambat Masuk Kerja",
-      deskripsi:
-          "Karyawan tiga kali terlambat dalam sebulan. Diberikan teguran I (SP1) sesuai aturan perusahaan.",
-      level: "SP1",
-    ),
-    WarningLetter(
-      noSurat: "Verbal/02/HRD/2024",
-      tanggal: "18 Mei 2024",
-      judul: "Tidak Menggunakan Seragam",
-      deskripsi:
-          "Karyawan tidak mengenakan seragam pada jam kerja. Disampaikan teguran secara lisan (verbal).",
-      level: "Verbal",
-    ),
-    WarningLetter(
-      noSurat: "SP/02/HRD/2024",
-      tanggal: "21 Februari 2024",
-      judul: "Pelaporan Absen Tidak Valid",
-      deskripsi:
-          "Melakukan pelaporan absen yang tidak valid. Pemberian Surat Peringatan II (SP2).",
-      level: "SP2",
-    ),
-  ];
+  const WarningLetterScreen({super.key, required this.userId});
+
+  @override
+  State<WarningLetterScreen> createState() => _WarningLetterScreenState();
+}
+
+class _WarningLetterScreenState extends State<WarningLetterScreen> {
+  List<WarningLetter> _warningList = [];
+  bool _loading = true;
+  String? _errorMessage;
+  final Set<int> _downloadingIds = {};
+
+  Future<void> _downloadAndOpenSurat(int id) async {
+    setState(() => _downloadingIds.add(id));
+    try {
+      final bytes = await TeguranService.downloadTeguranPdf(id);
+      final fileName = 'SuratTeguran_$id.pdf';
+
+      if (kIsWeb) {
+        downloadFileWeb(fileName, bytes);
+      } else {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsBytes(bytes);
+        await OpenFile.open(file.path);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal membuka surat: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _downloadingIds.remove(id));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTeguran();
+  }
+
+  Future<void> _loadTeguran() async {
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final list = await TeguranService.getMyTeguran(widget.userId);
+      if (!mounted) return;
+      setState(() {
+        _warningList = list.map((e) => WarningLetter.fromTeguranData(e)).toList();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Gagal memuat data teguran: $e';
+        _loading = false;
+      });
+    }
+  }
 
   Color _colorForLevel(String level) {
     switch (level) {
@@ -142,7 +199,10 @@ class WarningLetterScreen extends StatelessWidget {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          return SingleChildScrollView(
+          return RefreshIndicator(
+            onRefresh: _loadTeguran,
+            child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: EdgeInsets.symmetric(
               horizontal: cardPadding.toDouble(),
               vertical: 20,
@@ -192,7 +252,23 @@ class WarningLetterScreen extends StatelessWidget {
                 const SizedBox(height: 24),
 
                 // Daftar Teguran List
-                if (warningList.isEmpty)
+                if (_loading)
+                  Container(
+                    margin: const EdgeInsets.only(top: 80),
+                    child: const Center(child: CircularProgressIndicator()),
+                  )
+                else if (_errorMessage != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 50),
+                    child: Center(
+                      child: Text(
+                        _errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: titleFont, color: Colors.grey),
+                      ),
+                    ),
+                  )
+                else if (_warningList.isEmpty)
                   Container(
                     margin: const EdgeInsets.only(top: 50),
                     child: Center(
@@ -206,7 +282,7 @@ class WarningLetterScreen extends StatelessWidget {
                     ),
                   )
                 else
-                  ...warningList.map(
+                  ..._warningList.map(
                     (w) => Card(
                       margin: const EdgeInsets.only(bottom: 14),
                       shape: RoundedRectangleBorder(
@@ -327,6 +403,18 @@ class WarningLetterScreen extends StatelessWidget {
                               ),
                             ],
                           ),
+                          trailing: _downloadingIds.contains(w.id)
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : IconButton(
+                                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                                  color: _colorForLevel(w.level),
+                                  tooltip: 'Lihat/Unduh Surat',
+                                  onPressed: () => _downloadAndOpenSurat(w.id),
+                                ),
                           minVerticalPadding: 0,
                           dense: screenWidth < 380,
                           visualDensity: screenWidth < 400
@@ -337,6 +425,7 @@ class WarningLetterScreen extends StatelessWidget {
                     ),
                   ),
               ],
+            ),
             ),
           );
         },

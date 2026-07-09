@@ -3883,7 +3883,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     return LayoutBuilder(
       builder: (ctx, c) {
         final cols = c.maxWidth >= 600 ? 4 : 2;
-        final ratio = c.maxWidth >= 600 ? 1.6 : 1.2;
+        final ratio = c.maxWidth >= 600 ? 1.7 : 1.35;
         return Column(
           children: [
             GridView.count(
@@ -4110,42 +4110,45 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 2),
-            if (subtitle != null)
-              Text(
-                subtitle,
-                style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
-              ),
-            const SizedBox(height: 2),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: Colors.black87,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            // Label "Tap untuk lihat detail"
-            if (onTap != null)
-              Text(
-                'Tap untuk lihat',
-                style: TextStyle(
-                  fontSize: 9,
-                  color: color.withOpacity(0.6),
-                  fontStyle: FontStyle.italic,
+            // Blok teks di-scale otomatis supaya selalu muat di sisa ruang
+            // yang ada, berapa pun tingginya — tidak overflow lagi walau di
+            // device/ukuran layar/pengaturan skala font yang berbeda-beda.
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.bottomLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      value,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            ),
           ],
         ),
       ),

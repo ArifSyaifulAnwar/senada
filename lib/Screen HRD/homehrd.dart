@@ -44,14 +44,21 @@ class _HomePageHRDState extends State<HomePageHRD> {
 
   void _handlePendingNotification() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final type = FcmService.consumePendingNavigation();
-      if (type == 'late_attendance' || type == 'belum_absen') {
+      final nav = FcmService.consumePendingNavigation();
+      if (nav == null) return;
+
+      if (nav.type == 'late_attendance' || nav.type == 'belum_absen') {
         setState(() => myCurrentIndex = 1); // tab Riwayat Absensi
-      } else if (type == 'reimbursement_new') {
+      } else if (nav.type == 'reimbursement_new' ||
+          nav.type == 'reimbursement_resubmit') {
         setState(() => myCurrentIndex = 0); // pastikan di tab Home
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const HalamanHRDReimbursement()),
+          MaterialPageRoute(
+            builder: (_) => HalamanHRDReimbursement(
+              initialDetailId: int.tryParse(nav.referenceId ?? ''),
+            ),
+          ),
         );
       }
     });

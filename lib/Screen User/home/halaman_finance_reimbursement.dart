@@ -33,7 +33,9 @@ bool _isWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
 class HalamanFinanceReimbursement extends StatefulWidget {
-  const HalamanFinanceReimbursement({super.key});
+  final int? initialDetailId;
+
+  const HalamanFinanceReimbursement({super.key, this.initialDetailId});
 
   @override
   State<HalamanFinanceReimbursement> createState() =>
@@ -57,6 +59,7 @@ class _HalamanFinanceReimbursementState
   String? _currentUserName;
 
   bool _isLoading = true;
+  bool _initialDetailHandled = false;
   String? _loadError;
 
   int _webTabIndex = 0;
@@ -229,6 +232,7 @@ class _HalamanFinanceReimbursementState
         _filteredItems = _filterItems(items);
         _isLoading = false;
       });
+      _maybeOpenInitialDetail();
 
       if (showSuccessMessage) {
         _showSuccess('Data reimbursement berhasil diperbarui.');
@@ -2540,6 +2544,24 @@ class _HalamanFinanceReimbursementState
         ),
       ),
     );
+  }
+
+  // Kalau layar ini dibuka dari notifikasi (push atau lonceng in-app) yang
+  // menunjuk ke 1 reimbursement tertentu, otomatis buka detailnya begitu
+  // datanya sudah ke-load — sekali saja per kunjungan layar ini.
+  void _maybeOpenInitialDetail() {
+    if (_initialDetailHandled) return;
+    final id = widget.initialDetailId;
+    if (id == null) return;
+
+    final matches = _allItems.where((r) => r.id == id);
+    if (matches.isEmpty) return;
+
+    _initialDetailHandled = true;
+    final item = matches.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showDetail(item);
+    });
   }
 
   void _showDetail(FinanceReimbursementItem item) {

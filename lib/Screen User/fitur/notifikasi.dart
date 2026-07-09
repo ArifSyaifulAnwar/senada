@@ -4,6 +4,10 @@
 import 'package:absensikaryawan/models/notification_models.dart';
 import 'package:flutter/material.dart';
 import 'package:absensikaryawan/Services/notification_service.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/reimbursement.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warningletterscreen.dart';
+import 'package:absensikaryawan/Screen%20User/home/halaman_finance_reimbursement.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HalamanNotifikasi extends StatefulWidget {
   const HalamanNotifikasi({super.key});
@@ -490,13 +494,36 @@ class _HalamanNotifikasiState extends State<HalamanNotifikasi>
     );
   }
 
-  void _handleNotificationAction(NotificationItem notification) {
+  void _handleNotificationAction(NotificationItem notification) async {
     // Handle different action types based on notification type
-    if (notification.referenceType == 'reimbursement' &&
-        notification.referenceId != null) {
-      // Navigate to reimbursement detail
-      _showInfoSnackBar('Membuka detail reimbursement...');
-      // Navigator.pushNamed(context, '/reimbursement/detail/${notification.referenceId}');
+    final id = notification.referenceId != null
+        ? int.tryParse(notification.referenceId!)
+        : null;
+
+    if (notification.referenceType == 'reimbursement_finance') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HalamanFinanceReimbursement(initialDetailId: id),
+        ),
+      );
+    } else if (notification.referenceType == 'reimbursement') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HalamanReimbursement(initialDetailId: id),
+        ),
+      );
+    } else if (notification.referenceType == 'teguran') {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID') ?? '';
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WarningLetterScreen(userId: userId),
+        ),
+      );
     } else if (notification.actionUrl != null) {
       // Handle other URL actions
       _showInfoSnackBar('Membuka ${notification.actionText}...');

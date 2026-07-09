@@ -16,7 +16,9 @@ import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 
 class HalamanAdminReimbursement extends StatefulWidget {
-  const HalamanAdminReimbursement({super.key});
+  final int? initialDetailId;
+
+  const HalamanAdminReimbursement({super.key, this.initialDetailId});
 
   @override
   _HalamanAdminReimbursementState createState() =>
@@ -33,6 +35,7 @@ class _HalamanAdminReimbursementState extends State<HalamanAdminReimbursement>
   AdminReimbursementStatistics? _statistics;
 
   bool _isLoading = true;
+  bool _initialDetailHandled = false;
   String? _currentUserId;
   String? _currentUserName;
   String? _selectedStatus;
@@ -141,6 +144,7 @@ class _HalamanAdminReimbursementState extends State<HalamanAdminReimbursement>
         _applyFilters();
         _isLoading = false;
       });
+      _maybeOpenInitialDetail();
 
       // Show appropriate success message
       if (reimbursements.isNotEmpty) {
@@ -197,6 +201,25 @@ class _HalamanAdminReimbursementState extends State<HalamanAdminReimbursement>
       _statistics = statistics;
       _applyFilters();
       _isLoading = false;
+    });
+    _maybeOpenInitialDetail();
+  }
+
+  // Kalau layar ini dibuka dari notifikasi (push atau lonceng in-app) yang
+  // menunjuk ke 1 reimbursement tertentu, otomatis buka detailnya begitu
+  // datanya sudah ke-load — sekali saja per kunjungan layar ini.
+  void _maybeOpenInitialDetail() {
+    if (_initialDetailHandled) return;
+    final id = widget.initialDetailId;
+    if (id == null) return;
+
+    final matches = _allReimbursements.where((r) => r.id == id);
+    if (matches.isEmpty) return;
+
+    _initialDetailHandled = true;
+    final item = matches.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showReimbursementDetail(item);
     });
   }
 

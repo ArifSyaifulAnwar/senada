@@ -12,6 +12,7 @@ import 'package:absensikaryawan/Screen%20admin/Home/reimbursementadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/timeoffadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/notification_service.dart';
@@ -103,6 +104,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     super.initState();
     _refreshAll(showLoading: true);
     _startAutoRefresh();
+    _handlePendingNotification();
   }
 
   @override
@@ -110,6 +112,25 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = null;
     super.dispose();
+  }
+
+  void _handlePendingNotification() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nav = FcmService.consumePendingNavigation();
+      if (nav == null) return;
+
+      if (nav.type == 'reimbursement_admin_approved' ||
+          nav.type == 'reimbursement_admin_rejected') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HalamanAdminReimbursement(
+              initialDetailId: int.tryParse(nav.referenceId ?? ''),
+            ),
+          ),
+        );
+      }
+    });
   }
 
   // ── Auth & Identity ────────────────────────────────────────────────────────
@@ -860,13 +881,17 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
               size: badgeSize,
               iconSize: iconSize,
               color: Colors.red,
+              padding: EdgeInsets.symmetric(horizontal: badgeSize * 0.18),
               child: Text(
                 _unreadNotificationCount > 99
                     ? '99+'
                     : '$_unreadNotificationCount',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: badgeSize * 0.55,
+                  fontSize: badgeSize * 0.5,
                   fontWeight: FontWeight.bold,
                   height: 1.0,
                 ),
@@ -883,14 +908,15 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     required double iconSize,
     required Color color,
     required Widget child,
+    EdgeInsetsGeometry padding = EdgeInsets.zero,
   }) {
     final double offset = (48 - iconSize) / 2 - (size * 0.3);
     return Positioned(
       right: offset,
       top: offset,
       child: Container(
-        width: size,
-        height: size,
+        constraints: BoxConstraints(minWidth: size, minHeight: size),
+        padding: padding,
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(size / 2),

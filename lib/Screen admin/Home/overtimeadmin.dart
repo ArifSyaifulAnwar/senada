@@ -1,10 +1,16 @@
 // screens/overtime_admin_screen.dart
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
+import 'dart:io';
+
 import 'package:absensikaryawan/Screen%20admin/model/overtimemodeladmin.dart';
 import 'package:absensikaryawan/Screen%20admin/service/overtimeadminservice.dart';
+import 'package:absensikaryawan/Services/web_download.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class OvertimeAdminScreen extends StatefulWidget {
@@ -1645,6 +1651,49 @@ class _OvertimeDetailModalState extends State<OvertimeDetailModal> {
     }
   }
 
+  Future<void> _exportFormulir() async {
+    if (widget.item.status != 'Approved') {
+      _showErrorSnackBar('Formulir hanya bisa diexport setelah pengajuan disetujui');
+      return;
+    }
+
+    try {
+      setState(() => _isProcessing = true);
+
+      final res = await OvertimeAdminService.exportOvertimeFormAdmin(
+        overtimeId: widget.item.id,
+        adminId: widget.currentAdminId,
+      );
+
+      if (!res.success || res.data == null) {
+        _showErrorSnackBar(res.message);
+        return;
+      }
+
+      final safeName = widget.item.userName.replaceAll(' ', '_');
+      final fileName = 'Formulir_Lembur_${safeName}_${widget.item.id}.pdf';
+
+      if (kIsWeb) {
+        downloadFileWeb(res.data!, fileName);
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+        await file.writeAsBytes(res.data!);
+        final result = await OpenFile.open(file.path);
+        if (result.type != ResultType.done) {
+          _showErrorSnackBar('Tidak dapat membuka PDF: ${result.message}');
+          return;
+        }
+      }
+
+      _showSuccessSnackBar('Formulir PDF berhasil diexport');
+    } catch (e) {
+      _showErrorSnackBar('Gagal export formulir: $e');
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
   double _getResponsiveFontSize(BuildContext context, double baseSize) {
     final screenWidth = MediaQuery.of(context).size.width;
     if (screenWidth < 360) {
@@ -1946,6 +1995,26 @@ class _OvertimeDetailModalState extends State<OvertimeDetailModal> {
             ),
           ),
         ],
+      );
+    } else if (widget.item.status == 'Approved') {
+      return SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _isProcessing ? null : _exportFormulir,
+          icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+          label: const Text(
+            'Export Formulir PDF',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFEF4444),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
       );
     } else {
       return const SizedBox();

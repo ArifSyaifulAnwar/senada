@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/teguranhrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/timeoffhrd.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/asset_screen.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
@@ -889,13 +890,17 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               size: badgeSize,
               iconSize: iconSize,
               color: Colors.red,
+              padding: EdgeInsets.symmetric(horizontal: badgeSize * 0.18),
               child: Text(
                 _unreadNotificationCount > 99
                     ? '99+'
                     : '$_unreadNotificationCount',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: badgeSize * 0.55,
+                  fontSize: badgeSize * 0.5,
                   fontWeight: FontWeight.bold,
                   height: 1.0,
                 ),
@@ -912,6 +917,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     required double iconSize,
     required Color color,
     required Widget child,
+    EdgeInsetsGeometry padding = EdgeInsets.zero,
   }) {
     // Posisi badge: pojok kanan-atas icon
     final double offset = (48 - iconSize) / 2 - (size * 0.3);
@@ -919,8 +925,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       right: offset,
       top: offset,
       child: Container(
-        width: size,
-        height: size,
+        constraints: BoxConstraints(minWidth: size, minHeight: size),
+        padding: padding,
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(size / 2),
@@ -1199,6 +1205,15 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           MaterialPageRoute(builder: (_) => AssetScreen(userId: uid)),
         );
       },
+    ),
+    ServiceIconData(
+      icon: Icons.warning_amber_rounded,
+      label: 'Teguran',
+      color: const Color(0xFFEF4444),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const TeguranHrdScreen()),
+      ),
     ),
   ];
 

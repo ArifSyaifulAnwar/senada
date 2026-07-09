@@ -6,12 +6,17 @@ import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/liveattendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/infoprofile.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/reimbursement.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warningletterscreen.dart';
+import 'package:absensikaryawan/Screen%20User/home/halaman_finance_reimbursement.dart';
 import 'package:absensikaryawan/Screen%20User/home/overtime.dart';
 import 'package:absensikaryawan/Screen%20User/home/timeoff.dart';
+import '../../Screen HRD/Home/teguranhrd.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
+import 'package:absensikaryawan/Services/teguran_service.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/attendance_summary.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
@@ -63,6 +68,9 @@ class _HomePageState extends State<HomeScreen> {
   // ── Org approval count ──────────────────────────────────────────────────
   int _pendingOrgCount = 0;
 
+  // ── Deteksi Head (untuk menu Teguran) ────────────────────────────────────
+  bool _isDeptHead = false;
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +78,54 @@ class _HomePageState extends State<HomeScreen> {
     _checkTodayAttendanceStatus();
     _loadUnreadNotificationCount();
     _checkHariIniHome();
+    _handlePendingNotification();
+  }
+
+  void _handlePendingNotification() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final nav = FcmService.consumePendingNavigation();
+      if (nav == null) return;
+
+      final id = int.tryParse(nav.referenceId ?? '');
+
+      if (nav.type == 'teguran_new') {
+        if (userID == null || userID!.isEmpty) await loadUserId();
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => WarningLetterScreen(userId: userID ?? ''),
+          ),
+        );
+        return;
+      }
+
+      if (nav.type == 'reimbursement_approved_hrd') {
+        // Notifikasi ke Finance yang di-assign — langsung ke layar Finance,
+        // bukan layar reimbursement karyawan biasa.
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HalamanFinanceReimbursement(initialDetailId: id),
+          ),
+        );
+      } else if (nav.type == 'reimbursement_approved' ||
+          nav.type == 'reimbursement_rejected' ||
+          nav.type == 'reimbursement_revision' ||
+          nav.type == 'reimbursement_paid' ||
+          nav.type == 'reimbursement_admin_approved' ||
+          nav.type == 'reimbursement_admin_rejected' ||
+          nav.type == 'reimbursement_finance_review_approved' ||
+          nav.type == 'reimbursement_finance_review_rejected' ||
+          nav.type == 'reimbursement_finance_completed') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HalamanReimbursement(initialDetailId: id),
+          ),
+        );
+      }
+    });
   }
 
   Future<String?> loadUserId() async {
@@ -359,6 +415,15 @@ class _HomePageState extends State<HomeScreen> {
     if (mounted) setState(callback);
   }
 
+  // Cek apakah user login ini seorang Head (job_position 'HEAD OF...') —
+  // dipakai untuk menampilkan menu "Teguran" secara kondisional.
+  Future<void> _loadIsDeptHead() async {
+    final uid = _profileDisplay?.userId ?? userID;
+    if (uid == null || uid.isEmpty) return;
+    final result = await TeguranService.checkIsHead(uid);
+    _safeSetState(() => _isDeptHead = result.isHead);
+  }
+
   Future<void> _initializeUserInfo() async {
     try {
       _safeSetState(() {
@@ -371,6 +436,7 @@ class _HomePageState extends State<HomeScreen> {
         // Load org count setelah profile selesai (userId sudah tersedia)
         await loadUserId();
         await _loadPendingOrgCount();
+        _loadIsDeptHead();
       } else {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan token akses';
@@ -849,6 +915,16 @@ class _HomePageState extends State<HomeScreen> {
           ),
         ),
       ),
+      if (_isDeptHead)
+        _buildServiceIconData(
+          Icons.warning_amber_rounded,
+          "Teguran",
+          const Color(0xFFEF4444),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const TeguranHrdScreen()),
+          ),
+        ),
     ];
 
     return Container(

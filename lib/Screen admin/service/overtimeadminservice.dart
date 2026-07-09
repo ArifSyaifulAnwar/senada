@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:absensikaryawan/Screen%20admin/model/overtimemodeladmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
@@ -387,6 +388,44 @@ class OvertimeAdminService {
       }
     } catch (e) {
       return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        message: 'Koneksi bermasalah: ${e.toString()}',
+        data: null,
+      );
+    }
+  }
+
+  // Export formulir lembur per-request (PDF bertanda tangan + nomor dokumen)
+  static Future<ApiResponse<Uint8List>> exportOvertimeFormAdmin({
+    required int overtimeId,
+    required String adminId,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseURL$adminEndpoint/export-form'),
+            headers: await _getHeaders(),
+            body: jsonEncode({'overtimeId': overtimeId, 'adminId': adminId}),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (response.statusCode == 200) {
+        return ApiResponse<Uint8List>(
+          success: true,
+          message: 'Formulir berhasil diexport',
+          data: response.bodyBytes,
+        );
+      }
+
+      String msg = 'Gagal export formulir';
+      try {
+        final body = jsonDecode(response.body);
+        msg = (body['message'] ?? body['Message'] ?? msg).toString();
+      } catch (_) {}
+
+      return ApiResponse<Uint8List>(success: false, message: msg, data: null);
+    } catch (e) {
+      return ApiResponse<Uint8List>(
         success: false,
         message: 'Koneksi bermasalah: ${e.toString()}',
         data: null,

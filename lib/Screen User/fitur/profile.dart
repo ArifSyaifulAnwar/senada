@@ -8,6 +8,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/infoprofile.
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/keamanan.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kebijakanprivacy.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kontakdarurat.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warningletterscreen.dart';
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/profile.dart';
@@ -997,7 +998,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _l('reprimand'),
       iconSize: iconSz,
       fontSize: menuFs,
-      onTap: () => _showComingSoonDialog(context),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              WarningLetterScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
   ]);
 

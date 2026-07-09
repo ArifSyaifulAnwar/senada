@@ -1,5 +1,16 @@
 // models/admin_notification_models.dart
 
+// Backend ini kadang balikin JSON PascalCase (mis. "Id", "UserId") dan kadang
+// camelCase tergantung endpoint — helper ini coba dua-duanya supaya parsing
+// tidak crash kalau formatnya PascalCase.
+dynamic _j(Map<String, dynamic> json, String camelKey) {
+  if (json.containsKey(camelKey) && json[camelKey] != null) {
+    return json[camelKey];
+  }
+  final pascalKey = camelKey[0].toUpperCase() + camelKey.substring(1);
+  return json[pascalKey];
+}
+
 class AdminNotification {
   final int id;
   final String userId;
@@ -68,34 +79,36 @@ class AdminNotification {
 
   factory AdminNotification.fromJson(Map<String, dynamic> json) {
     return AdminNotification(
-      id: json['id'],
-      userId: json['userId'],
-      userName: json['userName'],
-      employeeNumber: json['employeeNumber'],
-      department: json['department'],
-      title: json['title'],
-      message: json['message'],
-      type: json['type'],
-      typeDisplay: json['typeDisplay'],
-      referenceId: json['referenceId'],
-      referenceType: json['referenceType'],
-      isRead: json['isRead'],
-      isImportant: json['isImportant'],
-      actionText: json['actionText'],
-      actionUrl: json['actionUrl'],
-      createdAt: DateTime.parse(json['createdAt']),
-      readAt: json['readAt'] != null ? DateTime.parse(json['readAt']) : null,
-      expiresAt: json['expiresAt'] != null
-          ? DateTime.parse(json['expiresAt'])
+      id: _j(json, 'id'),
+      userId: _j(json, 'userId'),
+      userName: _j(json, 'userName'),
+      employeeNumber: _j(json, 'employeeNumber'),
+      department: _j(json, 'department'),
+      title: _j(json, 'title'),
+      message: _j(json, 'message'),
+      type: _j(json, 'type'),
+      typeDisplay: _j(json, 'typeDisplay'),
+      referenceId: _j(json, 'referenceId'),
+      referenceType: _j(json, 'referenceType'),
+      isRead: _j(json, 'isRead') ?? false,
+      isImportant: _j(json, 'isImportant') ?? false,
+      actionText: _j(json, 'actionText'),
+      actionUrl: _j(json, 'actionUrl'),
+      createdAt: DateTime.parse(_j(json, 'createdAt')),
+      readAt: _j(json, 'readAt') != null
+          ? DateTime.parse(_j(json, 'readAt'))
           : null,
-      timeAgo: json['timeAgo'],
-      pdfFileName: json['pdfFileName'],
-      pdfFilePath: json['pdfFilePath'],
-      pdfFileSize: json['pdfFileSize'],
-      pdfUploadedAt: json['pdfUploadedAt'] != null
-          ? DateTime.parse(json['pdfUploadedAt'])
+      expiresAt: _j(json, 'expiresAt') != null
+          ? DateTime.parse(_j(json, 'expiresAt'))
           : null,
-      pdfUploadedBy: json['pdfUploadedBy'],
+      timeAgo: _j(json, 'timeAgo') ?? '',
+      pdfFileName: _j(json, 'pdfFileName'),
+      pdfFilePath: _j(json, 'pdfFilePath'),
+      pdfFileSize: _j(json, 'pdfFileSize'),
+      pdfUploadedAt: _j(json, 'pdfUploadedAt') != null
+          ? DateTime.parse(_j(json, 'pdfUploadedAt'))
+          : null,
+      pdfUploadedBy: _j(json, 'pdfUploadedBy'),
     );
   }
 }
@@ -109,6 +122,8 @@ class AdminNotificationRequest {
   final DateTime? dateFrom;
   final DateTime? dateTo;
   final String? searchText;
+  final String? requesterUserId;
+  final String? requesterRole;
 
   AdminNotificationRequest({
     this.page = 1,
@@ -119,6 +134,8 @@ class AdminNotificationRequest {
     this.dateFrom,
     this.dateTo,
     this.searchText,
+    this.requesterUserId,
+    this.requesterRole,
   });
 
   Map<String, dynamic> toJson() {
@@ -129,6 +146,8 @@ class AdminNotificationRequest {
     if (dateFrom != null) map['dateFrom'] = dateFrom!.toIso8601String();
     if (dateTo != null) map['dateTo'] = dateTo!.toIso8601String();
     if (searchText != null) map['searchText'] = searchText;
+    if (requesterUserId != null) map['requesterUserId'] = requesterUserId;
+    if (requesterRole != null) map['requesterRole'] = requesterRole;
     return map;
   }
 }
@@ -230,10 +249,10 @@ class NotificationTypeStats {
 
   factory NotificationTypeStats.fromJson(Map<String, dynamic> json) {
     return NotificationTypeStats(
-      type: json['type'],
-      typeDisplay: json['typeDisplay'],
-      count: json['count'],
-      unreadCount: json['unreadCount'],
+      type: _j(json, 'type') ?? '',
+      typeDisplay: _j(json, 'typeDisplay') ?? '',
+      count: _j(json, 'count') ?? 0,
+      unreadCount: _j(json, 'unreadCount') ?? 0,
     );
   }
 }
@@ -250,6 +269,8 @@ class CreateNotificationRequest {
   final String? actionUrl;
   final DateTime? expiresAt;
   final bool sendToAll;
+  final String? createdBy;
+  final String? requesterRole;
 
   CreateNotificationRequest({
     this.userId,
@@ -263,6 +284,8 @@ class CreateNotificationRequest {
     this.actionUrl,
     this.expiresAt,
     this.sendToAll = false,
+    this.createdBy,
+    this.requesterRole,
   });
 
   Map<String, dynamic> toJson() {
@@ -278,6 +301,8 @@ class CreateNotificationRequest {
       'actionUrl': actionUrl,
       'expiresAt': expiresAt?.toIso8601String(),
       'sendToAll': sendToAll,
+      'createdBy': createdBy,
+      'requesterRole': requesterRole,
     };
   }
 }
@@ -291,6 +316,7 @@ class UpdateNotificationRequest {
   final String? actionText;
   final String? actionUrl;
   final DateTime? expiresAt;
+  final String? requesterRole;
 
   UpdateNotificationRequest({
     required this.id,
@@ -301,6 +327,7 @@ class UpdateNotificationRequest {
     this.actionText,
     this.actionUrl,
     this.expiresAt,
+    this.requesterRole,
   });
 
   Map<String, dynamic> toJson() {
@@ -313,6 +340,7 @@ class UpdateNotificationRequest {
       'actionText': actionText,
       'actionUrl': actionUrl,
       'expiresAt': expiresAt?.toIso8601String(),
+      'requesterRole': requesterRole,
     };
   }
 }
@@ -336,12 +364,12 @@ class UserForNotification {
 
   factory UserForNotification.fromJson(Map<String, dynamic> json) {
     return UserForNotification(
-      userId: json['userId'],
-      name: json['name'],
-      employeeNumber: json['employeeNumber'],
-      department: json['department'],
-      position: json['position'],
-      mail: json['mail'],
+      userId: _j(json, 'userId') ?? '',
+      name: _j(json, 'name') ?? '',
+      employeeNumber: _j(json, 'employeeNumber'),
+      department: _j(json, 'department'),
+      position: _j(json, 'position'),
+      mail: _j(json, 'mail') ?? '',
     );
   }
 }
@@ -354,8 +382,8 @@ class NotificationTypeOption {
 
   factory NotificationTypeOption.fromJson(Map<String, dynamic> json) {
     return NotificationTypeOption(
-      value: json['value'],
-      display: json['display'],
+      value: _j(json, 'value') ?? '',
+      display: _j(json, 'display') ?? '',
     );
   }
 }

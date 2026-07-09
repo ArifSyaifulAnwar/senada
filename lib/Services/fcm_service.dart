@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -23,8 +24,16 @@ const AndroidNotificationChannel _channel = AndroidNotificationChannel(
 final FlutterLocalNotificationsPlugin _localNotif =
     FlutterLocalNotificationsPlugin();
 
+// Data pending-navigation dari notifikasi yang di-tap — dibawa sampai home
+// screen siap menavigasi ke layar yang dimaksud (mis. reimbursement tertentu).
+class PendingNav {
+  final String type;
+  final String? referenceId;
+  const PendingNav(this.type, this.referenceId);
+}
+
 class FcmService {
-  static String? _pendingNavigationType;
+  static PendingNav? _pendingNavigation;
 
   static Future<void> init() async {
     // Semua ini hanya untuk mobile — web tidak support
@@ -37,6 +46,11 @@ class FcmService {
 
     const initSettings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      iOS: DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      ),
     );
     await _localNotif.initialize(
       initSettings,
@@ -70,35 +84,9 @@ class FcmService {
         await FirebaseMessaging.instance.subscribeToTopic('admin_notifications');
       }
 
-      // Cek Head Finance → subscribe ke finance_notifications
-      try {
-        final tokenRes = await http.post(
-          Uri.parse('$baseURL/api/auth/token'),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-        ).timeout(const Duration(seconds: 10));
-        if (tokenRes.statusCode == 200) {
-          final accessToken = json.decode(tokenRes.body)['access_token'] as String?;
-          if (accessToken != null) {
-            final checkRes = await http.post(
-              Uri.parse('$baseURL/api/asn/reimbursement/is-head-finance'),
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer $accessToken',
-              },
-              body: jsonEncode({'userId': userId}),
-            ).timeout(const Duration(seconds: 10));
-            if (checkRes.statusCode == 200) {
-              final body = json.decode(checkRes.body);
-              final isHeadFinance = body['isHeadFinance'] == true || body['data'] == true;
-              if (isHeadFinance) {
-                await FirebaseMessaging.instance.subscribeToTopic('finance_notifications');
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
+      // Notifikasi personal (mis. Finance yang di-assign ke reimbursement
+      // tertentu) lewat topic per-user ini — tidak perlu lagi cek role
+      // Head Finance secara terpisah.
       await FirebaseMessaging.instance.subscribeToTopic('user_$userId');
       await _postToken(userId, token);
 
@@ -129,7 +117,11 @@ class FcmService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $accessToken',
         },
-        body: jsonEncode({'userId': userId, 'fcmToken': token, 'platform': 'android'}),
+        body: jsonEncode({
+          'userId': userId,
+          'fcmToken': token,
+          'platform': Platform.isIOS ? 'ios' : 'android',
+        }),
       );
     } catch (_) {}
   }
@@ -146,7 +138,6 @@ class FcmService {
       } else if (role == 'admin') {
         await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
       }
-      await FirebaseMessaging.instance.unsubscribeFromTopic('finance_notifications');
       if (userId != null && userId.isNotEmpty) {
         await FirebaseMessaging.instance.unsubscribeFromTopic('user_$userId');
       }
@@ -171,9 +162,9 @@ class FcmService {
     } catch (_) {}
   }
 
-  static String? consumePendingNavigation() {
-    final nav = _pendingNavigationType;
-    _pendingNavigationType = null;
+  static PendingNav? consumePendingNavigation() {
+    final nav = _pendingNavigation;
+    _pendingNavigation = null;
     return nav;
   }
 
@@ -194,20 +185,25 @@ class FcmService {
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
         ),
+        iOS: const DarwinNotificationDetails(),
       ),
       payload: jsonEncode(message.data),
     );
   }
 
   static void _onMessageTap(RemoteMessage message) {
-    _pendingNavigationType = message.data['type'];
+    final type = message.data['type'];
+    if (type == null) return;
+    _pendingNavigation = PendingNav(type, message.data['referenceId']);
   }
 
   static void _onLocalNotifTap(NotificationResponse response) {
     if (response.payload == null) return;
     try {
       final data = jsonDecode(response.payload!) as Map<String, dynamic>;
-      _pendingNavigationType = data['type'] as String?;
+      final type = data['type'] as String?;
+      if (type == null) return;
+      _pendingNavigation = PendingNav(type, data['referenceId'] as String?);
     } catch (_) {}
   }
 }

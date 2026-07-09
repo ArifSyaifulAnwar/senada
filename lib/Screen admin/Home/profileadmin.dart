@@ -16,6 +16,7 @@ import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Screen User/fitur/profile fitur/keamanan.dart';
 import '../../Screen User/fitur/profile fitur/kebijakanprivacy.dart';
 import '../../Screen User/fitur/profile fitur/kontakdarurat.dart';
+import '../../Screen User/fitur/profile fitur/warningletterscreen.dart';
 import '../../Screen User/home.dart';
 import '../../Screen User/splash_screen.dart';
 import '../../Services/config.dart';
@@ -784,7 +785,13 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     _MenuItem(
       icon: Icons.warning_amber_outlined,
       title: _t('reprimand'),
-      onTap: _showComingSoonDialog,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              WarningLetterScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
   ];
 

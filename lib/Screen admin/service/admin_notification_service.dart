@@ -8,9 +8,21 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminNotificationService {
   static const String _baseUrl = '$baseURL/api/admin/notifications';
+
+  // Token API aplikasi ini generik (bukan per-user), jadi identitas & role
+  // pemanggil (sudah tersimpan sejak login) harus disertakan manual di tiap
+  // request ke endpoint yang mengecek hak akses Admin/HRD.
+  static Future<Map<String, String?>> _getRequesterInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'requesterUserId': prefs.getString('UserID'),
+      'requesterRole': prefs.getString('Role'),
+    };
+  }
 
   static Future<String?> _getToken() async {
     try {
@@ -46,10 +58,14 @@ class AdminNotificationService {
   ) async {
     try {
       final headers = await _getHeaders();
+      final requesterInfo = await _getRequesterInfo();
+      final body = request.toJson();
+      body['requesterUserId'] ??= requesterInfo['requesterUserId'];
+      body['requesterRole'] ??= requesterInfo['requesterRole'];
       final response = await http.post(
         Uri.parse('$_baseUrl/list'),
         headers: headers,
-        body: jsonEncode(request.toJson()),
+        body: jsonEncode(body),
       );
 
       if (response.statusCode == 200) {
@@ -78,9 +94,11 @@ class AdminNotificationService {
   Future<AdminNotificationStats> getNotificationStats() async {
     try {
       final headers = await _getHeaders();
+      final requesterInfo = await _getRequesterInfo();
       final response = await http.post(
         Uri.parse('$_baseUrl/stats'),
         headers: headers,
+        body: jsonEncode(requesterInfo),
       );
 
       if (response.statusCode == 200) {
@@ -109,10 +127,14 @@ class AdminNotificationService {
   Future<bool> createNotification(CreateNotificationRequest request) async {
     try {
       final headers = await _getHeaders();
+      final requesterInfo = await _getRequesterInfo();
+      final body = request.toJson();
+      body['createdBy'] ??= requesterInfo['requesterUserId'];
+      body['requesterRole'] ??= requesterInfo['requesterRole'];
       final response = await http.post(
         Uri.parse('$_baseUrl/create'),
         headers: headers,
-        body: jsonEncode(request.toJson()),
+        body: jsonEncode(body),
       );
 
       if (response.statusCode == 200) {
@@ -254,10 +276,13 @@ class AdminNotificationService {
   Future<bool> updateNotification(UpdateNotificationRequest request) async {
     try {
       final headers = await _getHeaders();
+      final requesterInfo = await _getRequesterInfo();
+      final body = request.toJson();
+      body['requesterRole'] ??= requesterInfo['requesterRole'];
       final response = await http.post(
         Uri.parse('$_baseUrl/update'),
         headers: headers,
-        body: jsonEncode(request.toJson()),
+        body: jsonEncode(body),
       );
 
       if (response.statusCode == 200) {
@@ -283,10 +308,17 @@ class AdminNotificationService {
   Future<bool> deleteNotification(int id) async {
     try {
       final headers = await _getHeaders();
-      final response = await http.delete(
-        Uri.parse('$_baseUrl/delete/$id'),
-        headers: headers,
-      );
+      final requesterInfo = await _getRequesterInfo();
+      final query = {
+        if (requesterInfo['requesterUserId'] != null)
+          'requesterUserId': requesterInfo['requesterUserId']!,
+        if (requesterInfo['requesterRole'] != null)
+          'requesterRole': requesterInfo['requesterRole']!,
+      };
+      final uri = Uri.parse(
+        '$_baseUrl/delete/$id',
+      ).replace(queryParameters: query.isEmpty ? null : query);
+      final response = await http.delete(uri, headers: headers);
 
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);

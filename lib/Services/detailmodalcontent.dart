@@ -42,6 +42,14 @@ class _DetailModalContentState extends State<DetailModalContent> {
   ReimbursementAttachment? _receiptAttachment;
   ReimbursementAttachment? _paymentProofAttachment;
 
+  // Multi-attachment support (tabel baru, bisa lebih dari 1 file) — fallback
+  // ke _receiptAttachment (single, legacy) kalau tidak ada baris di sini.
+  List<ReimbursementAttachmentMeta> _attachmentMetas = [];
+  bool _isLoadingAttachmentList = false;
+  final Map<int, ReimbursementAttachment?> _attachmentBytesMap = {};
+  final Map<int, bool> _attachmentBytesLoading = {};
+  final Map<int, String?> _attachmentBytesError = {};
+
   bool _isLoading = true;
   bool _isLoadingReceipt = false;
   bool _isLoadingPaymentProof = false;
@@ -86,6 +94,8 @@ class _DetailModalContentState extends State<DetailModalContent> {
       if (_hasPaymentProof(result)) {
         _loadPaymentProofAttachment(result);
       }
+
+      _loadAttachmentList();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -101,6 +111,55 @@ class _DetailModalContentState extends State<DetailModalContent> {
       if (_hasPaymentProof(widget.initialItem)) {
         _loadPaymentProofAttachment(widget.initialItem);
       }
+
+      _loadAttachmentList();
+    }
+  }
+
+  Future<void> _loadAttachmentList() async {
+    if (_isLoadingAttachmentList) return;
+    setState(() => _isLoadingAttachmentList = true);
+    try {
+      final metas = await widget.reimbursementService.getAttachments(
+        reimbursementId: widget.initialItem.id,
+        userId: widget.currentUserId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _attachmentMetas = metas;
+        _isLoadingAttachmentList = false;
+      });
+      for (final meta in metas) {
+        _loadAttachmentBytes(meta.id);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingAttachmentList = false);
+    }
+  }
+
+  Future<void> _loadAttachmentBytes(int attachmentId) async {
+    if (_attachmentBytesLoading[attachmentId] == true) return;
+    setState(() {
+      _attachmentBytesLoading[attachmentId] = true;
+      _attachmentBytesError[attachmentId] = null;
+    });
+    try {
+      final att = await widget.reimbursementService.getAttachmentBytes(
+        attachmentId: attachmentId,
+        userId: widget.currentUserId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _attachmentBytesMap[attachmentId] = att;
+        _attachmentBytesLoading[attachmentId] = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _attachmentBytesMap[attachmentId] = null;
+        _attachmentBytesLoading[attachmentId] = false;
+        _attachmentBytesError[attachmentId] = e.toString();
+      });
     }
   }
 
@@ -433,7 +492,24 @@ class _DetailModalContentState extends State<DetailModalContent> {
               ] else if (_detailItem != null) ...[
                 _buildHeader(_detailItem!),
                 SizedBox(height: widget.getResponsivePadding(context, 20)),
-                if (_detailItem!.hasReceipt) ...[
+                if (_attachmentMetas.isNotEmpty ||
+                    _isLoadingAttachmentList) ...[
+                  Text(
+                    _attachmentMetas.length > 1
+                        ? 'Bukti Pembayaran (${_attachmentMetas.length} file)'
+                        : 'Bukti Pembayaran',
+                    style: TextStyle(
+                      fontSize: widget.getResponsiveFontSize(context, 16),
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _isLoadingAttachmentList && _attachmentMetas.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : _buildMultiAttachmentSection(),
+                  const SizedBox(height: 20),
+                ] else if (_detailItem!.hasReceipt) ...[
                   Text(
                     'Bukti Pembayaran',
                     style: TextStyle(
@@ -607,6 +683,196 @@ class _DetailModalContentState extends State<DetailModalContent> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildMultiAttachmentSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(_attachmentMetas.length, (index) {
+        final meta = _attachmentMetas[index];
+        final isLoading = _attachmentBytesLoading[meta.id] == true;
+        final att = _attachmentBytesMap[meta.id];
+        final err = _attachmentBytesError[meta.id];
+
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: index < _attachmentMetas.length - 1 ? 16 : 0,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_attachmentMetas.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'File ${index + 1} dari ${_attachmentMetas.length}',
+                    style: TextStyle(
+                      fontSize: widget.getResponsiveFontSize(context, 12),
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF64748B),
+                    ),
+                  ),
+                ),
+              Container(
+                height: 250,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(11),
+                  child: isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : att == null
+                      ? _buildAttachmentMetaError(meta, err)
+                      : att.isImage
+                      ? _buildImageAttachmentGeneric(att)
+                      : _buildDocumentAttachmentGeneric(att),
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildAttachmentMetaError(
+    ReimbursementAttachmentMeta meta,
+    String? err,
+  ) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.broken_image_outlined,
+              size: 42,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              err ?? 'File tidak dapat dimuat.',
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => _loadAttachmentBytes(meta.id),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Muat Ulang'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageAttachmentGeneric(ReimbursementAttachment attachment) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(color: Colors.white),
+        Padding(
+          padding: const EdgeInsets.all(6),
+          child: Image.memory(
+            Uint8List.fromList(attachment.bytes),
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) =>
+                const Center(child: Text('Gambar tidak dapat ditampilkan.')),
+          ),
+        ),
+        _buildGenericAttachmentButtons(attachment),
+      ],
+    );
+  }
+
+  Widget _buildDocumentAttachmentGeneric(ReimbursementAttachment attachment) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(
+          color: const Color(0xFFF8FAFC),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  attachment.extension == 'pdf'
+                      ? Icons.picture_as_pdf_outlined
+                      : Icons.insert_drive_file_outlined,
+                  size: 58,
+                  color: attachment.extension == 'pdf'
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF3B82F6),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(
+                    attachment.fileName,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF374151),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        _buildGenericAttachmentButtons(attachment),
+      ],
+    );
+  }
+
+  Widget _buildGenericAttachmentButtons(ReimbursementAttachment attachment) {
+    return Positioned(
+      right: 8,
+      bottom: 8,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _isAttachmentProcessing
+                ? null
+                : () => _previewAttachment(attachment),
+            icon: const Icon(Icons.visibility_outlined, size: 16),
+            label: const Text('Preview'),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF2563EB),
+              side: const BorderSide(color: Color(0xFFBFDBFE)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton.icon(
+            onPressed: _isAttachmentProcessing
+                ? null
+                : () => _downloadAttachment(attachment),
+            icon: const Icon(Icons.download_rounded, size: 16),
+            label: const Text('Download'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black87,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

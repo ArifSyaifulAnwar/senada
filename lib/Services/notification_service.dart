@@ -91,7 +91,12 @@ class NotificationService {
     try {
       final headers = await _getHeaders();
       final userId = await _getUserID();
-      final body = jsonEncode({'AdminId': userId, 'UserId': userId});
+      final prefs = await SharedPreferences.getInstance();
+      final role = prefs.getString('Role');
+      final body = jsonEncode({
+        'requesterUserId': userId,
+        'requesterRole': role,
+      });
 
       final response = await http
           .post(
