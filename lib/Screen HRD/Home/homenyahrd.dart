@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:absensikaryawan/Screen%20HRD/Home/berkaskantor.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Screen%20HRD/Home/teguranhrd.dart';
@@ -14,6 +15,7 @@ import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/nama.dart';
+import 'package:absensikaryawan/Services/office_file_service.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
@@ -104,6 +106,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
 
   // User identity — di-cache agar tidak bolak-balik SharedPreferences
   String? _userID;
+  bool _isOfficeFileHrdHead = false;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -112,6 +115,16 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     super.initState();
     _refreshAll(showLoading: true);
     _startAutoRefresh();
+    _checkOfficeFileAccess();
+  }
+
+  /// Cek apakah user ini Head HRD — dipakai untuk menampilkan/menyembunyikan
+  /// menu "Berkas Kantor" (akses fitur itu terbatas Head HRD + Finance).
+  Future<void> _checkOfficeFileAccess() async {
+    if (_userID == null || _userID!.isEmpty) await _loadUserId();
+    if (_userID == null || _userID!.isEmpty) return;
+    final access = await OfficeFileService.checkAccess(_userID!);
+    if (mounted) setState(() => _isOfficeFileHrdHead = access.isHrdHead);
   }
 
   @override
@@ -1215,6 +1228,16 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         MaterialPageRoute(builder: (_) => const TeguranHrdScreen()),
       ),
     ),
+    if (_isOfficeFileHrdHead)
+      ServiceIconData(
+        icon: Icons.folder_shared_outlined,
+        label: 'Berkas Kantor',
+        color: const Color(0xFF0EA5E9),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const BerkasKantorScreen()),
+        ),
+      ),
   ];
 
   Widget _buildServiceIconsSection(double scale) {

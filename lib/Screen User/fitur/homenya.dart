@@ -10,10 +10,12 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warninglette
 import 'package:absensikaryawan/Screen%20User/home/halaman_finance_reimbursement.dart';
 import 'package:absensikaryawan/Screen%20User/home/overtime.dart';
 import 'package:absensikaryawan/Screen%20User/home/timeoff.dart';
+import '../../Screen HRD/Home/berkaskantor.dart';
 import '../../Screen HRD/Home/teguranhrd.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
+import 'package:absensikaryawan/Services/office_file_service.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/teguran_service.dart';
@@ -70,6 +72,9 @@ class _HomePageState extends State<HomeScreen> {
 
   // ── Deteksi Head (untuk menu Teguran) ────────────────────────────────────
   bool _isDeptHead = false;
+
+  // ── Deteksi Finance (untuk menu Berkas Kantor) ───────────────────────────
+  bool _isOfficeFileFinance = false;
 
   @override
   void initState() {
@@ -424,6 +429,16 @@ class _HomePageState extends State<HomeScreen> {
     _safeSetState(() => _isDeptHead = result.isHead);
   }
 
+  // Cek apakah user login ini Finance — dipakai untuk menampilkan menu
+  // "Berkas Kantor" secara kondisional (akses fitur itu terbatas Head HRD +
+  // Finance; Head HRD dapat menu ini dari homenyahrd.dart, bukan di sini).
+  Future<void> _loadIsOfficeFileFinance() async {
+    final uid = _profileDisplay?.userId ?? userID;
+    if (uid == null || uid.isEmpty) return;
+    final access = await OfficeFileService.checkAccess(uid);
+    _safeSetState(() => _isOfficeFileFinance = access.isFinance);
+  }
+
   Future<void> _initializeUserInfo() async {
     try {
       _safeSetState(() {
@@ -437,6 +452,7 @@ class _HomePageState extends State<HomeScreen> {
         await loadUserId();
         await _loadPendingOrgCount();
         _loadIsDeptHead();
+        _loadIsOfficeFileFinance();
       } else {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan token akses';
@@ -923,6 +939,16 @@ class _HomePageState extends State<HomeScreen> {
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const TeguranHrdScreen()),
+          ),
+        ),
+      if (_isOfficeFileFinance)
+        _buildServiceIconData(
+          Icons.folder_shared_outlined,
+          "Berkas Kantor",
+          const Color(0xFF0EA5E9),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const BerkasKantorScreen()),
           ),
         ),
     ];
