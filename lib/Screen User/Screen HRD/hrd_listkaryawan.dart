@@ -43,6 +43,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
   // Web: detail panel
   EmployeeData? _selectedEmployee;
   bool _isLoadingDetail = false;
+  bool _togglingActive = false;
 
   final TextEditingController _searchCtrl = TextEditingController();
 
@@ -173,6 +174,46 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
         _selectedEmployee = res.data!.toEmployeeData();
       }
     });
+  }
+
+  // Akun Direktur cuma dipakai sesekali — HRD bisa aktif/nonaktifkan sesuai
+  // kebutuhan (login diblokir kalau nonaktif, sudah ditangani backend).
+  bool _isDirektur(EmployeeData emp) {
+    final jabatan = emp.jabatan.toUpperCase();
+    final dept = emp.departemen.toUpperCase();
+    return jabatan.contains('DIREKTUR') || dept.contains('DIREKTUR');
+  }
+
+  Future<void> _toggleAccountActive(EmployeeData emp, bool value) async {
+    setState(() => _togglingActive = true);
+    final res = await HrdEmployeeService.setAccountActive(
+      id: emp.id,
+      active: value,
+    );
+    if (!mounted) return;
+    setState(() => _togglingActive = false);
+
+    if (res.success) {
+      _showSnack(
+        value ? 'Akun Direktur diaktifkan.' : 'Akun Direktur dinonaktifkan.',
+        isError: false,
+      );
+      // Reset filter status & halaman ke awal — kalau sebelumnya sedang
+      // difilter (mis. "Aktif") dan barusan dinonaktifkan, dia akan otomatis
+      // hilang dari list ter-filter dan tidak ada jalan untuk mengaktifkannya
+      // lagi.
+      _selectedStatus = 'Semua';
+      _currentPage = 1;
+      if (_selectedEmployee?.id == emp.id) {
+        final detail = await HrdEmployeeService.getEmployeeDetail(emp.id);
+        if (mounted && detail.success && detail.data != null) {
+          setState(() => _selectedEmployee = detail.data!.toEmployeeData());
+        }
+      }
+      await _loadData();
+    } else {
+      _showSnack(res.message, isError: true);
+    }
   }
 
   void _showSnack(String msg, {required bool isError}) {
@@ -997,6 +1038,10 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
               ),
             ],
           ),
+          if (_isDirektur(emp)) ...[
+            const SizedBox(height: 16),
+            _buildDirekturActiveToggle(emp),
+          ],
           const SizedBox(height: 24),
           // Detail sections
           _buildDetailSection('Informasi Personal', [
@@ -1119,6 +1164,72 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
               }).toList(),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  // Toggle khusus akun Direktur — akun ini cuma dibutuhkan sesekali, jadi
+  // HRD bisa aktifkan/nonaktifkan sesuai kebutuhan. Login otomatis diblokir
+  // backend selama akun nonaktif.
+  Widget _buildDirekturActiveToggle(EmployeeData emp) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: emp.active
+            ? Colors.green.withOpacity(0.06)
+            : Colors.red.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: emp.active
+              ? Colors.green.withOpacity(0.25)
+              : Colors.red.withOpacity(0.25),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.admin_panel_settings,
+            color: emp.active ? Colors.green : Colors.red,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Akun Direktur',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1E293B),
+                  ),
+                ),
+                Text(
+                  emp.active
+                      ? 'Aktif — bisa login sekarang'
+                      : 'Nonaktif — tidak bisa login',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: emp.active ? Colors.green[700] : Colors.red[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_togglingActive)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Switch(
+              value: emp.active,
+              activeColor: Colors.green,
+              onChanged: (v) => _toggleAccountActive(emp, v),
+            ),
         ],
       ),
     );
@@ -1280,6 +1391,39 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
                   ),
                 ],
               ),
+              if (_isDirektur(emp)) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.admin_panel_settings,
+                      color: emp.active ? Colors.green : Colors.red,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        emp.active
+                            ? 'Akun Direktur Aktif'
+                            : 'Akun Direktur Nonaktif',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: emp.active ? Colors.green[700] : Colors.red[700],
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: emp.active,
+                      activeColor: Colors.green,
+                      onChanged: (v) {
+                        Navigator.pop(context);
+                        _toggleAccountActive(emp, v);
+                      },
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
               // Edit / Hapus
               Row(

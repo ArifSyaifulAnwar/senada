@@ -643,7 +643,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           : 'Tidak Hadir';
 
       final tidakHadir = employees
-          .where((e) => !hadirUserIds.contains(e.userId))
+          .where((e) => e.isActive && !hadirUserIds.contains(e.userId))
           .map(
             (e) => {
               'userId': e.userId,

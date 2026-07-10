@@ -307,6 +307,7 @@ class EmployeeApiData {
       bankName: bankName,
       bankAccountNumber: bankAccountNumber,
       bankAccountName: bankAccountName,
+      active: active,
     );
   }
 }

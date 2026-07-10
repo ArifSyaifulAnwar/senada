@@ -67,6 +67,7 @@ class EmployeeData {
   final String? bankName;
   final String? bankAccountNumber;
   final String? bankAccountName;
+  final bool active;
 
   EmployeeData({
     required this.id,
@@ -113,6 +114,7 @@ class EmployeeData {
     this.bankName,
     this.bankAccountNumber,
     this.bankAccountName,
+    this.active = true,
   });
 }
 

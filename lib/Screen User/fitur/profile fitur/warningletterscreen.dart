@@ -53,11 +53,16 @@ class _WarningLetterScreenState extends State<WarningLetterScreen> {
   String? _errorMessage;
   final Set<int> _downloadingIds = {};
 
-  Future<void> _downloadAndOpenSurat(int id) async {
+  Future<void> _downloadAndOpenSurat(WarningLetter letter) async {
+    final id = letter.id;
     setState(() => _downloadingIds.add(id));
     try {
       final bytes = await TeguranService.downloadTeguranPdf(id);
-      final fileName = 'SuratTeguran_$id.pdf';
+      final fileName = TeguranService.buildSuratFileName(
+        userName: null,
+        userId: widget.userId,
+        level: letter.level,
+      );
 
       if (kIsWeb) {
         downloadFileWeb(fileName, bytes);
@@ -413,7 +418,7 @@ class _WarningLetterScreenState extends State<WarningLetterScreen> {
                                   icon: const Icon(Icons.picture_as_pdf_outlined),
                                   color: _colorForLevel(w.level),
                                   tooltip: 'Lihat/Unduh Surat',
-                                  onPressed: () => _downloadAndOpenSurat(w.id),
+                                  onPressed: () => _downloadAndOpenSurat(w),
                                 ),
                           minVerticalPadding: 0,
                           dense: screenWidth < 380,

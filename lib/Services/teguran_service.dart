@@ -139,6 +139,43 @@ class TeguranService {
     }
   }
 
+  /// Koreksi teguran yang sudah dibuat (level/judul/deskripsi/tanggal).
+  /// UserId/issuedBy/noSurat tidak berubah.
+  static Future<({bool success, String message, TeguranData? data})> updateTeguran({
+    required int id,
+    required String level,
+    required String judul,
+    String? deskripsi,
+    required DateTime tanggal,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseURL/api/teguran/update'),
+        headers: await _headers(),
+        body: json.encode({
+          'id': id,
+          'level': level,
+          'judul': judul,
+          'deskripsi': deskripsi,
+          'tanggal': tanggal.toIso8601String(),
+        }),
+      );
+
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      final success = _r(body, 'success') == true;
+      final message = (_r(body, 'message') ?? '').toString();
+      final dataJson = _r(body, 'data');
+
+      return (
+        success: success,
+        message: message.isNotEmpty ? message : (success ? 'Teguran berhasil diperbarui.' : 'Gagal memperbarui teguran.'),
+        data: dataJson != null ? TeguranData.fromJson(dataJson as Map<String, dynamic>) : null,
+      );
+    } catch (e) {
+      return (success: false, message: 'Terjadi kesalahan jaringan: $e', data: null);
+    }
+  }
+
   /// Karyawan melihat daftar teguran miliknya sendiri.
   static Future<List<TeguranData>> getMyTeguran(String userId) async {
     try {
@@ -216,6 +253,13 @@ class TeguranService {
   }
 
   /// Unduh surat PDF teguran (generate on-demand di server).
+  ///
+  /// Nama file SENGAJA tidak diambil dari header Content-Disposition —
+  /// di Flutter Web, browser menyembunyikan header itu dari JS kecuali
+  /// server expose eksplisit (Access-Control-Expose-Headers), jadi tidak
+  /// reliable lintas platform. Nama file dibangun di client lewat
+  /// [buildSuratFileName] dari data yang sudah ada di memory (userName +
+  /// level), dipanggil terpisah oleh caller.
   static Future<Uint8List> downloadTeguranPdf(int id) async {
     final response = await http
         .post(
@@ -242,5 +286,22 @@ class TeguranService {
     }
 
     return Uint8List.fromList(response.bodyBytes);
+  }
+
+  /// Bangun nama file surat: SuratTeguran_{NamaKaryawan}_{Level}.pdf
+  /// (dibersihkan dari spasi/karakter yang tidak aman untuk nama file).
+  static String buildSuratFileName({
+    String? userName,
+    String? userId,
+    required String level,
+  }) {
+    String sanitize(String s) =>
+        s.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+
+    final namePart = sanitize(userName ?? userId ?? '');
+    final levelPart = sanitize(level);
+    final parts = [namePart, levelPart].where((p) => p.isNotEmpty).join('_');
+
+    return parts.isEmpty ? 'SuratTeguran.pdf' : 'SuratTeguran_$parts.pdf';
   }
 }

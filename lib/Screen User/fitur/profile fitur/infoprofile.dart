@@ -1,5 +1,6 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -8,7 +9,12 @@ import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/filecategory.dart';
 import 'package:absensikaryawan/Services/fileuserresponse.dart';
 import 'package:absensikaryawan/Services/profile.dart';
+import 'package:absensikaryawan/Screen%20User/Screen%20HRD/hrd_employee_service.dart';
+import 'package:absensikaryawan/Screen%20admin/service/web_preview.dart';
+import 'package:absensikaryawan/models/employee_models.dart';
+import 'package:absensikaryawan/utils/web_file_download.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -63,6 +69,11 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
   List<FileUserAdminResponse> _hrdAllFiles = [];
   String _hrdSearchQuery = '';
   String _hrdSelectedCategory = 'Semua';
+  // Daftar karyawan (untuk picker "Upload untuk karyawan" + resolve email
+  // pemilik file saat edit/hapus) — di-load sekali & malas (lazy), hanya
+  // ketika tab "File Karyawan" pertama kali dipakai untuk aksi CRUD.
+  List<EmployeeApiData> _hrdEmployeesForPicker = [];
+  bool _isLoadingHRDEmployeePicker = false;
   int _selectedTabIndex = 0;
   // final List<String> _tabs = ["Personal", "Profesional", "Dokumen"];
   List<String> get _tabs {
@@ -104,8 +115,6 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     setState(() => _isCheckingHRDAccess = true);
 
     try {
-      if (_accessToken == null) await _getToken();
-
       final prefs = await SharedPreferences.getInstance();
       final requestUserId = prefs.getString('UserID') ?? '';
 
@@ -117,12 +126,9 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
         return;
       }
 
-      final response = await http.post(
-        Uri.parse('$baseURL/api/asn/file/getAllHRD'),
-        headers: {
-          'Authorization': 'Bearer $_accessToken',
-          'Content-Type': 'application/json',
-        },
+      final response = await _makeAuthenticatedRequest(
+        url: '$baseURL/api/asn/file/getAllHRD',
+        headers: {'Content-Type': 'application/json'},
         body: json.encode({'RequestUserId': requestUserId}),
       );
 
@@ -154,14 +160,10 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     try {
       final prefs = await SharedPreferences.getInstance();
       final requestUserId = prefs.getString('UserID') ?? '';
-      if (_accessToken == null) await _getToken();
 
-      final response = await http.post(
-        Uri.parse('$baseURL/api/asn/file/getAllHRD'),
-        headers: {
-          'Authorization': 'Bearer $_accessToken',
-          'Content-Type': 'application/json',
-        },
+      final response = await _makeAuthenticatedRequest(
+        url: '$baseURL/api/asn/file/getAllHRD',
+        headers: {'Content-Type': 'application/json'},
         body: json.encode({'RequestUserId': requestUserId}),
       );
 
@@ -181,21 +183,440 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     }
   }
 
+  Future<void> _ensureHRDEmployeePickerLoaded() async {
+    if (_hrdEmployeesForPicker.isNotEmpty || _isLoadingHRDEmployeePicker) {
+      return;
+    }
+    _safeSetState(() => _isLoadingHRDEmployeePicker = true);
+    try {
+      // Sengaja TIDAK filter status: file bisa saja milik karyawan yang
+      // sedang Cuti/Non-Aktif — kalau difilter 'Aktif', resolve email untuk
+      // edit/hapus file mereka akan gagal ("Email pemilik tidak ditemukan").
+      final res = await HrdEmployeeService.getEmployeeList(
+        pageSize: 1000,
+      );
+      if (res.success && res.data != null) {
+        _safeSetState(() => _hrdEmployeesForPicker = res.data!.data);
+      }
+    } catch (_) {
+    } finally {
+      _safeSetState(() => _isLoadingHRDEmployeePicker = false);
+    }
+  }
+
+  /// Cari email pemilik file dari userId-nya — dipakai saat edit/hapus file
+  /// karyawan lain, karena endpoint file/update & file/delete mewajibkan
+  /// UserId+Mail pemilik file yang benar (validasi kepemilikan di backend).
+  String? _resolveEmployeeMail(String userId) {
+    for (final e in _hrdEmployeesForPicker) {
+      if (e.userId == userId) return e.email;
+    }
+    return null;
+  }
+
+  // Upload dokumen baru untuk salah satu karyawan (bukan diri sendiri) —
+  // pilih karyawan dulu, baru pilih file-nya.
+  Future<void> _startUploadForEmployee() async {
+    await _ensureHRDEmployeePickerLoaded();
+    if (!mounted) return;
+
+    final picked = await showDialog<EmployeeApiData>(
+      context: context,
+      builder: (_) => _EmployeePickerDialog(
+        employees: _hrdEmployeesForPicker,
+        loading: _isLoadingHRDEmployeePicker,
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        withData: true,
+      );
+      if (result == null || !mounted) return;
+
+      final name = result.files.single.name;
+      final fb = result.files.single.bytes;
+      if (fb == null || fb.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('File tidak dapat dibaca. Silakan pilih ulang.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      final mime = lookupMimeType(name);
+
+      await _showUploadDialog(
+        picked.userId,
+        picked.email,
+        name,
+        fb,
+        mime,
+        onSuccess: _reloadHRDAllFiles,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteHRDFile(FileUserAdminResponse f) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Dokumen'),
+        content: Text(
+          'Hapus dokumen "${f.name}" milik ${f.employeeName}? Tindakan ini tidak dapat dibatalkan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Hapus', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    await _ensureHRDEmployeePickerLoaded();
+    if (!mounted) return;
+    final mail = _resolveEmployeeMail(f.userId);
+    if (mail == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Email pemilik file tidak ditemukan.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Menghapus file...'),
+          ],
+        ),
+      ),
+    );
+    try {
+      final response = await _makeAuthenticatedRequest(
+        url: '$baseURL/api/asn/file/delete',
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'Id': f.id, 'UserId': f.userId, 'Mail': mail}),
+      );
+      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('File berhasil dihapus'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _reloadHRDAllFiles();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal menghapus: ${response.body}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // Edit metadata (kategori/deskripsi) dokumen karyawan, dengan opsi ganti
+  // file. Kalau file tidak diganti, file lama didownload lalu dikirim ulang
+  // apa adanya — supaya aman berapa pun cara udp_file_user_update_by_id
+  // menangani parameter file yang kosong.
+  Future<void> _startEditHRDFile(FileUserAdminResponse f) async {
+    // Ambil daftar karyawan (untuk resolve email) di LATAR BELAKANG — tidak
+    // di-await di sini supaya dialog Edit langsung muncul tanpa nunggu.
+    // Baru dipakai nanti saat tombol "Simpan" ditekan.
+    unawaited(_ensureHRDEmployeePickerLoaded());
+
+    final descCtrl = TextEditingController(text: f.description);
+    final uploadCats = _categories.where((c) => c.name != 'Semua').toList();
+    FileCategory? selCat = uploadCats.firstWhere(
+      (c) => c.name == f.fileCategory,
+      orElse: () => uploadCats.isNotEmpty
+          ? uploadCats.first
+          : FileCategory(id: 0, name: f.fileCategory),
+    );
+
+    Uint8List? newFileBytes;
+    String? newFileName;
+    String? newMimeType;
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDS) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.edit, color: Color(0xFF007AFF)),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Edit Dokumen')),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context, false),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${f.employeeName} • ${f.jobPosition}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF007AFF),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final result = await FilePicker.platform.pickFiles(
+                      type: FileType.any,
+                      withData: true,
+                    );
+                    if (result == null) return;
+                    final name = result.files.single.name;
+                    final bytes = result.files.single.bytes;
+                    if (bytes == null || bytes.isEmpty) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'File tidak dapat dibaca. Silakan pilih ulang.',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                      return;
+                    }
+                    setDS(() {
+                      newFileBytes = bytes;
+                      newFileName = name;
+                      newMimeType = lookupMimeType(name);
+                    });
+                  },
+                  icon: const Icon(Icons.attach_file, size: 18),
+                  label: Text(
+                    newFileName ?? 'Ganti File (opsional, kosongkan = tetap)',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Kategori',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<FileCategory>(
+                      value: selCat,
+                      isExpanded: true,
+                      items: uploadCats
+                          .map(
+                            (c) =>
+                                DropdownMenuItem(value: c, child: Text(c.name)),
+                          )
+                          .toList(),
+                      onChanged: (v) => setDS(() => selCat = v),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Deskripsi',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: descCtrl,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: selCat == null
+                  ? null
+                  : () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF007AFF),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Simpan'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Menyimpan perubahan...'),
+          ],
+        ),
+      ),
+    );
+
+    // Pastikan daftar karyawan (untuk resolve email pemilik file) sudah
+    // ter-load — biasanya sudah selesai di latar belakang selama user isi
+    // form, jadi baris ini normalnya langsung lanjut tanpa jeda.
+    await _ensureHRDEmployeePickerLoaded();
+    final mail = _resolveEmployeeMail(f.userId);
+    if (mail == null) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Email pemilik file tidak ditemukan.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      // udp_file_user_update_by_id memakai ISNULL(@filecontent, filecontent)
+      // / ISNULL(@filetype, filetype) — kirim null kalau file tidak diganti,
+      // SP otomatis pertahankan file lama. Tidak perlu download+upload ulang
+      // isi file yang sama.
+      final response = await _makeAuthenticatedRequest(
+        url: '$baseURL/api/asn/file/update',
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'Id': f.id,
+          'UserId': f.userId,
+          'Mail': mail,
+          'Name': newFileName ?? f.name,
+          'FileCategory': selCat!.name,
+          'Description': descCtrl.text,
+          'FileContent': newFileBytes != null
+              ? base64Encode(newFileBytes!)
+              : null,
+          'FileType': newFileBytes != null ? newMimeType : null,
+        }),
+      );
+      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Dokumen berhasil diperbarui'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await _reloadHRDAllFiles();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal memperbarui: ${response.body}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<Uint8List> _downloadHRDFileContent(int fileId) async {
     final prefs = await SharedPreferences.getInstance();
     final requestUserId = prefs.getString('UserID') ?? '';
 
-    final response = await http.post(
-      Uri.parse('$baseURL/api/asn/file/downloadAdminHRD'),
-      headers: {
-        'Authorization': 'Bearer $_accessToken',
-        'Content-Type': 'application/json',
-      },
+    final response = await _makeAuthenticatedRequest(
+      url: '$baseURL/api/asn/file/downloadAdminHRD',
+      headers: {'Content-Type': 'application/json'},
       body: json.encode({'RequestUserId': requestUserId, 'FileId': fileId}),
     );
 
     if (response.statusCode == 200) return response.bodyBytes;
     throw Exception('Gagal mengunduh file: ${response.statusCode}');
+  }
+
+  /// Nama file saat dibuka/diunduh: {NamaKaryawan}_{KategoriFile}.{ekstensi}
+  /// — supaya jelas ini file siapa & jenisnya apa (CV, KTP, dll), bukan
+  /// cuma id angka + nama file asli yang belum tentu deskriptif.
+  String _buildHRDFileDisplayName(FileUserAdminResponse file) {
+    String sanitize(String s) =>
+        s.trim().replaceAll(RegExp(r'[^A-Za-z0-9]+'), '');
+
+    final namePart = sanitize(file.employeeName);
+    final catPart = sanitize(file.fileCategory);
+    final dotIndex = file.name.lastIndexOf('.');
+    final ext = dotIndex >= 0 ? file.name.substring(dotIndex) : '';
+
+    final parts = [namePart, catPart].where((p) => p.isNotEmpty).join('_');
+    return (parts.isEmpty ? 'Dokumen' : parts) + ext;
   }
 
   Future<void> _openHRDFile(FileUserAdminResponse file) async {
@@ -230,18 +651,91 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
         return;
       }
 
-      final dir = await getTemporaryDirectory();
-      final safeName =
-          '${file.id}_${file.name.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')}';
-      final f = File('${dir.path}/$safeName');
-      await f.writeAsBytes(bytes);
-      await OpenFile.open(f.path);
+      final safeName = _buildHRDFileDisplayName(file);
+
+      if (kIsWeb) {
+        // Buka di tab baru (viewer bawaan browser) — BUKAN unduh langsung.
+        openBytesInBrowser(
+          bytes,
+          safeName,
+          file.fileType.isEmpty ? 'application/octet-stream' : file.fileType,
+        );
+      } else {
+        final dir = await getTemporaryDirectory();
+        final f = File('${dir.path}/$safeName');
+        await f.writeAsBytes(bytes);
+        final result = await OpenFile.open(f.path);
+        if (result.type != ResultType.done && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tidak ada aplikasi untuk membuka file ini.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Gagal membuka file: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Unduh eksplisit ke perangkat — beda dengan "Lihat" (_openHRDFile) yang
+  // cuma preview/buka sementara. Web: trigger save-as lewat browser.
+  // Mobile: simpan permanen ke folder dokumen aplikasi.
+  Future<void> _downloadHRDFile(FileUserAdminResponse file) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Text('Mengunduh file...'),
+          ],
+        ),
+      ),
+    );
+    try {
+      final bytes = await _downloadHRDFileContent(file.id);
+      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+
+      final safeName = _buildHRDFileDisplayName(file);
+
+      if (kIsWeb) {
+        downloadFileWeb(safeName, bytes);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('File sedang diunduh.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        final dir = await getApplicationDocumentsDirectory();
+        final f = File('${dir.path}/$safeName');
+        await f.writeAsBytes(bytes, flush: true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('File tersimpan: ${f.path}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal mengunduh file: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -546,8 +1040,9 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     Uint8List fileBytes,
     String? mimeType,
     String category,
-    String description,
-  ) async {
+    String description, {
+    Future<void> Function()? onSuccess,
+  }) async {
     if (!mounted) return;
     showDialog(
       context: context,
@@ -585,7 +1080,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
             backgroundColor: Colors.green,
           ),
         );
-        await _loadUserFiles();
+        await (onSuccess ?? _loadUserFiles)();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1032,13 +1527,24 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
           mimeType = lookupMimeType(image.path) ?? 'image/jpeg';
         }
       } else {
-        final result = await FilePicker.platform.pickFiles(type: FileType.any);
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.any,
+          withData: true,
+        );
         if (result != null) {
-          final path = result.files.single.path!;
           final name = result.files.single.name;
+          final fb = result.files.single.bytes;
           final mime = lookupMimeType(name);
-          final fb = await File(path).readAsBytes();
-          await _showUploadDialog(userId, mail, name, fb, mime);
+          if (fb != null && fb.isNotEmpty && mounted) {
+            await _showUploadDialog(userId, mail, name, fb, mime);
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('File tidak dapat dibaca. Silakan pilih ulang.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
           return;
         }
       }
@@ -1059,8 +1565,9 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     String mail,
     String fileName,
     Uint8List fileBytes,
-    String? mimeType,
-  ) async {
+    String? mimeType, {
+    Future<void> Function()? onSuccess,
+  }) async {
     if (!mounted) return;
     final descCtrl = TextEditingController();
     FileCategory? selCat;
@@ -1069,16 +1576,23 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
 
     return showDialog<void>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => StatefulBuilder(
         builder: (context, setDS) => AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.cloud_upload, color: Color(0xFF007AFF)),
-              SizedBox(width: 8),
-              Text('Upload Dokumen'),
+              const Icon(Icons.cloud_upload, color: Color(0xFF007AFF)),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Upload Dokumen')),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
             ],
           ),
           content: SingleChildScrollView(
@@ -1191,6 +1705,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
                         mimeType,
                         selCat!.name,
                         descCtrl.text,
+                        onSuccess: onSuccess,
                       );
                     },
               style: ElevatedButton.styleFrom(
@@ -1428,6 +1943,23 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
                       }).toList(),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _startUploadForEmployee,
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: const Text('Upload Dokumen untuk Karyawan'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF007AFF),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1449,10 +1981,13 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           decoration: BoxDecoration(
-                            color: Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: Colors.grey.shade200),
                           ),
+                          child: Material(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          clipBehavior: Clip.antiAlias,
                           child: ListTile(
                             onTap: () => _openHRDFile(f),
                             leading: Container(
@@ -1500,7 +2035,43 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
                                 ),
                               ],
                             ),
-                            trailing: const Icon(Icons.chevron_right, size: 18),
+                            trailing: PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, size: 20),
+                              onSelected: (value) {
+                                if (value == 'download') {
+                                  _downloadHRDFile(f);
+                                }
+                                if (value == 'edit') _startEditHRDFile(f);
+                                if (value == 'delete') {
+                                  _confirmDeleteHRDFile(f);
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'download',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.download,
+                                        size: 16,
+                                        color: Colors.grey,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Unduh'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Edit'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Hapus'),
+                                ),
+                              ],
+                            ),
+                          ),
                           ),
                         );
                       },
@@ -2783,4 +3354,100 @@ class _ItemData {
     this.valueColor,
     this.sectionBefore,
   });
+}
+
+// ── Dialog pilih karyawan (upload dokumen untuk karyawan lain) ──────────────
+class _EmployeePickerDialog extends StatefulWidget {
+  final List<EmployeeApiData> employees;
+  final bool loading;
+
+  const _EmployeePickerDialog({
+    required this.employees,
+    required this.loading,
+  });
+
+  @override
+  State<_EmployeePickerDialog> createState() => _EmployeePickerDialogState();
+}
+
+class _EmployeePickerDialogState extends State<_EmployeePickerDialog> {
+  final _searchCtrl = TextEditingController();
+  String _q = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _q.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? widget.employees
+        : widget.employees.where((e) {
+            return e.name.toLowerCase().contains(q) ||
+                (e.jobPosition ?? '').toLowerCase().contains(q) ||
+                (e.department ?? '').toLowerCase().contains(q);
+          }).toList();
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Pilih Karyawan'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Cari nama karyawan...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onChanged: (v) => setState(() => _q = v),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 320,
+              child: widget.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filtered.isEmpty
+                  ? const Center(child: Text('Karyawan tidak ditemukan.'))
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Material(
+                        child: ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (context, i) {
+                            final e = filtered[i];
+                            return ListTile(
+                              title: Text(e.name),
+                              subtitle: Text(
+                                [
+                                  e.jobPosition,
+                                  e.department,
+                                ].where((v) => (v ?? '').isNotEmpty).join(' • '),
+                              ),
+                              onTap: () => Navigator.pop(context, e),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+      ],
+    );
+  }
 }

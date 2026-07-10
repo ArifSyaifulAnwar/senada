@@ -88,7 +88,7 @@ class _HomePageState extends State<HomeScreen> {
 
       final id = int.tryParse(nav.referenceId ?? '');
 
-      if (nav.type == 'teguran_new') {
+      if (nav.type == 'teguran_new' || nav.type == 'teguran_updated') {
         if (userID == null || userID!.isEmpty) await loadUserId();
         if (!mounted) return;
         Navigator.push(

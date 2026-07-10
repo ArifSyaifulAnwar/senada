@@ -33,6 +33,9 @@ class _TeguranHrdScreenState extends State<TeguranHrdScreen>
   List<TeguranData> _allTeguran = [];
   bool _loadingList = true;
   String _searchKeyword = '';
+  String _levelFilter = 'Semua';
+
+  static const _levelFilters = ['Semua', 'Verbal', 'SP1', 'SP2', 'SP3'];
 
   @override
   void initState() {
@@ -81,12 +84,15 @@ class _TeguranHrdScreenState extends State<TeguranHrdScreen>
   }
 
   List<TeguranData> get _filteredTeguran {
-    if (_searchKeyword.trim().isEmpty) return _allTeguran;
     final q = _searchKeyword.trim().toLowerCase();
     return _allTeguran.where((t) {
-      return (t.userName ?? '').toLowerCase().contains(q) ||
+      final matchesLevel = _levelFilter == 'Semua' || t.level == _levelFilter;
+      final matchesSearch =
+          q.isEmpty ||
+          (t.userName ?? '').toLowerCase().contains(q) ||
           t.judul.toLowerCase().contains(q) ||
           t.noSurat.toLowerCase().contains(q);
+      return matchesLevel && matchesSearch;
     }).toList();
   }
 
@@ -155,6 +161,26 @@ class _TeguranHrdScreenState extends State<TeguranHrdScreen>
               onChanged: (v) => setState(() => _searchKeyword = v),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _levelFilters.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, i) {
+                  final lvl = _levelFilters[i];
+                  final selected = _levelFilter == lvl;
+                  return ChoiceChip(
+                    label: Text(lvl),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _levelFilter = lvl),
+                  );
+                },
+              ),
+            ),
+          ),
           Expanded(
             child: _loadingList
                 ? const Center(child: CircularProgressIndicator())
@@ -175,8 +201,10 @@ class _TeguranHrdScreenState extends State<TeguranHrdScreen>
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                     itemCount: _filteredTeguran.length,
-                    itemBuilder: (context, i) =>
-                        _TeguranListCard(data: _filteredTeguran[i]),
+                    itemBuilder: (context, i) => _TeguranListCard(
+                      data: _filteredTeguran[i],
+                      onUpdated: _loadTeguranList,
+                    ),
                   ),
           ),
         ],
@@ -214,7 +242,7 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
   final _judulController = TextEditingController();
   final _deskripsiController = TextEditingController();
 
-  EmployeeApiData? _selectedEmployee;
+  final List<EmployeeApiData> _selectedEmployees = [];
   String _level = 'SP1';
   DateTime _tanggal = DateTime.now();
   bool _submitting = false;
@@ -263,9 +291,9 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
   }
 
   Future<void> _submit() async {
-    if (_selectedEmployee == null) {
+    if (_selectedEmployees.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pilih karyawan yang akan ditegur.')),
+        const SnackBar(content: Text('Pilih minimal 1 karyawan yang akan ditegur.')),
       );
       return;
     }
@@ -273,29 +301,44 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
 
     setState(() => _submitting = true);
 
-    final result = await TeguranService.createTeguran(
-      userId: _selectedEmployee!.userId,
-      level: _level,
-      judul: _judulController.text.trim(),
-      deskripsi: _deskripsiController.text.trim(),
-      tanggal: _tanggal,
-      issuedBy: widget.hrdUserId,
-      issuedByName: widget.hrdUserName,
-    );
+    // Buat 1 teguran (1 surat) per karyawan — judul/deskripsi/level/tanggal
+    // sama untuk semua, tapi tetap N baris teguran terpisah (N no_surat, N
+    // notifikasi, N PDF), bukan 1 surat gabungan.
+    final failedNames = <String>[];
+    for (final emp in _selectedEmployees) {
+      final result = await TeguranService.createTeguran(
+        userId: emp.userId,
+        level: _level,
+        judul: _judulController.text.trim(),
+        deskripsi: _deskripsiController.text.trim(),
+        tanggal: _tanggal,
+        issuedBy: widget.hrdUserId,
+        issuedByName: widget.hrdUserName,
+      );
+      if (!result.success) failedNames.add(emp.name);
+    }
 
     if (!mounted) return;
     setState(() => _submitting = false);
 
+    final total = _selectedEmployees.length;
+    final successCount = total - failedNames.length;
+    final message = failedNames.isEmpty
+        ? (total > 1
+            ? 'Berhasil membuat $total teguran.'
+            : 'Teguran berhasil dibuat.')
+        : '$successCount/$total teguran berhasil dibuat. Gagal: ${failedNames.join(', ')}';
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.message),
-        backgroundColor: result.success ? Colors.green : Colors.red,
+        content: Text(message),
+        backgroundColor: failedNames.isEmpty ? Colors.green : Colors.orange,
       ),
     );
 
-    if (result.success) {
+    if (failedNames.isEmpty) {
       setState(() {
-        _selectedEmployee = null;
+        _selectedEmployees.clear();
         _searchController.clear();
         _judulController.clear();
         _deskripsiController.clear();
@@ -340,31 +383,36 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
                 padding: EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: CircularProgressIndicator()),
               )
-            else if (_selectedEmployee != null)
-              Card(
-                color: const Color(0xFFEFF6FF),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+            else ...[
+              if (_selectedEmployees.isNotEmpty) ...[
+                Text(
+                  '${_selectedEmployees.length} karyawan dipilih — teguran ini akan dibuat terpisah untuk masing-masing (1 surat per orang).',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
-                child: ListTile(
-                  leading: const Icon(Icons.check_circle, color: Color(0xFF007AFF)),
-                  title: Text(
-                    _selectedEmployee!.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    [
-                      _selectedEmployee!.jobPosition,
-                      _selectedEmployee!.department,
-                    ].where((e) => (e ?? '').isNotEmpty).join(' • '),
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => setState(() => _selectedEmployee = null),
-                  ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _selectedEmployees
+                      .map(
+                        (emp) => Chip(
+                          backgroundColor: const Color(0xFFEFF6FF),
+                          label: Text(
+                            emp.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                          deleteIcon: const Icon(Icons.close, size: 16),
+                          onDeleted: () =>
+                              setState(() => _selectedEmployees.remove(emp)),
+                        ),
+                      )
+                      .toList(),
                 ),
-              )
-            else
+                const SizedBox(height: 10),
+              ],
               Container(
                 constraints: const BoxConstraints(maxHeight: 220),
                 decoration: BoxDecoration(
@@ -388,7 +436,11 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
                         itemCount: _filteredEmployees.length,
                         itemBuilder: (context, i) {
                           final emp = _filteredEmployees[i];
-                          return ListTile(
+                          final isSelected = _selectedEmployees.any(
+                            (e) => e.userId == emp.userId,
+                          );
+                          return CheckboxListTile(
+                            value: isSelected,
                             title: Text(emp.name),
                             subtitle: Text(
                               [
@@ -396,13 +448,22 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
                                 emp.department,
                               ].where((e) => (e ?? '').isNotEmpty).join(' • '),
                             ),
-                            onTap: () => setState(() => _selectedEmployee = emp),
+                            onChanged: (checked) => setState(() {
+                              if (checked == true) {
+                                _selectedEmployees.add(emp);
+                              } else {
+                                _selectedEmployees.removeWhere(
+                                  (e) => e.userId == emp.userId,
+                                );
+                              }
+                            }),
                           );
                         },
                         ),
                         ),
                       ),
               ),
+            ],
             const SizedBox(height: 20),
 
             const Text(
@@ -538,8 +599,9 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
 
 class _TeguranListCard extends StatefulWidget {
   final TeguranData data;
+  final VoidCallback onUpdated;
 
-  const _TeguranListCard({required this.data});
+  const _TeguranListCard({required this.data, required this.onUpdated});
 
   @override
   State<_TeguranListCard> createState() => _TeguranListCardState();
@@ -550,11 +612,27 @@ class _TeguranListCardState extends State<_TeguranListCard> {
 
   TeguranData get data => widget.data;
 
+  Future<void> _showEditSheet() async {
+    final updated = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _EditTeguranSheet(data: data),
+    );
+    if (updated == true) widget.onUpdated();
+  }
+
   Future<void> _downloadAndOpenSurat() async {
     setState(() => _downloading = true);
     try {
       final bytes = await TeguranService.downloadTeguranPdf(data.id);
-      final fileName = 'SuratTeguran_${data.id}.pdf';
+      final fileName = TeguranService.buildSuratFileName(
+        userName: data.userName,
+        userId: data.userId,
+        level: data.level,
+      );
 
       if (kIsWeb) {
         downloadFileWeb(fileName, bytes);
@@ -690,26 +768,289 @@ class _TeguranListCardState extends State<_TeguranListCard> {
               ],
             ),
             const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: _downloading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : TextButton.icon(
-                      onPressed: _downloadAndOpenSurat,
-                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                      label: const Text('Lihat/Unduh Surat'),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: _showEditSheet,
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Edit'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _downloading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : TextButton.icon(
+                        onPressed: _downloadAndOpenSurat,
+                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                        label: const Text('Lihat/Unduh Surat'),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
-                    ),
+              ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit teguran (bottom sheet)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EditTeguranSheet extends StatefulWidget {
+  final TeguranData data;
+
+  const _EditTeguranSheet({required this.data});
+
+  @override
+  State<_EditTeguranSheet> createState() => _EditTeguranSheetState();
+}
+
+class _EditTeguranSheetState extends State<_EditTeguranSheet> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _judulController;
+  late final TextEditingController _deskripsiController;
+  late String _level;
+  late DateTime _tanggal;
+  bool _submitting = false;
+
+  static const _levels = ['Verbal', 'SP1', 'SP2', 'SP3'];
+
+  @override
+  void initState() {
+    super.initState();
+    _judulController = TextEditingController(text: widget.data.judul);
+    _deskripsiController = TextEditingController(text: widget.data.deskripsi ?? '');
+    _level = widget.data.level;
+    _tanggal = widget.data.tanggal;
+  }
+
+  @override
+  void dispose() {
+    _judulController.dispose();
+    _deskripsiController.dispose();
+    super.dispose();
+  }
+
+  Color _colorForLevel(String level) {
+    switch (level) {
+      case 'SP1':
+        return Colors.orange;
+      case 'SP2':
+        return Colors.deepOrange;
+      case 'SP3':
+        return Colors.red;
+      default:
+        return Colors.blueAccent;
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _tanggal,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) setState(() => _tanggal = picked);
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _submitting = true);
+
+    final result = await TeguranService.updateTeguran(
+      id: widget.data.id,
+      level: _level,
+      judul: _judulController.text.trim(),
+      deskripsi: _deskripsiController.text.trim(),
+      tanggal: _tanggal,
+    );
+
+    if (!mounted) return;
+    setState(() => _submitting = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.success ? Colors.green : Colors.red,
+      ),
+    );
+
+    if (result.success) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Edit Teguran',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(false),
+                  ),
+                ],
+              ),
+              Text(
+                widget.data.userName ?? widget.data.userId,
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Level Teguran',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: _levels.map((lvl) {
+                  final selected = _level == lvl;
+                  final color = _colorForLevel(lvl);
+                  return ChoiceChip(
+                    label: Text(lvl),
+                    selected: selected,
+                    selectedColor: color.withOpacity(0.18),
+                    labelStyle: TextStyle(
+                      color: selected ? color : Colors.black87,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                    ),
+                    onSelected: (_) => setState(() => _level = lvl),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Judul',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _judulController,
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                ),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Judul wajib diisi.' : null,
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Deskripsi',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _deskripsiController,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              const Text(
+                'Tanggal',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: _pickDate,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_today_outlined, size: 18, color: Colors.grey),
+                      const SizedBox(width: 10),
+                      Text(DateFormat('d MMMM yyyy', 'id_ID').format(_tanggal)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF007AFF),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          'Simpan Perubahan',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

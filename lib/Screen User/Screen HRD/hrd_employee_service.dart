@@ -437,6 +437,34 @@ class HrdEmployeeService {
     }
   }
 
+  // ── Set Active (isolated — TIDAK menyentuh `deleted`) ────────────────────────
+  // Beda dengan updateEmployee(activeStatus: ...): endpoint "update" memakai SP
+  // yang menyamakan active=0 dengan soft-delete (deleted=1), jadi tidak cocok
+  // untuk nonaktifkan-sementara (mis. fitur toggle Akun Direktur). Endpoint ini
+  // HANYA mengubah kolom active.
+  static Future<ApiResponse<void>> setAccountActive({
+    required int id,
+    required bool active,
+  }) async {
+    try {
+      final uid = await _userId();
+      final r = await http
+          .post(
+            Uri.parse('$_base/set-active'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'HrdUserId': uid,
+              'TargetId': id,
+              'Active': active,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+      return _parseResponse<void>(r);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Network error: $e');
+    }
+  }
+
   static ApiResponse<T> _parseResponse<T>(
     http.Response r, {
     T Function(Map<String, dynamic>)? dataParser,
