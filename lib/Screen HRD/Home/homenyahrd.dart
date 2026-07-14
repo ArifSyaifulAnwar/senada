@@ -27,6 +27,7 @@ import 'package:slide_to_act/slide_to_act.dart';
 
 import '../../Screen User/Screen HRD/hrd_calendar_screen.dart';
 import '../../Screen User/fitur/daily_activity_screen.dart';
+import '../../Screen User/fitur/notifikasi.dart';
 import '../../Screen User/fitur/org_approval_screen.dart';
 import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Services/notification_service.dart';
@@ -437,7 +438,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         return;
       }
 
-      final result = await _notificationService.getAdminNotificationStats();
+      final result = await _notificationService.getUnreadCount();
       if (mounted) {
         _safeSetState(() {
           _unreadNotificationCount = result['unreadCount'] ?? 0;
@@ -818,8 +819,32 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             ],
           ),
         ),
+        _buildBroadcastNotificationIcon(scale),
         _buildNotificationIcon(scale),
       ],
+    );
+  }
+
+  // Ikon terpisah untuk kelola broadcast notifikasi (buat/edit/hapus
+  // pengumuman) — dipisah dari bell notifikasi pribadi supaya bell tetap
+  // konsisten dengan role lain (isinya notifikasi milik akun ini sendiri,
+  // termasuk notifikasi reimbursement/teguran), bukan console admin.
+  Widget _buildBroadcastNotificationIcon(double scale) {
+    return IconButton(
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      tooltip: 'Kelola Notifikasi',
+      icon: Icon(
+        Icons.campaign_outlined,
+        color: Colors.grey[800],
+        size: 26.0 * scale,
+      ),
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanNotifikasiAdmin()),
+        );
+      },
     );
   }
 
@@ -859,9 +884,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const HalamanNotifikasiAdmin(),
-                ),
+                MaterialPageRoute(builder: (_) => const HalamanNotifikasi()),
               );
               await refreshNotificationCount();
             },

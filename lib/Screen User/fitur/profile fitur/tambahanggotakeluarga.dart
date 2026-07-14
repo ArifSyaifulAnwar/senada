@@ -3,27 +3,20 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-class FamilyMember {
-  final String name;
-  final String relationship;
-  final String phone;
-  final String? photoUrl;
-
-  FamilyMember({
-    required this.name,
-    required this.relationship,
-    required this.phone,
-    this.photoUrl,
-  });
-}
+import 'package:absensikaryawan/Services/family_member_service.dart';
 
 class AddFamilyMemberScreen extends StatefulWidget {
+  final String userId;
   final FamilyMember? memberToEdit; // For edit mode
+  // Diisi kalau yang mengelola BUKAN si pemilik data sendiri — misal Head HRD
+  // mengelola data karyawan lain dari layar admin-nya.
+  final String? actorUserId;
 
   const AddFamilyMemberScreen({
     super.key,
+    required this.userId,
     this.memberToEdit,
+    this.actorUserId,
   });
 
   @override
@@ -35,6 +28,7 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
   final _formKey = GlobalKey<FormState>();
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
+  final FamilyMemberService _service = FamilyMemberService();
 
   // Controllers
   final TextEditingController _nameController = TextEditingController();
@@ -44,6 +38,7 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
 
   // Form state
   String _selectedRelationship = '';
+  DateTime? _selectedBirthdate;
   bool _isLoading = false;
 
   // Relationship options for family
@@ -96,8 +91,14 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
     if (widget.memberToEdit != null) {
       final member = widget.memberToEdit!;
       _nameController.text = member.name;
-      _phoneController.text = member.phone;
+      _phoneController.text = member.phoneNumber;
       _selectedRelationship = member.relationship;
+      _addressController.text = member.address ?? '';
+      if (member.birthDate != null) {
+        _selectedBirthdate = member.birthDate;
+        _birthdateController.text =
+            "${member.birthDate!.day.toString().padLeft(2, '0')}/${member.birthDate!.month.toString().padLeft(2, '0')}/${member.birthDate!.year}";
+      }
     }
   }
 
@@ -194,7 +195,7 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
   Future<void> _selectBirthdate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().subtract(Duration(days: 365 * 20)),
+      initialDate: _selectedBirthdate ?? DateTime.now().subtract(Duration(days: 365 * 20)),
       firstDate: DateTime(1940),
       lastDate: DateTime.now(),
       builder: (BuildContext context, Widget? child) {
@@ -214,6 +215,7 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
 
     if (picked != null) {
       setState(() {
+        _selectedBirthdate = picked;
         _birthdateController.text =
             "${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}";
       });
@@ -221,28 +223,51 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
   }
 
   Future<void> _saveFamilyMember() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
+    if (!_formKey.currentState!.validate()) return;
 
-      // Simulate API call
-      await Future.delayed(Duration(seconds: 2));
+    setState(() {
+      _isLoading = true;
+    });
 
-      setState(() {
-        _isLoading = false;
-      });
+    final address = _addressController.text.trim();
+    final result = isEditMode
+        ? await _service.updateFamilyMember(
+            id: widget.memberToEdit!.id,
+            userId: widget.userId,
+            name: _nameController.text.trim(),
+            relationship: _selectedRelationship,
+            phoneNumber: _phoneController.text.trim(),
+            birthDate: _selectedBirthdate,
+            address: address.isEmpty ? null : address,
+            actorUserId: widget.actorUserId,
+          )
+        : await _service.createFamilyMember(
+            userId: widget.userId,
+            name: _nameController.text.trim(),
+            relationship: _selectedRelationship,
+            phoneNumber: _phoneController.text.trim(),
+            birthDate: _selectedBirthdate,
+            address: address.isEmpty ? null : address,
+            actorUserId: widget.actorUserId,
+          );
 
-      // Show success message
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (result.success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
             children: [
               Icon(Icons.check_circle, color: Colors.white),
               SizedBox(width: 8),
-              Text(isEditMode
-                  ? 'Anggota keluarga berhasil diperbarui'
-                  : 'Anggota keluarga berhasil ditambahkan'),
+              Text(
+                isEditMode
+                    ? 'Anggota keluarga berhasil diperbarui'
+                    : 'Anggota keluarga berhasil ditambahkan',
+              ),
             ],
           ),
           backgroundColor: Colors.green,
@@ -253,8 +278,18 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
         ),
       );
 
-      // Return to previous screen with success indicator
       Navigator.pop(context, true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      );
     }
   }
 

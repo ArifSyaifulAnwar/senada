@@ -1359,18 +1359,19 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   Widget _buildActionButtonWeb(Color accentColor) {
     final bool isInside =
         _locationInfo.contains("Dalam") || _locationInfo.contains("✅");
+    // Hari libur (termasuk weekend, _isHariLibur juga true untuk Sabtu/Minggu
+    // — lihat _checkHariIni) tetap boleh absen, backend yang mencatatnya
+    // sebagai status Lembur. Dulu weekend diblokir total di sini padahal
+    // backend sudah mendukungnya.
     final bool canTakePhoto =
-        !_isProcessingFace &&
-        !_isAutoRetrying &&
-        _isLocationKnown &&
-        !_isWeekend;
+        !_isProcessingFace && !_isAutoRetrying && _isLocationKnown;
 
     final String label = _isProcessingFace
         ? "Memproses..."
         : _isAutoRetrying
         ? "Mencoba ulang..."
         : (_capturedImage == null && _capturedImageBytes == null)
-        ? _isHariLibur && !_isWeekend
+        ? _isHariLibur
               ? "Absen (Lembur)"
               : _isWfh
               ? "Absen WFH"
@@ -1772,18 +1773,19 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     // canTakePhoto sekarang pakai _isLocationKnown, bukan isInside.
     // Artinya tombol tetap aktif walau di luar radius — server yang
     // memutuskan apakah butuh persetujuan Head HRD atau tidak.
+    // Hari libur (termasuk weekend, _isHariLibur juga true untuk Sabtu/Minggu
+    // — lihat _checkHariIni) tetap boleh absen, backend yang mencatatnya
+    // sebagai status Lembur. Dulu weekend diblokir total di sini padahal
+    // backend sudah mendukungnya.
     final bool canTakePhoto =
-        !_isProcessingFace &&
-        !_isAutoRetrying &&
-        _isLocationKnown &&
-        !_isWeekend;
+        !_isProcessingFace && !_isAutoRetrying && _isLocationKnown;
 
     final String label = _isProcessingFace
         ? "Memproses..."
         : _isAutoRetrying
         ? "Mencoba ulang..."
         : (_capturedImage == null && _capturedImageBytes == null)
-        ? _isHariLibur && !_isWeekend
+        ? _isHariLibur
               ? "Absen (Lembur)"
               : _isWfh
               ? "Absen WFH"

@@ -1,6 +1,7 @@
 // services/emergency_contact_service.dart
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:http/http.dart' as http;
 
 // Models
@@ -84,6 +85,39 @@ class EmergencyContactCategory {
   }
 }
 
+// Kontak darurat 1 karyawan — dipakai Head HRD untuk lihat semua karyawan
+// sekaligus (endpoint admin-list).
+class EmployeeEmergencyContactGroup {
+  final String userId;
+  final String employeeName;
+  final String? employeeJob;
+  final String? department;
+  final List<EmergencyContact> contacts;
+
+  EmployeeEmergencyContactGroup({
+    required this.userId,
+    required this.employeeName,
+    this.employeeJob,
+    this.department,
+    required this.contacts,
+  });
+
+  factory EmployeeEmergencyContactGroup.fromJson(Map<String, dynamic> json) {
+    dynamic get(String key) =>
+        json[key] ?? json[key[0].toLowerCase() + key.substring(1)];
+    final rawContacts = get('Contacts') as List? ?? [];
+    return EmployeeEmergencyContactGroup(
+      userId: get('UserId') ?? '',
+      employeeName: get('EmployeeName') ?? '',
+      employeeJob: get('EmployeeJob'),
+      department: get('Department'),
+      contacts: rawContacts
+          .map((e) => EmergencyContact.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
 class ApiResponse<T> {
   final bool success;
   final String message;
@@ -101,42 +135,28 @@ class ApiResponse<T> {
 }
 
 class EmergencyContactService {
-  // static Map<String, String> get _headers => {
-  //   'Content-Type': 'application/json',
-  //   if (_authToken != null) 'Authorization': 'Bearer $_authToken',
-  // };
-  static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  Future<Map<String, String>> _getHeaders() async {
-    final token = await _getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
+  // Reuse TokenService (dedupe + cache sesuai expires_in dari server) —
+  // dulu fetch token baru dari /api/auth/token setiap kali dipanggil tanpa
+  // cache dan tanpa cek null sebelum dipakai di header, jadi rawan kirim
+  // "Authorization: Bearer null" dan kena 401.
+  Future<Map<String, String>> _getHeaders() => TokenService.jsonHeaders();
 
   // PUBLIC method untuk external access
   Future<Map<String, String>> getHeaders() async {
     return await _getHeaders();
+  }
+
+  // Response dari backend ini PascalCase (Success/Message/Data), tapi
+  // beberapa method di bawah sempat ditulis mengakses key lowercase
+  // (success/message/data) — pakai dual-fallback supaya konsisten & aman
+  // dari kesalahan casing di kedua arah.
+  static dynamic _get(Map<String, dynamic> body, String key) {
+    if (body.containsKey(key)) return body[key];
+    final lower = key[0].toLowerCase() + key.substring(1);
+    if (body.containsKey(lower)) return body[lower];
+    final pascal = key[0].toUpperCase() + key.substring(1);
+    if (body.containsKey(pascal)) return body[pascal];
+    return null;
   }
 
   // GET: Daftar kontak darurat
@@ -157,21 +177,21 @@ class EmergencyContactService {
       final Map<String, dynamic> responseData = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        final List<dynamic> contactsJson = responseData['Data'] ?? [];
+        final List<dynamic> contactsJson = _get(responseData, 'Data') ?? [];
         final List<EmergencyContact> contacts = contactsJson
             .map((json) => EmergencyContact.fromJson(json))
             .toList();
 
         return ApiResponse<List<EmergencyContact>>(
-          success: responseData['Success'] ?? false,
-          message: responseData['Message'] ?? '',
+          success: _get(responseData, 'Success') ?? false,
+          message: _get(responseData, 'Message') ?? '',
           data: contacts,
-          totalCount: responseData['TotalCount'],
+          totalCount: _get(responseData, 'TotalCount'),
         );
       } else {
         return ApiResponse<List<EmergencyContact>>(
           success: false,
-          message: responseData['Message'] ?? 'Failed to fetch contacts',
+          message: _get(responseData, 'Message') ?? 'Failed to fetch contacts',
         );
       }
     } catch (e) {
@@ -201,18 +221,18 @@ class EmergencyContactService {
 
       if (response.statusCode == 200) {
         final EmergencyContact contact = EmergencyContact.fromJson(
-          responseData['data'],
+          _get(responseData, 'Data'),
         );
 
         return ApiResponse<EmergencyContact>(
-          success: responseData['success'] ?? false,
-          message: responseData['message'] ?? '',
+          success: _get(responseData, 'Success') ?? false,
+          message: _get(responseData, 'Message') ?? '',
           data: contact,
         );
       } else {
         return ApiResponse<EmergencyContact>(
           success: false,
-          message: responseData['message'] ?? 'Contact not found',
+          message: _get(responseData, 'Message') ?? 'Contact not found',
         );
       }
     } catch (e) {
@@ -232,6 +252,7 @@ class EmergencyContactService {
     String? email,
     String? address,
     bool isPrimary = false,
+    String? actorUserId,
   }) async {
     try {
       final response = await http.post(
@@ -245,6 +266,7 @@ class EmergencyContactService {
           'email': email,
           'address': address,
           'isPrimary': isPrimary,
+          'actorUserId': actorUserId,
         }),
       );
 
@@ -252,19 +274,19 @@ class EmergencyContactService {
 
       if (response.statusCode == 200) {
         final EmergencyContact contact = EmergencyContact.fromJson(
-          responseData['Data'],
+          _get(responseData, 'Data'),
         );
 
         return ApiResponse<EmergencyContact>(
-          success: responseData['Success'] ?? false,
-          message: responseData['Message'] ?? '',
+          success: _get(responseData, 'Success') ?? false,
+          message: _get(responseData, 'Message') ?? '',
           data: contact,
-          contactId: responseData['ContactId'],
+          contactId: _get(responseData, 'ContactId'),
         );
       } else {
         return ApiResponse<EmergencyContact>(
           success: false,
-          message: responseData['Message'] ?? 'Failed to create contact',
+          message: _get(responseData, 'Message') ?? 'Failed to create contact',
         );
       }
     } catch (e) {
@@ -285,6 +307,7 @@ class EmergencyContactService {
     String? email,
     String? address,
     bool isPrimary = false,
+    String? actorUserId,
   }) async {
     try {
       final response = await http.put(
@@ -299,6 +322,7 @@ class EmergencyContactService {
           'email': email,
           'address': address,
           'isPrimary': isPrimary,
+          'actorUserId': actorUserId,
         }),
       );
 
@@ -306,18 +330,18 @@ class EmergencyContactService {
 
       if (response.statusCode == 200) {
         final EmergencyContact contact = EmergencyContact.fromJson(
-          responseData['data'],
+          _get(responseData, 'Data'),
         );
 
         return ApiResponse<EmergencyContact>(
-          success: responseData['success'] ?? false,
-          message: responseData['message'] ?? '',
+          success: _get(responseData, 'Success') ?? false,
+          message: _get(responseData, 'Message') ?? '',
           data: contact,
         );
       } else {
         return ApiResponse<EmergencyContact>(
           success: false,
-          message: responseData['message'] ?? 'Failed to update contact',
+          message: _get(responseData, 'Message') ?? 'Failed to update contact',
         );
       }
     } catch (e) {
@@ -331,20 +355,21 @@ class EmergencyContactService {
   // DELETE: Hapus kontak darurat
   Future<ApiResponse<void>> deleteEmergencyContact(
     int id,
-    String userId,
-  ) async {
+    String userId, {
+    String? actorUserId,
+  }) async {
     try {
       final response = await http.delete(
         Uri.parse('$baseURL/api/asn/emergency-contact/delete'),
         headers: await getHeaders(),
-        body: jsonEncode({'id': id, 'userId': userId}),
+        body: jsonEncode({'id': id, 'userId': userId, 'actorUserId': actorUserId}),
       );
 
       final Map<String, dynamic> responseData = jsonDecode(response.body);
 
       return ApiResponse<void>(
-        success: responseData['success'] ?? false,
-        message: responseData['message'] ?? '',
+        success: _get(responseData, 'Success') ?? false,
+        message: _get(responseData, 'Message') ?? '',
       );
     } catch (e) {
       return ApiResponse<void>(success: false, message: 'Network error: $e');
@@ -352,19 +377,23 @@ class EmergencyContactService {
   }
 
   // POST: Set kontak sebagai primary
-  Future<ApiResponse<void>> setPrimaryContact(int id, String userId) async {
+  Future<ApiResponse<void>> setPrimaryContact(
+    int id,
+    String userId, {
+    String? actorUserId,
+  }) async {
     try {
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/emergency-contact/set-primary'),
         headers: await getHeaders(),
-        body: jsonEncode({'id': id, 'userId': userId}),
+        body: jsonEncode({'id': id, 'userId': userId, 'actorUserId': actorUserId}),
       );
 
       final Map<String, dynamic> responseData = jsonDecode(response.body);
 
       return ApiResponse<void>(
-        success: responseData['success'] ?? false,
-        message: responseData['message'] ?? '',
+        success: _get(responseData, 'Success') ?? false,
+        message: _get(responseData, 'Message') ?? '',
       );
     } catch (e) {
       return ApiResponse<void>(success: false, message: 'Network error: $e');
@@ -382,24 +411,67 @@ class EmergencyContactService {
       final Map<String, dynamic> responseData = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        final List<dynamic> categoriesJson = responseData['data'] ?? [];
+        final List<dynamic> categoriesJson = _get(responseData, 'Data') ?? [];
         final List<EmergencyContactCategory> categories = categoriesJson
             .map((json) => EmergencyContactCategory.fromJson(json))
             .toList();
 
         return ApiResponse<List<EmergencyContactCategory>>(
-          success: responseData['success'] ?? false,
-          message: responseData['message'] ?? '',
+          success: _get(responseData, 'Success') ?? false,
+          message: _get(responseData, 'Message') ?? '',
           data: categories,
         );
       } else {
         return ApiResponse<List<EmergencyContactCategory>>(
           success: false,
-          message: responseData['message'] ?? 'Failed to fetch categories',
+          message: _get(responseData, 'Message') ?? 'Failed to fetch categories',
         );
       }
     } catch (e) {
       return ApiResponse<List<EmergencyContactCategory>>(
+        success: false,
+        message: 'Network error: $e',
+      );
+    }
+  }
+
+  // GET: Kontak darurat SEMUA karyawan — khusus Head HRD.
+  Future<ApiResponse<List<EmployeeEmergencyContactGroup>>> getAllContactsForHrd(
+    String hrdUserId,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/emergency-contact/admin-list'),
+        headers: await getHeaders(),
+        body: jsonEncode({'hrdUserId': hrdUserId}),
+      );
+
+      final Map<String, dynamic> responseData = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && _get(responseData, 'Success') == true) {
+        final rawList = _get(responseData, 'Data') as List? ?? [];
+        final groups = rawList
+            .map(
+              (e) => EmployeeEmergencyContactGroup.fromJson(
+                e as Map<String, dynamic>,
+              ),
+            )
+            .toList();
+
+        return ApiResponse<List<EmployeeEmergencyContactGroup>>(
+          success: true,
+          message: (_get(responseData, 'Message') ?? '') as String,
+          data: groups,
+        );
+      }
+
+      return ApiResponse<List<EmployeeEmergencyContactGroup>>(
+        success: false,
+        message:
+            (_get(responseData, 'Message') ?? 'Gagal mengambil data') as String,
+      );
+    } catch (e) {
+      return ApiResponse<List<EmployeeEmergencyContactGroup>>(
         success: false,
         message: 'Network error: $e',
       );

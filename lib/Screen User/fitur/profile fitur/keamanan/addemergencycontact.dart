@@ -8,11 +8,15 @@ import 'package:flutter/services.dart';
 class AddEmergencyContactScreen extends StatefulWidget {
   final String userId;
   final EmergencyContact? contactToEdit; // For edit mode
+  // Diisi kalau yang mengelola BUKAN si pemilik data sendiri — misal Head HRD
+  // mengelola kontak darurat karyawan lain dari layar admin-nya.
+  final String? actorUserId;
 
   const AddEmergencyContactScreen({
     super.key,
     required this.userId,
     this.contactToEdit,
+    this.actorUserId,
   });
 
   @override
@@ -300,6 +304,7 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen>
                 ? null
                 : _addressController.text.trim(),
             isPrimary: _isPrimary,
+            actorUserId: widget.actorUserId,
           );
         } else {
           // Create new contact
@@ -316,6 +321,7 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen>
                 ? null
                 : _addressController.text.trim(),
             isPrimary: _isPrimary,
+            actorUserId: widget.actorUserId,
           );
         }
 

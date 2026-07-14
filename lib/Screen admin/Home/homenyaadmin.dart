@@ -10,6 +10,7 @@ import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/overtimeadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/reimbursementadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/timeoffadmin.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/notifikasi.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
@@ -128,6 +129,11 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
               initialDetailId: int.tryParse(nav.referenceId ?? ''),
             ),
           ),
+        );
+      } else if (nav.type == 'timeoff_pending_director') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TimeOffAdminScreen()),
         );
       }
     });
@@ -413,7 +419,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
         return;
       }
 
-      final result = await _notificationService.getAdminNotificationStats();
+      final result = await _notificationService.getUnreadCount();
       if (mounted) {
         _safeSetState(() {
           _unreadNotificationCount = result['unreadCount'] ?? 0;
@@ -796,8 +802,32 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
             ],
           ),
         ),
+        _buildBroadcastNotificationIcon(scale),
         _buildNotificationIcon(scale),
       ],
+    );
+  }
+
+  // Ikon terpisah untuk kelola broadcast notifikasi (buat/edit/hapus
+  // pengumuman) — dipisah dari bell notifikasi pribadi supaya bell tetap
+  // berisi notifikasi milik akun ini sendiri (termasuk notifikasi izin/timeoff
+  // yang butuh approval Direktur), bukan console admin.
+  Widget _buildBroadcastNotificationIcon(double scale) {
+    return IconButton(
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      tooltip: 'Kelola Notifikasi',
+      icon: Icon(
+        Icons.campaign_outlined,
+        color: Colors.grey[800],
+        size: 26.0 * scale,
+      ),
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanNotifikasiAdmin()),
+        );
+      },
     );
   }
 
@@ -837,9 +867,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const HalamanNotifikasiAdmin(),
-                ),
+                MaterialPageRoute(builder: (_) => const HalamanNotifikasi()),
               );
               await refreshNotificationCount();
             },

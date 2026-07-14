@@ -766,7 +766,10 @@ class _HalamanAjukanReimbursementState
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
-      firstDate: DateTime(2020),
+      // Tidak dibatasi ke belakang — biar bisa direkap transaksi dari
+      // tahun-tahun sebelumnya. Batas depan tetap hari ini karena
+      // reimbursement hanya untuk transaksi yang sudah terjadi.
+      firstDate: DateTime(2000),
       lastDate: DateTime.now(),
       builder: (context, child) {
         return Theme(

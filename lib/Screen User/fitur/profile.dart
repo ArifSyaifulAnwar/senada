@@ -8,6 +8,8 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/infoprofile.
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/keamanan.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kebijakanprivacy.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kontakdarurat.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/familyinfoprofile.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/educationscreen.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warningletterscreen.dart';
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
 import 'package:absensikaryawan/Services/config.dart';
@@ -977,14 +979,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _l('familyInfo'),
       iconSize: iconSz,
       fontSize: menuFs,
-      onTap: () => _showComingSoonDialog(context),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              FamilyInfoScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
     _buildMenuItem(
       Icons.school_outlined,
       _l('education'),
       iconSize: iconSz,
       fontSize: menuFs,
-      onTap: () => _showComingSoonDialog(context),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              EducationExperienceScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
     _buildMenuItem(
       Icons.payment_outlined,

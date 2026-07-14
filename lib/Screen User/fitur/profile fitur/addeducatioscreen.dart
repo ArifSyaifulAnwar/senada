@@ -1,53 +1,27 @@
-// add_education_experience_screen.dart
+// add_education_experience_screen.dart — data asli ke backend (sebelumnya
+// simulasi delay 2 detik lalu pura-pura berhasil, tidak pernah tersimpan)
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-class Education {
-  final String institution;
-  final String degree;
-  final String field;
-  final String period;
-  final String? grade;
-  final String type;
-
-  Education({
-    required this.institution,
-    required this.degree,
-    required this.field,
-    required this.period,
-    this.grade,
-    required this.type,
-  });
-}
-
-class Experience {
-  final String company;
-  final String position;
-  final String period;
-  final String? description;
-  final String type;
-
-  Experience({
-    required this.company,
-    required this.position,
-    required this.period,
-    this.description,
-    required this.type,
-  });
-}
+import 'package:absensikaryawan/Services/education_experience_service.dart';
 
 class AddEducationExperienceScreen extends StatefulWidget {
-  final String type;
+  final String userId;
+  final String type; // 'education' | 'experience'
   final Education? educationToEdit;
   final Experience? experienceToEdit;
+  // Diisi kalau yang mengelola BUKAN si pemilik data sendiri — misal Head HRD
+  // mengelola data karyawan lain dari layar admin-nya.
+  final String? actorUserId;
 
   const AddEducationExperienceScreen({
     super.key,
+    required this.userId,
     required this.type,
     this.educationToEdit,
     this.experienceToEdit,
+    this.actorUserId,
   });
 
   @override
@@ -61,6 +35,7 @@ class _AddEducationExperienceScreenState
   final _formKey = GlobalKey<FormState>();
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
+  final EducationExperienceService _service = EducationExperienceService();
 
   // Controllers for Education
   final TextEditingController _institutionController = TextEditingController();
@@ -115,7 +90,6 @@ class _AddEducationExperienceScreenState
   }
 
   Future<void> _initializeData() async {
-    // If edit mode, populate fields
     if (isEditMode) {
       _populateEditData();
     }
@@ -129,15 +103,11 @@ class _AddEducationExperienceScreenState
       _institutionController.text = education.institution;
       _degreeController.text = education.degree;
       _fieldController.text = education.field;
-      // Parse period like "2018 - 2022" or "2018 - Sekarang"
-      final periods = education.period.split(' - ');
-      if (periods.length == 2) {
-        _startDateController.text = periods[0];
-        if (periods[1] != 'Sekarang') {
-          _endDateController.text = periods[1];
-        } else {
-          _isCurrentlyStudying = true;
-        }
+      _startDateController.text = education.startYear.toString();
+      if (education.endYear != null) {
+        _endDateController.text = education.endYear.toString();
+      } else {
+        _isCurrentlyStudying = true;
       }
       if (education.grade != null) {
         _gradeController.text = education.grade!;
@@ -146,15 +116,11 @@ class _AddEducationExperienceScreenState
       final experience = widget.experienceToEdit!;
       _companyController.text = experience.company;
       _positionController.text = experience.position;
-      // Parse period like "Jan 2023 - Sekarang"
-      final periods = experience.period.split(' - ');
-      if (periods.length == 2) {
-        _startDateController.text = periods[0];
-        if (periods[1] != 'Sekarang') {
-          _endDateController.text = periods[1];
-        } else {
-          _isCurrentlyWorking = true;
-        }
+      _startDateController.text = experience.startPeriod;
+      if (experience.endPeriod != null) {
+        _endDateController.text = experience.endPeriod!;
+      } else {
+        _isCurrentlyWorking = true;
       }
       if (experience.description != null) {
         _descriptionController.text = experience.description!;
@@ -331,19 +297,22 @@ class _AddEducationExperienceScreenState
   }
 
   Future<void> _saveData() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
+    if (!_formKey.currentState!.validate()) return;
 
-      // Simulate API call
-      await Future.delayed(Duration(seconds: 2));
+    setState(() {
+      _isLoading = true;
+    });
 
-      setState(() {
-        _isLoading = false;
-      });
+    final result = isEducation
+        ? await _saveEducation()
+        : await _saveExperience();
 
-      // Show success message
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+    });
+
+    if (result.success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -365,9 +334,78 @@ class _AddEducationExperienceScreenState
         ),
       );
 
-      // Return to previous screen with success indicator
       Navigator.pop(context, true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      );
     }
+  }
+
+  Future<ApiResponse<dynamic>> _saveEducation() async {
+    final startYear = int.tryParse(_startDateController.text) ?? 0;
+    final endYear = _isCurrentlyStudying
+        ? null
+        : int.tryParse(_endDateController.text);
+    final grade = _gradeController.text.trim();
+
+    if (isEditMode) {
+      return _service.updateEducation(
+        id: widget.educationToEdit!.id,
+        userId: widget.userId,
+        institution: _institutionController.text.trim(),
+        degree: _degreeController.text,
+        field: _fieldController.text.trim(),
+        startYear: startYear,
+        endYear: endYear,
+        grade: grade.isEmpty ? null : grade,
+        actorUserId: widget.actorUserId,
+      );
+    }
+    return _service.createEducation(
+      userId: widget.userId,
+      institution: _institutionController.text.trim(),
+      degree: _degreeController.text,
+      field: _fieldController.text.trim(),
+      startYear: startYear,
+      endYear: endYear,
+      grade: grade.isEmpty ? null : grade,
+      actorUserId: widget.actorUserId,
+    );
+  }
+
+  Future<ApiResponse<dynamic>> _saveExperience() async {
+    final endPeriod = _isCurrentlyWorking ? null : _endDateController.text;
+    final description = _descriptionController.text.trim();
+
+    if (isEditMode) {
+      return _service.updateExperience(
+        id: widget.experienceToEdit!.id,
+        userId: widget.userId,
+        company: _companyController.text.trim(),
+        position: _positionController.text.trim(),
+        startPeriod: _startDateController.text,
+        endPeriod: endPeriod,
+        description: description.isEmpty ? null : description,
+        actorUserId: widget.actorUserId,
+      );
+    }
+    return _service.createExperience(
+      userId: widget.userId,
+      company: _companyController.text.trim(),
+      position: _positionController.text.trim(),
+      startPeriod: _startDateController.text,
+      endPeriod: endPeriod,
+      description: description.isEmpty ? null : description,
+      actorUserId: widget.actorUserId,
+    );
   }
 
   Widget _buildSectionHeader() {
@@ -483,7 +521,6 @@ class _AddEducationExperienceScreenState
   Widget _buildEducationForm() {
     return Column(
       children: [
-        // Nama Institusi/Sekolah
         _buildFormField(
           title: 'Nama Institusi/Sekolah',
           description: 'Masukkan nama lengkap institusi pendidikan',
@@ -504,7 +541,6 @@ class _AddEducationExperienceScreenState
           ),
         ),
 
-        // Jenjang Pendidikan
         _buildFormField(
           title: 'Jenjang Pendidikan',
           description: 'Pilih jenjang pendidikan yang sesuai',
@@ -545,7 +581,6 @@ class _AddEducationExperienceScreenState
           ),
         ),
 
-        // Jurusan/Bidang Studi
         _buildFormField(
           title: 'Jurusan/Bidang Studi',
           description: 'Masukkan jurusan atau bidang studi',
@@ -567,7 +602,6 @@ class _AddEducationExperienceScreenState
           ),
         ),
 
-        // Periode Pendidikan
         Row(
           children: [
             Expanded(
@@ -655,7 +689,6 @@ class _AddEducationExperienceScreenState
           ],
         ),
 
-        // IPK/Nilai (Opsional)
         _buildFormField(
           title: 'IPK/Nilai (Opsional)',
           description: 'Masukkan IPK atau nilai rata-rata (skala 4.0)',
@@ -685,7 +718,6 @@ class _AddEducationExperienceScreenState
   Widget _buildExperienceForm() {
     return Column(
       children: [
-        // Nama Perusahaan
         _buildFormField(
           title: 'Nama Perusahaan',
           description: 'Masukkan nama lengkap perusahaan',
@@ -706,7 +738,6 @@ class _AddEducationExperienceScreenState
           ),
         ),
 
-        // Posisi/Jabatan
         _buildFormField(
           title: 'Posisi/Jabatan',
           description: 'Masukkan posisi atau jabatan dalam perusahaan',
@@ -727,7 +758,6 @@ class _AddEducationExperienceScreenState
           ),
         ),
 
-        // Periode Kerja
         Row(
           children: [
             Expanded(
@@ -818,7 +848,6 @@ class _AddEducationExperienceScreenState
           ],
         ),
 
-        // Deskripsi Pekerjaan (Opsional)
         _buildFormField(
           title: 'Deskripsi Pekerjaan (Opsional)',
           description: 'Jelaskan tanggung jawab dan pencapaian Anda',
@@ -890,10 +919,8 @@ class _AddEducationExperienceScreenState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header
                 _buildSectionHeader(),
 
-                // Form Fields
                 if (isEducation)
                   _buildEducationForm()
                 else
@@ -901,7 +928,6 @@ class _AddEducationExperienceScreenState
 
                 SizedBox(height: 8),
 
-                // Save Button
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: Container(
@@ -987,7 +1013,6 @@ class _AddEducationExperienceScreenState
 
                 SizedBox(height: 20),
 
-                // Info Tips
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: Container(

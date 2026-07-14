@@ -465,6 +465,99 @@ class HrdEmployeeService {
     }
   }
 
+  // ── Hari Kerja Kustom ─────────────────────────────────────────────────────
+  // Karyawan dengan jadwal terbatas (mis. hanya Senin/Selasa/Rabu) tidak
+  // dianggap "belum absen" di luar hari jadwalnya. Tidak ada entri untuk
+  // seorang userId di map = jadwal normal (semua hari), tidak dibatasi.
+  // Angka hari: 1=Senin ... 7=Minggu (cocok dengan DateTime.weekday di Dart).
+
+  static Future<Map<String, List<int>>> getAllWorkDays() async {
+    try {
+      final r = await http
+          .post(Uri.parse('$_base/workdays/all'), headers: await _headers())
+          .timeout(const Duration(seconds: 20));
+      if (r.statusCode == 200) {
+        final j = jsonDecode(r.body);
+        if (_get(j, 'success') == true) {
+          final raw = _get(j, 'data') as List? ?? [];
+          final map = <String, List<int>>{};
+          for (final e in raw) {
+            final em = e as Map<String, dynamic>;
+            final uid = (_get(em, 'userId') ?? '').toString();
+            final days = (_get(em, 'workDays') ?? '')
+                .toString()
+                .split(',')
+                .map((s) => int.tryParse(s.trim()))
+                .whereType<int>()
+                .where((d) => d >= 1 && d <= 7)
+                .toList();
+            if (uid.isNotEmpty) map[uid] = days;
+          }
+          return map;
+        }
+      }
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<List<int>?> getWorkDays(String userId) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('$_base/workdays/get'),
+            headers: await _headers(),
+            body: jsonEncode({'UserId': userId}),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode == 200) {
+        final j = jsonDecode(r.body);
+        if (_get(j, 'success') == true) {
+          final data = _get(j, 'data');
+          if (data == null) return null;
+          final days = (_get(data as Map<String, dynamic>, 'workDays') ?? '')
+              .toString()
+              .split(',')
+              .map((s) => int.tryParse(s.trim()))
+              .whereType<int>()
+              .where((d) => d >= 1 && d <= 7)
+              .toList();
+          return days;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [workDays] null/kosong = reset ke jadwal normal (semua hari).
+  static Future<ApiResponse<void>> setWorkDays({
+    required String targetUserId,
+    List<int>? workDays,
+  }) async {
+    try {
+      final uid = await _userId();
+      final r = await http
+          .post(
+            Uri.parse('$_base/workdays/set'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'HrdUserId': uid,
+              'TargetUserId': targetUserId,
+              'WorkDays': (workDays == null || workDays.isEmpty)
+                  ? null
+                  : workDays.join(','),
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+      return _parseResponse<void>(r);
+    } catch (e) {
+      return ApiResponse(success: false, message: 'Network error: $e');
+    }
+  }
+
   static ApiResponse<T> _parseResponse<T>(
     http.Response r, {
     T Function(Map<String, dynamic>)? dataParser,

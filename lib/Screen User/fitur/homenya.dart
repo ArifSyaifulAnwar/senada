@@ -105,16 +105,20 @@ class _HomePageState extends State<HomeScreen> {
         return;
       }
 
-      if (nav.type == 'reimbursement_approved_hrd') {
+      if (nav.type == 'reimbursement_approved_hrd' ||
+          nav.type == 'reimbursement_awaiting_payment') {
         // Notifikasi ke Finance yang di-assign — langsung ke layar Finance,
-        // bukan layar reimbursement karyawan biasa.
+        // bukan layar reimbursement karyawan biasa. Dipakai untuk 2 momen:
+        // (1) HRD baru approve → Finance perlu verifikasi, (2) Finance sendiri
+        // sudah approve → pengingat segera proses pembayaran.
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => HalamanFinanceReimbursement(initialDetailId: id),
           ),
         );
-      } else if (nav.type == 'reimbursement_approved' ||
+      } else if (nav.type == 'reimbursement_submitted' ||
+          nav.type == 'reimbursement_approved' ||
           nav.type == 'reimbursement_rejected' ||
           nav.type == 'reimbursement_revision' ||
           nav.type == 'reimbursement_paid' ||
@@ -128,6 +132,51 @@ class _HomePageState extends State<HomeScreen> {
           MaterialPageRoute(
             builder: (_) => HalamanReimbursement(initialDetailId: id),
           ),
+        );
+      } else if (nav.type == 'company_calendar') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HalamanCalendar()),
+        );
+      } else if (nav.type == 'timeoff_submitted' ||
+          nav.type == 'timeoff_hrd_approved' ||
+          nav.type == 'timeoff_approved' ||
+          nav.type == 'timeoff_rejected') {
+        if (userID == null || userID!.isEmpty) await loadUserId();
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TimeOffScreen(userId: userID ?? ''),
+          ),
+        );
+      } else if (nav.type == 'overtime_submitted' ||
+          nav.type == 'overtime_approved' ||
+          nav.type == 'overtime_rejected') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const OvertimeScreen()),
+        );
+      } else if (nav.type == 'dl_pending_org' ||
+          nav.type == 'dl_pending_finance' ||
+          nav.type == 'dl_pending_hrd' ||
+          nav.type == 'dl_pending_hrd_verify') {
+        if (userID == null || userID!.isEmpty) await loadUserId();
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OrgApprovalScreen(userId: userID ?? ''),
+          ),
+        );
+      } else if (nav.type == 'asset_submitted' ||
+          nav.type == 'asset_approved' ||
+          nav.type == 'asset_rejected') {
+        if (userID == null || userID!.isEmpty) await loadUserId();
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => AssetScreen(userId: userID ?? '')),
         );
       }
     });

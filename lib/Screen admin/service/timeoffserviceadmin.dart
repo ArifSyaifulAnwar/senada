@@ -2,39 +2,21 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:absensikaryawan/Screen%20admin/model/timeoffmodeladmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:http/http.dart' as http;
 
 class TimeOffAdminService {
   static const String adminEndpoint = '/api/timeoff/admin';
 
-  static Future<Map<String, String>> _getHeaders() async {
-    final token = await _getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
+  // Dulu tiap panggilan minta token baru ke /api/auth/token tanpa cache dan
+  // tanpa cek null sebelum dipakai (banyak method di bawah langsung
+  // "Authorization: Bearer $token" walau token null) — begitu fetch token
+  // gagal (network hiccup dll), header jadi "Bearer null" dan server selalu
+  // balas 401. TokenService (sudah dipakai fitur Asset/Inventory) benar:
+  // dedupe, cache sesuai expires_in, retry otomatis 1x kalau kena 401.
+  static Future<Map<String, String>> _getHeaders() => TokenService.jsonHeaders();
 
-  static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+  static Future<String?> _getToken() => TokenService.getToken();
 
   // Get admin statistics
   static Future<ApiResponse<TimeOffAdminStatistics>> getAdminStatistics({

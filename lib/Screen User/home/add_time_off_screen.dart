@@ -1808,10 +1808,10 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
       initialDate: isStart
           ? (_tanggalMulai ?? DateTime.now())
           : (_tanggalSelesai ?? _tanggalMulai ?? DateTime.now()),
-      firstDate: _isEditMode
-          ? DateTime(2020)
-          : DateTime.now().subtract(const Duration(days: 90)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      // Tidak dibatasi tanggalnya — bisa ajukan izin untuk tanggal kapan saja,
+      // baik jauh ke belakang (misal susulan) maupun jauh ke depan.
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.light(

@@ -10,7 +10,12 @@ import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Screen User/Screen HRD/hrd_listkaryawan.dart';
+import '../Screen User/Screen HRD/hrd_calendar_screen.dart';
 import 'Home/riwayatabsensihrd.dart';
+import 'Home/timeoffhrd.dart';
+import 'Home/overtimehrd.dart';
+import 'Home/teguranhrd.dart';
+import '../Screen User/fitur/org_approval_screen.dart';
 
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -43,7 +48,7 @@ class _HomePageHRDState extends State<HomePageHRD> {
   }
 
   void _handlePendingNotification() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final nav = FcmService.consumePendingNavigation();
       if (nav == null) return;
 
@@ -59,6 +64,44 @@ class _HomePageHRDState extends State<HomePageHRD> {
               initialDetailId: int.tryParse(nav.referenceId ?? ''),
             ),
           ),
+        );
+      } else if (nav.type == 'company_calendar') {
+        setState(() => myCurrentIndex = 0); // pastikan di tab Home
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HrdCalendarScreen()),
+        );
+      } else if (nav.type == 'timeoff_new') {
+        setState(() => myCurrentIndex = 0); // pastikan di tab Home
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TimeOffHRDScreen()),
+        );
+      } else if (nav.type == 'overtime_new') {
+        setState(() => myCurrentIndex = 0); // pastikan di tab Home
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const OvertimeHRDScreen()),
+        );
+      } else if (nav.type == 'dl_pending_org' ||
+          nav.type == 'dl_pending_finance' ||
+          nav.type == 'dl_pending_hrd' ||
+          nav.type == 'dl_pending_hrd_verify' ||
+          nav.type == 'asset_new') {
+        setState(() => myCurrentIndex = 0); // pastikan di tab Home
+        final prefs = await SharedPreferences.getInstance();
+        final uid = prefs.getString('UserID') ?? '';
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => OrgApprovalScreen(userId: uid)),
+        );
+      } else if (nav.type == 'teguran_created' ||
+          nav.type == 'teguran_update_confirmed') {
+        setState(() => myCurrentIndex = 0); // pastikan di tab Home
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TeguranHrdScreen()),
         );
       }
     });

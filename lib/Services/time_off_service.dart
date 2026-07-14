@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as path;
@@ -14,37 +15,14 @@ import '../Screen User/fitur/org_approval_screen.dart';
 class TimeOffService {
   static const String _base = '/api/timeoff';
 
-  // ── Auth token (cached 10 menit agar tidak fetch ulang setiap call) ─────────
-  static String? _cachedToken;
-  static DateTime? _tokenExpiry;
-
-  static Future<String?> _getToken() async {
-    if (_cachedToken != null &&
-        _tokenExpiry != null &&
-        DateTime.now().isBefore(_tokenExpiry!)) {
-      return _cachedToken;
-    }
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final d = json.decode(res.body);
-        if (d['access_token'] != null) {
-          _cachedToken = d['access_token'] as String;
-          _tokenExpiry = DateTime.now().add(const Duration(minutes: 10));
-          return _cachedToken;
-        }
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
+  // Auth token — dulu tiap service punya cache token sendiri-sendiri (fixed
+  // 10 menit, tanpa retry) sehingga kalau fetch token gagal (network hiccup,
+  // banyak request bersamaan pas cache habis, dll) header yang terkirim jadi
+  // "Authorization: bearer null" dan server selalu balas 401. TokenService
+  // (dipakai bareng fitur Asset/Inventory) sudah benar: dedupe request token
+  // yang bersamaan, cache sesuai expires_in asli dari server, dan retry
+  // otomatis 1x kalau request pertama kena 401.
+  static Future<String?> _getToken() => TokenService.getToken();
 
   static Future<ApiResponse<void>> submitDlLaporanForm({
     required int timeOffId,
@@ -493,15 +471,10 @@ class TimeOffService {
     }
   }
 
-  static Future<Map<String, String>> _jsonHeaders() async {
-    final tok = await _getToken();
-    return {'Content-Type': 'application/json', 'Authorization': 'bearer $tok'};
-  }
+  static Future<Map<String, String>> _jsonHeaders() => TokenService.jsonHeaders();
 
-  static Future<Map<String, String>> _multipartHeaders() async {
-    final tok = await _getToken();
-    return {'Authorization': 'bearer $tok'};
-  }
+  static Future<Map<String, String>> _multipartHeaders() =>
+      TokenService.multipartHeaders();
 
   static String _normalizeJenis(String j) =>
       j.trim().replaceAll(RegExp(r'\s+'), ' ');

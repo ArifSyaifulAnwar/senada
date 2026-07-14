@@ -454,6 +454,24 @@ class AdminAttendanceService {
     }
   }
 
+  // Reaktif — aman dipanggil berkali-kali (misal tiap kali layar Riwayat
+  // Absensi HRD dibuka/refresh). Server yang menentukan apakah benar-benar
+  // perlu kirim notifikasi: hanya sekali per hari, dan hanya mulai jam 10.
+  Future<void> checkBelumAbsenNotify() async {
+    try {
+      final adminUserId = await _getUserId();
+      if (adminUserId == null || adminUserId.isEmpty) return;
+
+      await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/admin/attendance/check-belum-absen-notify'),
+        body: jsonEncode({'adminUserId': adminUserId}),
+      ).timeout(const Duration(seconds: 20));
+    } catch (_) {
+      // Diam-diam saja — ini pengecekan latar belakang, tidak perlu
+      // mengganggu pengalaman buka layar riwayat absensi.
+    }
+  }
+
   Future<ApiResponse<List<Employee>>> getEmployees({String? searchTerm}) async {
     try {
       final adminUserId = await _getUserId();

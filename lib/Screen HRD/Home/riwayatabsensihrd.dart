@@ -1,5 +1,6 @@
 // screens/halaman_hrd_absensi.dart — FULL REPLACE
 // ignore_for_file: curly_braces_in_flow_control_structures, library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
+import 'dart:async' show unawaited;
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:absensikaryawan/Services/web_download.dart';
@@ -13,6 +14,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../Screen admin/model/admin_attendance_model.dart';
 import '../../Screen admin/service/admin_attendance_service.dart';
 import '../../Screen admin/service/hrd_attendance_service.dart';
+import '../../Screen User/Screen HRD/hrd_employee_service.dart';
 import '../../Services/company_calendar_service.dart';
 import '../doa_karyawan_screen.dart';
 import '../hrd_absensi_edit.dart';
@@ -67,6 +69,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   Map<String, String> _doaMap = {};
   Employee? _selectedAnalyticsEmployee;
   List<CompanyCalendarEvent> _analyticsCalendarEvents = [];
+  // Karyawan dengan jadwal kerja kustom (mis. hanya Senin-Rabu) tidak boleh
+  // dianggap "belum absen"/"tidak hadir" di hari yang bukan jadwalnya.
+  // Tidak ada entri untuk seorang userId di map = jadwal normal (semua hari).
+  Map<String, List<int>> _workDaysMap = {};
   @override
   void initState() {
     super.initState();
@@ -364,6 +370,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _loadEmployees(),
       _loadOffices(),
       _loadDashboardStats(),
+      _loadWorkDaysMap(),
     ]);
     await _loadAttendanceData(refresh: true);
     await _loadHRDAnalytics();
@@ -600,6 +607,11 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     }
   }
 
+  Future<void> _loadWorkDaysMap() async {
+    final map = await HrdEmployeeService.getAllWorkDays();
+    if (mounted) setState(() => _workDaysMap = map);
+  }
+
   Future<void> _loadOffices() async {
     try {
       final r = await _adminService.getOffices();
@@ -642,8 +654,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           ? 'Belum Absen'
           : 'Tidak Hadir';
 
+      // Cek reaktif ke server apakah perlu kirim notifikasi "belum absen" ke
+      // HRD — server yang menentukan (hanya jam 10 ke atas, hanya sekali per
+      // hari), di sini cukup dipanggil setiap refresh untuk hari ini.
+      if (isToday) unawaited(_adminService.checkBelumAbsenNotify());
+
+      // Karyawan dengan jadwal kustom (mis. hanya Senin-Rabu) tidak dianggap
+      // "belum absen"/"tidak hadir" di hari yang bukan jadwal kerjanya.
+      final targetIsoWeekday = targetDate.weekday; // 1=Senin ... 7=Minggu
       final tidakHadir = employees
           .where((e) => e.isActive && !hadirUserIds.contains(e.userId))
+          .where((e) {
+            final customDays = _workDaysMap[e.userId];
+            return customDays == null || customDays.contains(targetIsoWeekday);
+          })
           .map(
             (e) => {
               'userId': e.userId,
@@ -919,9 +943,17 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     while (!current.isAfter(end)) {
       // Skip Sabtu, Minggu, dan LIBUR dari kalender HRD
       if (!_isLiburExport(current, calendarEvents)) {
+        final currentIsoWeekday = current.weekday; // 1=Senin ... 7=Minggu
         for (final entry in userSample.entries) {
           final uid = entry.key;
           final sample = entry.value;
+
+          // Karyawan dengan jadwal kustom (mis. hanya Senin-Rabu) tidak
+          // ditandai "Tidak Hadir" di hari yang bukan jadwal kerjanya.
+          final customDays = _workDaysMap[uid];
+          if (customDays != null && !customDays.contains(currentIsoWeekday)) {
+            continue;
+          }
 
           final key = '${uid}_${DateFormat('yyyy-MM-dd').format(current)}';
 

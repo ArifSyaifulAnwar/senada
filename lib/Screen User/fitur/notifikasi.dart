@@ -4,9 +4,19 @@
 import 'package:absensikaryawan/models/notification_models.dart';
 import 'package:flutter/material.dart';
 import 'package:absensikaryawan/Services/notification_service.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/reimbursement.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warningletterscreen.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/teguranhrd.dart';
 import 'package:absensikaryawan/Screen%20User/home/halaman_finance_reimbursement.dart';
+import 'package:absensikaryawan/Screen%20User/home/timeoff.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/timeoffhrd.dart';
+import 'package:absensikaryawan/Screen%20admin/Home/timeoffadmin.dart';
+import 'package:absensikaryawan/Screen%20User/home/overtime.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/overtimehrd.dart';
+import 'org_approval_screen.dart';
+import 'asset_screen.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/riwayatabsensihrd.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class HalamanNotifikasi extends StatefulWidget {
@@ -355,7 +365,13 @@ class _HalamanNotifikasiState extends State<HalamanNotifikasi>
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _markAsRead(notification.id),
+        onTap: () {
+          _markAsRead(notification.id);
+          if (notification.referenceType != null &&
+              notification.referenceType!.isNotEmpty) {
+            _handleNotificationAction(notification);
+          }
+        },
         child: Container(
           padding: EdgeInsets.all(_getResponsivePadding(context, 16)),
           decoration: BoxDecoration(
@@ -463,8 +479,11 @@ class _HalamanNotifikasiState extends State<HalamanNotifikasi>
                 ),
               ),
 
-              // Action Button
-              if (notification.actionText != null) ...[
+              // Action Button — hanya untuk actionText yang benar-benar
+              // terisi (backend kadang balikin string kosong "" alih-alih
+              // null untuk kolom yang tidak diisi, bukan null literal).
+              if (notification.actionText != null &&
+                  notification.actionText!.isNotEmpty) ...[
                 SizedBox(height: _getResponsivePadding(context, 12)),
                 Align(
                   alignment: Alignment.centerRight,
@@ -508,21 +527,126 @@ class _HalamanNotifikasiState extends State<HalamanNotifikasi>
         ),
       );
     } else if (notification.referenceType == 'reimbursement') {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => HalamanReimbursement(initialDetailId: id),
-        ),
-      );
+      // HRD dapat notif "pengajuan baru"/"diajukan ulang" (referenceType yang
+      // sama dengan status-update ke pengaju) — arahkan ke layar review HRD,
+      // bukan layar reimbursement pribadi karyawan biasa.
+      final prefs = await SharedPreferences.getInstance();
+      final role = (prefs.getString('Role') ?? '').toLowerCase();
+      if (!mounted) return;
+      if (role == 'hrd') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HalamanHRDReimbursement(initialDetailId: id),
+          ),
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HalamanReimbursement(initialDetailId: id),
+          ),
+        );
+      }
     } else if (notification.referenceType == 'teguran') {
+      // Karyawan yang ditegur dapat notif teguran_new/updated → lihat surat
+      // teguran mereka sendiri. HRD/Head yang membuat teguran dapat notif
+      // konfirmasi (teguran_created/update_confirmed) → balik ke layar kelola
+      // teguran, bukan layar pribadi karyawan.
+      final prefs = await SharedPreferences.getInstance();
+      final role = (prefs.getString('Role') ?? '').toLowerCase();
+      final userId = prefs.getString('UserID') ?? '';
+      if (!mounted) return;
+      if (role == 'hrd') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TeguranHrdScreen()),
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => WarningLetterScreen(userId: userId),
+          ),
+        );
+      }
+    } else if (notification.referenceType == 'timeoff') {
+      // Pengaju dapat notif status izin mereka sendiri; HRD dapat notif
+      // "pengajuan baru"; Direktur dapat notif "menunggu persetujuan Anda" —
+      // arahkan ke layar review masing-masing role, bukan layar pengajuan
+      // karyawan biasa.
+      final prefs = await SharedPreferences.getInstance();
+      final role = (prefs.getString('Role') ?? '').toLowerCase();
+      final userId = prefs.getString('UserID') ?? '';
+      if (!mounted) return;
+      if (role == 'hrd') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TimeOffHRDScreen()),
+        );
+      } else if (role == 'admin') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TimeOffAdminScreen()),
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => TimeOffScreen(userId: userId)),
+        );
+      }
+    } else if (notification.referenceType == 'overtime') {
+      // Direktur tidak dapat notif lembur (per keputusan produk), jadi cukup
+      // dua cabang: HRD (pengajuan baru) dan karyawan biasa (status lembur
+      // mereka sendiri).
+      final prefs = await SharedPreferences.getInstance();
+      final role = (prefs.getString('Role') ?? '').toLowerCase();
+      if (!mounted) return;
+      if (role == 'hrd') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const OvertimeHRDScreen()),
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const OvertimeScreen()),
+        );
+      }
+    } else if (notification.referenceType == 'dl_approval') {
+      // Approver Dinas Luar (atasan/manager, Finance, atau HRD) — semuanya
+      // review lewat layar "Persetujuan" yang sama, tidak perlu role-aware.
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID') ?? '';
       if (!mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => WarningLetterScreen(userId: userId),
-        ),
+        MaterialPageRoute(builder: (_) => OrgApprovalScreen(userId: userId)),
+      );
+    } else if (notification.referenceType == 'asset') {
+      // HRD dapat notif "pengajuan baru" → review lewat layar Persetujuan;
+      // pengaju dapat notif status pengajuannya sendiri → layar Asset miliknya.
+      final prefs = await SharedPreferences.getInstance();
+      final role = (prefs.getString('Role') ?? '').toLowerCase();
+      final userId = prefs.getString('UserID') ?? '';
+      if (!mounted) return;
+      if (role == 'hrd') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => OrgApprovalScreen(userId: userId)),
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => AssetScreen(userId: userId)),
+        );
+      }
+    } else if (notification.referenceType == 'late_attendance' ||
+        notification.referenceType == 'belum_absen_digest') {
+      // Hanya HRD yang menerima notif ini — langsung ke Riwayat Absensi.
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const HalamanHRDAbsensi()),
       );
     } else if (notification.actionUrl != null) {
       // Handle other URL actions

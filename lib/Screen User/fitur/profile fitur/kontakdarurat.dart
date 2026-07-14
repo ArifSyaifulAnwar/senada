@@ -2,8 +2,10 @@
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
 import 'package:absensikaryawan/Services/emergencycontactservice.dart';
+import 'package:absensikaryawan/Services/teguran_service.dart';
 import 'package:flutter/material.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/keamanan/addemergencycontact.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/emergency_contact_hrd_screen.dart';
 
 class EmergencyContactScreen extends StatefulWidget {
   final String userId; // Add userId parameter
@@ -22,6 +24,7 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen>
   List<EmergencyContact> _emergencyContacts = [];
   bool _isLoading = true;
   String? _errorMessage;
+  bool _isHeadHrd = false;
 
   @override
   void initState() {
@@ -36,6 +39,12 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen>
     );
 
     _loadEmergencyContacts();
+    _checkHeadHrd();
+  }
+
+  Future<void> _checkHeadHrd() async {
+    final result = await TeguranService.checkIsHead(widget.userId);
+    if (mounted) setState(() => _isHeadHrd = result.isHrdHead);
   }
 
   @override
@@ -679,7 +688,44 @@ class _EmergencyContactScreenState extends State<EmergencyContactScreen>
                       ),
                     ),
 
-                    SizedBox(height: 24),
+                    SizedBox(height: 16),
+
+                    // Khusus Head HRD — lihat kontak darurat semua karyawan
+                    if (_isHeadHrd)
+                      Container(
+                        width: double.infinity,
+                        margin: EdgeInsets.only(bottom: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => EmergencyContactHrdScreen(
+                                hrdUserId: widget.userId,
+                              ),
+                            ),
+                          ),
+                          icon: Icon(
+                            Icons.contact_emergency_outlined,
+                            color: Color(0xFFEF4444),
+                          ),
+                          label: Text(
+                            'Lihat Kontak Darurat Semua Karyawan',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFEF4444),
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: EdgeInsets.symmetric(vertical: 14),
+                            side: BorderSide(color: Color(0xFFEF4444)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    SizedBox(height: 8),
 
                     // Tips
                     if (_emergencyContacts.isEmpty)

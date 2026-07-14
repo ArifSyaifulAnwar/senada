@@ -6,6 +6,7 @@ import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:absensikaryawan/Screen%20admin/model/timeoffmodeladmin.dart';
 import 'package:absensikaryawan/Screen%20admin/service/timeoffserviceadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:excel/excel.dart' as xl;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -3774,24 +3775,11 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
     }
   }
 
-  Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final d = json.decode(res.body);
-        return d['access_token'];
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
+  // Reuse TokenService (dedupe + cache sesuai expires_in dari server) — dulu
+  // fetch token baru dari /api/auth/token setiap kali dipanggil tanpa cache
+  // sama sekali, jadi lebih boros dan lebih gampang kena gagal fetch token
+  // (network hiccup dll) yang berujung ke error 401 dari server.
+  Future<String?> _getToken() => TokenService.getToken();
 
   // Ambil semua file: multi-file (udt_timeoff_files) + fallback legacy
   Future<void> _loadAttachments() async {

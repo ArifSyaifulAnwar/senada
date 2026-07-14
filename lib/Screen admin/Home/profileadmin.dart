@@ -16,6 +16,8 @@ import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Screen User/fitur/profile fitur/keamanan.dart';
 import '../../Screen User/fitur/profile fitur/kebijakanprivacy.dart';
 import '../../Screen User/fitur/profile fitur/kontakdarurat.dart';
+import '../../Screen User/fitur/profile fitur/familyinfoprofile.dart';
+import '../../Screen User/fitur/profile fitur/educationscreen.dart';
 import '../../Screen User/fitur/profile fitur/warningletterscreen.dart';
 import '../../Screen User/home.dart';
 import '../../Screen User/splash_screen.dart';
@@ -770,12 +772,24 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     _MenuItem(
       icon: Icons.family_restroom,
       title: _t('familyInfo'),
-      onTap: _showComingSoonDialog,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              FamilyInfoScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
     _MenuItem(
       icon: Icons.school_outlined,
       title: _t('education'),
-      onTap: _showComingSoonDialog,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              EducationExperienceScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
     _MenuItem(
       icon: Icons.payment_outlined,

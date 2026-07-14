@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/time_off_model.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as p;
@@ -9,34 +10,13 @@ import 'package:path/path.dart' as p;
 class TimeOffFileService {
   static const String _base = '/api/timeoff/files';
 
-  static Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        final d = json.decode(res.body);
-        if (d['access_token'] != null) return d['access_token'];
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
+  // Reuse TokenService (dedupe + cache sesuai expires_in + retry-safe) —
+  // dulu tiap panggilan fetch token baru tanpa cache, tanpa cek null,
+  // sehingga bisa kirim "Authorization: bearer null" dan 401.
+  static Future<Map<String, String>> _jsonHeaders() => TokenService.jsonHeaders();
 
-  static Future<Map<String, String>> _jsonHeaders() async {
-    final tok = await _getToken();
-    return {'Content-Type': 'application/json', 'Authorization': 'bearer $tok'};
-  }
-
-  static Future<Map<String, String>> _multipartHeaders() async {
-    final tok = await _getToken();
-    return {'Authorization': 'bearer $tok'};
-  }
+  static Future<Map<String, String>> _multipartHeaders() =>
+      TokenService.multipartHeaders();
 
   static Future<ApiResponse<List<TimeOffFileItem>>> uploadFilesBytes({
     required int timeOffId,

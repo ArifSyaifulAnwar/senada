@@ -7,6 +7,7 @@ import 'package:absensikaryawan/Screen%20admin/Home/edit_notification_page.dart'
 import 'package:absensikaryawan/Screen%20admin/model/admin_notification_models.dart';
 import 'package:absensikaryawan/Screen%20admin/service/admin_notification_service.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class HalamanNotifikasiAdmin extends StatefulWidget {
   const HalamanNotifikasiAdmin({super.key});
@@ -209,118 +210,309 @@ class _HalamanNotifikasiAdminState extends State<HalamanNotifikasiAdmin>
         false;
   }
 
+  // Preset periode — dievaluasi ulang tiap kali dipilih (bukan disimpan
+  // sebagai state persisten), supaya rentang tanggal selalu relatif ke
+  // "sekarang" saat filter benar-benar diterapkan.
+  static const List<String> _periodPresets = [
+    'Semua Waktu',
+    'Hari Ini',
+    '7 Hari Terakhir',
+    '30 Hari Terakhir',
+    'Bulan Ini',
+    'Kustom',
+  ];
+
+  (DateTime?, DateTime?) _rangeForPreset(String preset) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    switch (preset) {
+      case 'Hari Ini':
+        return (today, today.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1)));
+      case '7 Hari Terakhir':
+        return (today.subtract(const Duration(days: 6)), now);
+      case '30 Hari Terakhir':
+        return (today.subtract(const Duration(days: 29)), now);
+      case 'Bulan Ini':
+        return (DateTime(now.year, now.month, 1), now);
+      default:
+        return (null, null);
+    }
+  }
+
+  String _presetLabelFor(DateTime? from, DateTime? to) {
+    if (from == null && to == null) return 'Semua Waktu';
+    for (final preset in _periodPresets) {
+      if (preset == 'Semua Waktu' || preset == 'Kustom') continue;
+      final range = _rangeForPreset(preset);
+      if (range.$1 != null &&
+          _isSameDay(range.$1!, from) &&
+          to != null &&
+          to.difference(range.$2!).inMinutes.abs() < 2) {
+        return preset;
+      }
+    }
+    return 'Kustom';
+  }
+
+  bool _isSameDay(DateTime a, DateTime? b) =>
+      b != null && a.year == b.year && a.month == b.month && a.day == b.day;
+
+  String _formatDateRange(DateTime? from, DateTime? to) {
+    if (from == null && to == null) return '';
+    final fmt = DateFormat('dd/MM/yyyy');
+    if (from != null && to != null) {
+      return '${fmt.format(from)} - ${fmt.format(to)}';
+    }
+    return fmt.format(from ?? to!);
+  }
+
+  bool get _hasActiveFilters =>
+      _selectedFilter != 'Semua' ||
+      _selectedReadFilter != null ||
+      _dateFrom != null ||
+      _dateTo != null;
+
   void _showFilterDialog() {
+    // Salinan sementara — perubahan hanya berlaku beneran kalau tombol
+    // "Terapkan" ditekan; batal/geser tutup sheet tidak mengubah filter aktif.
+    String tempFilter = _selectedFilter;
+    bool? tempReadFilter = _selectedReadFilter;
+    DateTime? tempDateFrom = _dateFrom;
+    DateTime? tempDateTo = _dateTo;
+    String tempPeriodLabel = _presetLabelFor(_dateFrom, _dateTo);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _buildFilterBottomSheet(),
-    );
-  }
-
-  Widget _buildFilterBottomSheet() {
-    return StatefulBuilder(
-      builder: (context, setModalState) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Filter Notifikasi',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
               ),
-              const SizedBox(height: 20),
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Filter Notifikasi',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
 
-              // Type Filter
-              const Text('Tipe Notifikasi'),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _selectedFilter,
-                items: _notificationTypes.map((type) {
-                  return DropdownMenuItem(
-                    value: type.value == 'all' ? 'Semua' : type.value,
-                    child: Text(type.display),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  setModalState(() {
-                    _selectedFilter = value ?? 'Semua';
-                  });
-                },
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+                      // Type Filter
+                      const Text(
+                        'Tipe Notifikasi',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: tempFilter,
+                        items: _notificationTypes.map((type) {
+                          return DropdownMenuItem(
+                            value: type.value == 'all' ? 'Semua' : type.value,
+                            child: Text(type.display),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setModalState(() {
+                            tempFilter = value ?? 'Semua';
+                          });
+                        },
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // Read Status Filter
+                      const Text(
+                        'Status Baca',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<bool?>(
+                        value: tempReadFilter,
+                        items: const [
+                          DropdownMenuItem(value: null, child: Text('Semua')),
+                          DropdownMenuItem(
+                            value: true,
+                            child: Text('Sudah Dibaca'),
+                          ),
+                          DropdownMenuItem(
+                            value: false,
+                            child: Text('Belum Dibaca'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setModalState(() {
+                            tempReadFilter = value;
+                          });
+                        },
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // Period Filter
+                      const Text(
+                        'Periode',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _periodPresets.map((preset) {
+                          final selected = tempPeriodLabel == preset;
+                          return ChoiceChip(
+                            label: Text(preset),
+                            selected: selected,
+                            onSelected: (_) async {
+                              if (preset == 'Kustom') {
+                                final now = DateTime.now();
+                                final picked = await showDateRangePicker(
+                                  context: context,
+                                  firstDate: DateTime(now.year - 2),
+                                  lastDate: now,
+                                  initialDateRange:
+                                      tempDateFrom != null && tempDateTo != null
+                                      ? DateTimeRange(
+                                          start: tempDateFrom!,
+                                          end: tempDateTo!,
+                                        )
+                                      : null,
+                                );
+                                if (picked == null) return;
+                                setModalState(() {
+                                  tempDateFrom = picked.start;
+                                  tempDateTo = picked.end.add(
+                                    const Duration(
+                                      hours: 23,
+                                      minutes: 59,
+                                      seconds: 59,
+                                    ),
+                                  );
+                                  tempPeriodLabel = 'Kustom';
+                                });
+                              } else {
+                                final range = _rangeForPreset(preset);
+                                setModalState(() {
+                                  tempDateFrom = range.$1;
+                                  tempDateTo = range.$2;
+                                  tempPeriodLabel = preset;
+                                });
+                              }
+                            },
+                            selectedColor: Colors.blue.withOpacity(0.15),
+                            labelStyle: TextStyle(
+                              color: selected ? Colors.blue[800] : null,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      if (tempDateFrom != null || tempDateTo != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.date_range,
+                              size: 16,
+                              color: Colors.grey[600],
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _formatDateRange(tempDateFrom, tempDateTo),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+
+                      const SizedBox(height: 24),
+
+                      // Action Buttons
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                setModalState(() {
+                                  tempFilter = 'Semua';
+                                  tempReadFilter = null;
+                                  tempDateFrom = null;
+                                  tempDateTo = null;
+                                  tempPeriodLabel = 'Semua Waktu';
+                                });
+                              },
+                              child: const Text('Reset'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _selectedFilter = tempFilter;
+                                  _selectedReadFilter = tempReadFilter;
+                                  _dateFrom = tempDateFrom;
+                                  _dateTo = tempDateTo;
+                                });
+                                Navigator.pop(sheetContext);
+                                _loadNotifications(refresh: true);
+                              },
+                              child: const Text('Terapkan'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
-
-              const SizedBox(height: 16),
-
-              // Read Status Filter
-              const Text('Status Baca'),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<bool?>(
-                value: _selectedReadFilter,
-                items: const [
-                  DropdownMenuItem(value: null, child: Text('Semua')),
-                  DropdownMenuItem(value: true, child: Text('Sudah Dibaca')),
-                  DropdownMenuItem(value: false, child: Text('Belum Dibaca')),
-                ],
-                onChanged: (value) {
-                  setModalState(() {
-                    _selectedReadFilter = value;
-                  });
-                },
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Action Buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () {
-                        setModalState(() {
-                          _selectedFilter = 'Semua';
-                          _selectedReadFilter = null;
-                          _selectedUserFilter = null;
-                          _dateFrom = null;
-                          _dateTo = null;
-                        });
-                      },
-                      child: const Text('Reset'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _loadNotifications(refresh: true);
-                      },
-                      child: const Text('Terapkan'),
-                    ),
-                  ),
-                ],
-              ),
-
-              SizedBox(height: MediaQuery.of(context).viewInsets.bottom),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -847,16 +1039,110 @@ class _HalamanNotifikasiAdminState extends State<HalamanNotifikasiAdmin>
             ),
           ),
           const SizedBox(width: 12),
-          IconButton(
-            onPressed: _showFilterDialog,
-            icon: const Icon(Icons.filter_list),
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.blue.withOpacity(0.1),
-              foregroundColor: Colors.blue,
-            ),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                onPressed: _showFilterDialog,
+                icon: const Icon(Icons.filter_list),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.blue.withOpacity(0.1),
+                  foregroundColor: Colors.blue,
+                ),
+              ),
+              if (_hasActiveFilters)
+                Positioned(
+                  right: 4,
+                  top: 4,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildActiveFiltersBar() {
+    if (!_hasActiveFilters) return const SizedBox.shrink();
+
+    final chips = <Widget>[];
+
+    if (_selectedFilter != 'Semua') {
+      final display = _notificationTypes
+          .firstWhere(
+            (t) => t.value == _selectedFilter,
+            orElse: () => NotificationTypeOption(
+              value: _selectedFilter,
+              display: _selectedFilter,
+            ),
+          )
+          .display;
+      chips.add(
+        _buildFilterChip('Tipe: $display', () {
+          setState(() => _selectedFilter = 'Semua');
+          _loadNotifications(refresh: true);
+        }),
+      );
+    }
+
+    if (_selectedReadFilter != null) {
+      chips.add(
+        _buildFilterChip(
+          _selectedReadFilter! ? 'Sudah Dibaca' : 'Belum Dibaca',
+          () {
+            setState(() => _selectedReadFilter = null);
+            _loadNotifications(refresh: true);
+          },
+        ),
+      );
+    }
+
+    if (_dateFrom != null || _dateTo != null) {
+      chips.add(
+        _buildFilterChip(
+          '${_presetLabelFor(_dateFrom, _dateTo)}: ${_formatDateRange(_dateFrom, _dateTo)}',
+          () {
+            setState(() {
+              _dateFrom = null;
+              _dateTo = null;
+            });
+            _loadNotifications(refresh: true);
+          },
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: EdgeInsets.fromLTRB(
+        _getResponsivePadding(context, 20),
+        0,
+        _getResponsivePadding(context, 20),
+        _getResponsivePadding(context, 12),
+      ),
+      child: Wrap(spacing: 8, runSpacing: 8, children: chips),
+    );
+  }
+
+  Widget _buildFilterChip(String label, VoidCallback onClear) {
+    return Chip(
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      deleteIcon: const Icon(Icons.close, size: 16),
+      onDeleted: onClear,
+      backgroundColor: Colors.blue.withOpacity(0.08),
+      side: BorderSide(color: Colors.blue.withOpacity(0.3)),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 
@@ -1030,6 +1316,7 @@ class _HalamanNotifikasiAdminState extends State<HalamanNotifikasiAdmin>
         children: [
           _buildStatsCards(),
           _buildSearchBar(),
+          _buildActiveFiltersBar(),
           Expanded(child: _buildNotificationList()),
         ],
       ),
