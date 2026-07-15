@@ -24,6 +24,12 @@ const AndroidNotificationChannel _channel = AndroidNotificationChannel(
 final FlutterLocalNotificationsPlugin _localNotif =
     FlutterLocalNotificationsPlugin();
 
+// Dipakai fitur lain (mis. Pengingat Absen) yang perlu menjadwalkan
+// notifikasi lokal lewat instance plugin yang sama (sudah di-initialize di
+// FcmService.init(), termasuk channel Android & tap-handler-nya).
+FlutterLocalNotificationsPlugin get localNotificationsPlugin => _localNotif;
+AndroidNotificationChannel get highImportanceChannel => _channel;
+
 // Data pending-navigation dari notifikasi yang di-tap — dibawa sampai home
 // screen siap menavigasi ke layar yang dimaksud (mis. reimbursement tertentu).
 class PendingNav {

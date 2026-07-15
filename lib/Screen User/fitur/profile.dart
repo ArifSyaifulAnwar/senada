@@ -6,6 +6,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/bantuandandu
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/hubungikami.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/infoprofile.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/keamanan.dart';
+import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/pengingatabsen.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kebijakanprivacy.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/kontakdarurat.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/familyinfoprofile.dart';
@@ -1041,7 +1042,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _l('attendanceReminder'),
           iconSize: iconSz,
           fontSize: menuFs,
-          onTap: () => _showComingSoonDialog(context),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const PengingatAbsenScreen()),
+          ),
         ),
       ]);
 

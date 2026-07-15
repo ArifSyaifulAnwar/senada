@@ -12,6 +12,7 @@ import 'package:absensikaryawan/Screen%20User/home/overtime.dart';
 import 'package:absensikaryawan/Screen%20User/home/timeoff.dart';
 import '../../Screen HRD/Home/berkaskantor.dart';
 import '../../Screen HRD/Home/teguranhrd.dart';
+import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
@@ -80,10 +81,29 @@ class _HomePageState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _initializeUserInfo();
-    _checkTodayAttendanceStatus();
+    final attendanceFuture = _checkTodayAttendanceStatus();
+    final calendarFuture = _checkHariIniHome();
     _loadUnreadNotificationCount();
-    _checkHariIniHome();
     _handlePendingNotification();
+    Future.wait([
+      attendanceFuture,
+      calendarFuture,
+    ]).then((_) => _maybeScheduleAttendanceReminder());
+  }
+
+  // Pengingat Absen — notifikasi lokal jam 10:00 kalau belum check-in di
+  // hari kerja karyawan ini. Dijadwalkan ulang tiap home screen dibuka
+  // (schedule-on-open), dibatalkan otomatis begitu check-in berhasil (lihat
+  // attendance.dart).
+  Future<void> _maybeScheduleAttendanceReminder() async {
+    if (!mounted) return;
+    final uid = userID ?? await loadUserId();
+    if (uid == null || uid.isEmpty) return;
+    await AttendanceReminderService.scheduleIfNeeded(
+      userId: uid,
+      isHariLibur: _isHariLiburHome,
+      hasCheckedIn: _hasCheckedIn,
+    );
   }
 
   void _handlePendingNotification() {
@@ -258,14 +278,14 @@ class _HomePageState extends State<HomeScreen> {
       textColor = Colors.red[800]!;
       icon = Icons.weekend_rounded;
       title = _keteranganHariHome;
-      subtitle = 'Geser absen dinonaktifkan. Ajukan lembur via fitur Lembur.';
+      subtitle = 'Tetap masuk? Geser absen, otomatis tercatat sebagai Lembur.';
     } else if (_isHariLiburHome) {
       bgColor = Colors.orange[50]!;
       borderColor = Colors.orange[200]!;
       textColor = Colors.orange[800]!;
       icon = Icons.beach_access_rounded;
       title = 'Hari Libur: $_keteranganHariHome';
-      subtitle = 'Hari ini libur. Masuk kantor? Ajukan lembur.';
+      subtitle = 'Tetap masuk? Geser absen, otomatis tercatat sebagai Lembur.';
     } else {
       bgColor = const Color(0xFFE8F8F2);
       borderColor = const Color(0xFF10B981);
@@ -831,9 +851,9 @@ class _HomePageState extends State<HomeScreen> {
             ),
           SlideAction(
             key: _slideActionKey,
-            // ← disable juga kalau weekend
-            onSubmit:
-                (_hasCheckedOut || _isSlideActionProcessing || _isWeekendHome)
+            // Hari libur/weekend tetap boleh absen (tercatat sebagai Lembur
+            // oleh backend) — lihat _buildHomeBanner & attendance.dart.
+            onSubmit: (_hasCheckedOut || _isSlideActionProcessing)
                 ? null
                 : () async {
                     if (_isSlideActionProcessing) return null;
@@ -852,15 +872,14 @@ class _HomePageState extends State<HomeScreen> {
                     return null;
                   },
             sliderButtonIcon: Icon(_getSliderIcon(), color: Colors.white),
-            innerColor: _isWeekendHome ? Colors.grey : _getSliderColor(),
-            outerColor: (_isWeekendHome ? Colors.grey : _getSliderColor())
-                .withOpacity(0.2),
-            elevation: (_hasCheckedOut || _isWeekendHome) ? 1 : 4,
-            text: _isWeekendHome
-                ? 'Hari ${_keteranganHariHome} - Tidak Bisa Absen'
+            innerColor: _getSliderColor(),
+            outerColor: _getSliderColor().withOpacity(0.2),
+            elevation: _hasCheckedOut ? 1 : 4,
+            text: (_isHariLiburHome && !_hasCheckedOut && !_hasCheckedIn)
+                ? 'Geser untuk Check In (Lembur)'
                 : _getSliderText(),
             textStyle: TextStyle(
-              color: (_hasCheckedOut || _isWeekendHome)
+              color: _hasCheckedOut
                   ? Colors.grey[600]
                   : (_hasCheckedIn ? Colors.white : _getSliderColor()),
               fontWeight: FontWeight.bold,
@@ -871,8 +890,7 @@ class _HomePageState extends State<HomeScreen> {
             enabled:
                 !_hasCheckedOut &&
                 !_isLoadingAttendance &&
-                !_isSlideActionProcessing &&
-                !_isWeekendHome, // ← disable weekend
+                !_isSlideActionProcessing,
           ),
         ],
       ),

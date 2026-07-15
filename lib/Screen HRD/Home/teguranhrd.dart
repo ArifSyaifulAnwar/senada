@@ -75,7 +75,11 @@ class _TeguranHrdScreenState extends State<TeguranHrdScreen>
 
   Future<void> _loadTeguranList() async {
     setState(() => _loadingList = true);
-    final list = await TeguranService.getAllTeguran();
+    if (_hrdUserId == null || _hrdUserId!.isEmpty) {
+      setState(() => _loadingList = false);
+      return;
+    }
+    final list = await TeguranService.getAllTeguran(_hrdUserId!);
     if (!mounted) return;
     setState(() {
       _allTeguran = list;

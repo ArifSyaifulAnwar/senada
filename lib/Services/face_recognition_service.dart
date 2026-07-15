@@ -204,6 +204,7 @@ class FaceRecognitionService {
     required double latitude,
     required double longitude,
     required String attendanceType,
+    double? accuracyMeters,
   }) async {
     try {
       // Validasi input
@@ -246,6 +247,11 @@ class FaceRecognitionService {
         'AttendanceType': attendanceType
             .trim()
             .toLowerCase(), // ✅ Changed from 'attendanceType'
+        // Akurasi GPS (meter) dari Geolocator — dipakai backend untuk
+        // toleransi radius kantor. Terutama penting di web, di mana
+        // akurasi jauh lebih bervariasi (bisa WiFi/IP-based, 50-100m+)
+        // dibanding GPS asli di HP native.
+        if (accuracyMeters != null) 'AccuracyMeters': accuracyMeters,
       };
 
       // Debug

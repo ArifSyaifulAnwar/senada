@@ -122,6 +122,12 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
       'icon': '🕯️',
       'description': 'Izin duka cita',
     },
+    {
+      'value': 'Bencana Alam',
+      'label': 'Bencana Alam',
+      'icon': '🌪️',
+      'description': 'Izin terdampak bencana alam — langsung disetujui HRD',
+    },
   ];
 
   bool get _isDinasLuar => _selectedJenis == 'Dinas Luar';

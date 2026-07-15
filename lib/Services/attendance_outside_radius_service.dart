@@ -33,6 +33,7 @@ class AttendanceOutsideRadiusService {
     double? detScore,
     double? livenessScore,
     double? bestDistance,
+    double? accuracyMeters,
   }) async {
     try {
       final token = await _getToken();
@@ -51,6 +52,7 @@ class AttendanceOutsideRadiusService {
         'DetScore': detScore,
         'LivenessScore': livenessScore,
         'BestDistance': bestDistance,
+        'AccuracyMeters': accuracyMeters,
       };
 
       final response = await http

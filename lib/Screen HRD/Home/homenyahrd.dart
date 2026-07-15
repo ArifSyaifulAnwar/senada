@@ -13,6 +13,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/liveattendanceadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
+import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/office_file_service.dart';
@@ -109,14 +110,72 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   String? _userID;
   bool _isOfficeFileHrdHead = false;
 
+  // Pengingat Absen — dicek sekali saat cold start saja (bukan di auto-refresh
+  // 30 detik) supaya tidak boros panggilan /api/calendar/check.
+  bool _isHariLiburHrd = false;
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _refreshAll(showLoading: true);
+    final refreshFuture = _refreshAll(showLoading: true);
+    final calendarFuture = _checkHariIniHrd();
     _startAutoRefresh();
     _checkOfficeFileAccess();
+    Future.wait([
+      refreshFuture,
+      calendarFuture,
+    ]).then((_) => _maybeScheduleAttendanceReminder());
+  }
+
+  Future<void> _checkHariIniHrd() async {
+    try {
+      final today = DateTime.now();
+      if (today.weekday == DateTime.saturday ||
+          today.weekday == DateTime.sunday) {
+        if (mounted) setState(() => _isHariLiburHrd = true);
+        return;
+      }
+
+      final token = await _getToken();
+      if (token == null) return;
+
+      final tanggal =
+          '${today.year}-'
+          '${today.month.toString().padLeft(2, '0')}-'
+          '${today.day.toString().padLeft(2, '0')}';
+
+      final resp = await http
+          .post(
+            Uri.parse('$baseURL/api/calendar/check'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode({'tanggal': tanggal}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200 && mounted) {
+        final body = json.decode(resp.body);
+        final isWeekend = body['IsWeekend'] ?? body['is_weekend'] ?? false;
+        final isHariLibur =
+            body['IsHariLibur'] ?? body['is_hari_libur'] ?? false;
+        setState(() => _isHariLiburHrd = isWeekend || isHariLibur);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _maybeScheduleAttendanceReminder() async {
+    if (!mounted) return;
+    final uid = _userID ?? await _loadUserId();
+    if (uid == null || uid.isEmpty) return;
+    await AttendanceReminderService.scheduleIfNeeded(
+      userId: uid,
+      isHariLibur: _isHariLiburHrd,
+      hasCheckedIn: _hasCheckedIn,
+    );
   }
 
   /// Cek apakah user ini Head HRD — dipakai untuk menampilkan/menyembunyikan

@@ -200,12 +200,14 @@ class TeguranService {
     }
   }
 
-  /// HRD melihat semua teguran yang pernah dibuat (semua karyawan).
-  static Future<List<TeguranData>> getAllTeguran() async {
+  /// HRD melihat semua teguran yang pernah dibuat (karyawan di perusahaan
+  /// yang sama saja).
+  static Future<List<TeguranData>> getAllTeguran(String hrdUserId) async {
     try {
       final response = await http.post(
         Uri.parse('$baseURL/api/teguran/list'),
         headers: await _headers(),
+        body: json.encode({'HrdUserId': hrdUserId}),
       );
 
       if (response.statusCode == 200) {

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,13 @@ import '../../Services/attendance_outside_radius_service.dart';
 
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
+
+// Toleransi maksimum akurasi GPS yang ditambahkan ke radius kantor —
+// HARUS sama dengan @MaxAccuracyToleranceMeters di
+// udp_verify_face_attendance_python supaya info di layar ini konsisten
+// dengan keputusan server. Dibatasi (bukan toleransi tanpa batas) supaya
+// tidak bisa disalahgunakan buat pura-pura di kantor padahal jauh.
+const double _kMaxGpsAccuracyToleranceMeters = 50.0;
 
 class AbsensiScreen extends StatefulWidget {
   final bool isCheckOut;
@@ -492,11 +500,13 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         latitude: _currentPosition?.latitude ?? 0,
         longitude: _currentPosition?.longitude ?? 0,
         attendanceType: _isCheckOut ? 'checkout' : 'checkin',
+        accuracyMeters: _currentPosition?.accuracy,
       ).timeout(const Duration(seconds: 45));
 
       if (mounted) {
         if (verifyResult['success']) {
           _autoRetryCount = 0;
+          if (!_isCheckOut) AttendanceReminderService.cancel();
           setState(() {
             _isAttendanceSubmitted = true;
             _isAutoRetrying = false;
@@ -609,6 +619,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       distanceFromOffice: _nearestOfficeLocation?['distance'],
       nearestOfficeId: _nearestOfficeLocation?['id'],
       faceImageBase64: imageBase64,
+      accuracyMeters: _currentPosition?.accuracy,
     );
 
     if (!mounted) return;
@@ -805,12 +816,23 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         double distance = _nearestOfficeLocation!['distance'];
         double allowedRadius = (_nearestOfficeLocation!['radius_meters'] as num)
             .toDouble();
+        // Cuma untuk tampilan — cermin dari toleransi akurasi GPS yang
+        // sekarang juga diterapkan di server (lihat _kMaxGpsAccuracyToleranceMeters).
+        // Server tetap yang memutuskan sesungguhnya, ini supaya user tidak
+        // panik lihat "di luar radius" padahal nanti diterima server karena
+        // GPS-nya memang kurang presisi (umum terjadi di web/laptop).
+        final effectiveRadius =
+            allowedRadius +
+            (position.accuracy.isFinite
+                ? position.accuracy.clamp(0, _kMaxGpsAccuracyToleranceMeters)
+                : 0);
         setState(() {
-          _locationInfo = distance <= allowedRadius
+          _locationInfo = distance <= effectiveRadius
               ? "✅ Dalam radius ${_nearestOfficeLocation!['office_name']}"
               : "❌ Di luar radius ${_nearestOfficeLocation!['office_name']} "
                     "(${distance.toStringAsFixed(0)}m dari batas "
-                    "${allowedRadius.toStringAsFixed(0)}m)";
+                    "${allowedRadius.toStringAsFixed(0)}m, akurasi GPS "
+                    "±${position.accuracy.toStringAsFixed(0)}m)";
           _isLoadingLocation = false;
           // Lokasi sudah didapat, WALAUPUN di luar radius.
           // Tombol tetap aktif — server yang akan memutuskan apakah

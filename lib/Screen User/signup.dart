@@ -32,6 +32,14 @@ class _SignUpScreenState extends State<SignUpScreen>
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _otpController = TextEditingController();
 
+  // ── Gabung perusahaan (kode undangan) vs Daftarkan perusahaan baru ──
+  bool _isJoinMode = true;
+  final TextEditingController _inviteCodeController = TextEditingController();
+  final TextEditingController _newCompanyNameController =
+      TextEditingController();
+  String? _invitePreviewCompanyName;
+  bool _isCheckingInvite = false;
+
   @override
   void initState() {
     super.initState();
@@ -173,6 +181,23 @@ class _SignUpScreenState extends State<SignUpScreen>
 
                             // ── Form Fields ──
                             if (!_showOtpField) ...[
+                              _buildCompanyModeSelector(isWeb),
+                              SizedBox(
+                                height: isWeb ? 16 : screenHeight * 0.02,
+                              ),
+                              if (_isJoinMode)
+                                _buildInviteCodeField(isWeb)
+                              else
+                                _buildTextField(
+                                  label: 'Nama Perusahaan',
+                                  icon: Icons.business,
+                                  isPassword: false,
+                                  controller: _newCompanyNameController,
+                                  maxLength: 200,
+                                ),
+                              SizedBox(
+                                height: isWeb ? 16 : screenHeight * 0.02,
+                              ),
                               _buildTextField(
                                 label: 'Nama Lengkap',
                                 icon: Icons.person,
@@ -249,6 +274,20 @@ class _SignUpScreenState extends State<SignUpScreen>
                                   FilteringTextInputFormatter.digitsOnly,
                                 ],
                                 maxLength: 6,
+                              ),
+                              SizedBox(height: isWeb ? 12 : screenHeight * 0.015),
+                              // Jalan keluar kalau OTP kadaluwarsa/salah email —
+                              // tanpa ini user terjebak di layar OTP tanpa cara
+                              // kembali dari dalam aplikasi.
+                              TextButton(
+                                onPressed: _isLoading ? null : _resetToFormStage,
+                                child: const Text(
+                                  '← Ganti data / Kirim ulang OTP',
+                                  style: TextStyle(
+                                    color: Color(0xFF246BFD),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ],
 
@@ -509,6 +548,218 @@ class _SignUpScreenState extends State<SignUpScreen>
     );
   }
 
+  Widget _buildCompanyModeSelector(bool isWeb) {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: EdgeInsets.symmetric(vertical: isWeb ? 10 : 12),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? const Color(0xFF246BFD) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFF246BFD),
+                width: 1.5,
+              ),
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: selected ? Colors.white : const Color(0xFF246BFD),
+                fontWeight: FontWeight.w600,
+                fontSize: isWeb ? 13 : 14,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        chip('Gabung Perusahaan', _isJoinMode, () {
+          if (_isJoinMode) return;
+          setState(() {
+            _isJoinMode = true;
+            _invitePreviewCompanyName = null;
+          });
+        }),
+        const SizedBox(width: 10),
+        chip('Daftarkan Perusahaan Baru', !_isJoinMode, () {
+          if (!_isJoinMode) return;
+          setState(() {
+            _isJoinMode = false;
+            _invitePreviewCompanyName = null;
+          });
+        }),
+      ],
+    );
+  }
+
+  Widget _buildInviteCodeField(bool isWeb) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _inviteCodeController,
+                textCapitalization: TextCapitalization.characters,
+                onChanged: (_) {
+                  if (_invitePreviewCompanyName != null) {
+                    setState(() => _invitePreviewCompanyName = null);
+                  }
+                },
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Silakan masukkan kode undangan';
+                  }
+                  return null;
+                },
+                style: TextStyle(
+                  color: Colors.black,
+                  fontSize: isWeb ? 14 : 16,
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Kode Undangan Perusahaan',
+                  labelStyle: TextStyle(
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w500,
+                    fontSize: isWeb ? 14 : 16,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  prefixIcon: const Icon(
+                    Icons.vpn_key,
+                    color: Color(0xFF246BFD),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    vertical: isWeb ? 12 : 16,
+                    horizontal: 16,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15.0),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF246BFD),
+                      width: 1.5,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15.0),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF246BFD),
+                      width: 2.0,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: isWeb ? 48 : 55,
+              child: ElevatedButton(
+                onPressed: _isCheckingInvite ? null : _checkInviteCode,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF246BFD),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15.0),
+                  ),
+                ),
+                child: _isCheckingInvite
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : const Text(
+                        'Cek',
+                        style: TextStyle(color: Colors.white),
+                      ),
+              ),
+            ),
+          ],
+        ),
+        if (_invitePreviewCompanyName != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            '✓ Anda akan bergabung dengan: $_invitePreviewCompanyName',
+            style: const TextStyle(
+              color: Colors.green,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<String?> _fetchAppToken() async {
+    try {
+      final tokenResponse = await http.post(
+        Uri.parse('$baseURL/api/auth/token'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+      );
+      if (tokenResponse.statusCode != 200) return null;
+      return json.decode(tokenResponse.body)['access_token'];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _checkInviteCode() async {
+    final code = _inviteCodeController.text.trim();
+    if (code.isEmpty) {
+      _showErrorDialog('Silakan masukkan kode undangan terlebih dahulu.');
+      return;
+    }
+
+    setState(() {
+      _isCheckingInvite = true;
+      _invitePreviewCompanyName = null;
+    });
+
+    try {
+      final accessToken = await _fetchAppToken();
+      if (accessToken == null) {
+        _showErrorDialog('Gagal terhubung ke server. Silakan coba lagi.');
+        return;
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseURL/api/asn/company/validate-invite'),
+        headers: {
+          'Authorization': 'bearer $accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'InviteCode': code}),
+      );
+
+      final data = json.decode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        setState(() => _invitePreviewCompanyName = data['companyName']);
+      } else {
+        _showErrorDialog(data['message'] ?? 'Kode undangan tidak valid.');
+      }
+    } catch (_) {
+      _showErrorDialog('Terjadi kesalahan koneksi. Periksa internet Anda.');
+    } finally {
+      if (mounted) setState(() => _isCheckingInvite = false);
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -518,7 +769,16 @@ class _SignUpScreenState extends State<SignUpScreen>
     _confirmPasswordController.dispose();
     _phoneController.dispose();
     _otpController.dispose();
+    _inviteCodeController.dispose();
+    _newCompanyNameController.dispose();
     super.dispose();
+  }
+
+  void _resetToFormStage() {
+    setState(() {
+      _showOtpField = false;
+      _otpController.clear();
+    });
   }
 
   Future<void> _onSignUpPressed() async {
@@ -535,6 +795,19 @@ class _SignUpScreenState extends State<SignUpScreen>
       if (password != confirmPassword) {
         _showErrorDialog('Password dan Konfirmasi Password tidak cocok.');
         return;
+      }
+
+      if (!_showOtpField) {
+        if (_isJoinMode && _invitePreviewCompanyName == null) {
+          _showErrorDialog(
+            'Silakan cek kode undangan terlebih dahulu (tombol "Cek") sebelum mendaftar.',
+          );
+          return;
+        }
+        if (!_isJoinMode && _newCompanyNameController.text.trim().isEmpty) {
+          _showErrorDialog('Silakan masukkan nama perusahaan baru.');
+          return;
+        }
       }
 
       setState(() => _isLoading = true);
@@ -565,6 +838,15 @@ class _SignUpScreenState extends State<SignUpScreen>
                 'Email': email,
                 'Phone': phone,
                 'OtpCode': _showOtpField ? otpCode : '',
+                // Cuma relevan & divalidasi di tahap 1 (server membaca balik
+                // dari data sementara saat verifikasi OTP), tapi aman dikirim
+                // di kedua tahap.
+                'InviteCode': _isJoinMode
+                    ? _inviteCodeController.text.trim()
+                    : '',
+                'NewCompanyName': _isJoinMode
+                    ? ''
+                    : _newCompanyNameController.text.trim(),
               }),
             );
 
@@ -598,6 +880,20 @@ class _SignUpScreenState extends State<SignUpScreen>
               }
             } else {
               setState(() => _isLoading = false);
+              // OTP kedaluwarsa: baris pendaftaran sementara di server tidak
+              // bisa dipakai lagi — balikkan ke form awal supaya tombol
+              // "Daftar" berikutnya benar-benar minta OTP baru, bukan
+              // ngirim ulang OTP yang sama-sama sudah mati.
+              final apiMsg = (responseData['message'] ??
+                      responseData['Message'] ??
+                      '')
+                  .toString();
+              if (_showOtpField && apiMsg.toLowerCase().contains('kedaluwarsa')) {
+                setState(() {
+                  _showOtpField = false;
+                  _otpController.clear();
+                });
+              }
               _handleErrorResponse(signUpResponse.statusCode, responseData);
             }
           } else {

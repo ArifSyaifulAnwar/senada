@@ -14,6 +14,7 @@ import '../../Screen User/fitur/profile fitur/bantuandandukungan.dart';
 import '../../Screen User/fitur/profile fitur/hubungikami.dart';
 import '../../Screen User/fitur/profile fitur/infoprofile.dart';
 import '../../Screen User/fitur/profile fitur/keamanan.dart';
+import '../../Screen User/fitur/profile fitur/pengingatabsen.dart';
 import '../../Screen User/fitur/profile fitur/kebijakanprivacy.dart';
 import '../../Screen User/fitur/profile fitur/kontakdarurat.dart';
 import '../../Screen User/fitur/profile fitur/familyinfoprofile.dart';
@@ -23,6 +24,7 @@ import '../../Screen User/home.dart';
 import '../../Screen User/splash_screen.dart';
 import '../../Services/config.dart';
 import '../../Services/profile.dart';
+import '../../Screen HRD/Home/company_invite_screen.dart';
 
 bool _isWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -58,6 +60,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'settings': 'Pengaturan',
       'changeSecurity': 'Ubah Keamanan',
       'attendanceReminder': 'Pengingat Absen',
+      'companyInviteCode': 'Kode Undangan Perusahaan',
       'language': 'Bahasa',
       'switchToUserMode': 'Masuk ke Mode User',
       'helpSupport': 'Bantuan & Dukungan',
@@ -98,6 +101,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'settings': 'Settings',
       'changeSecurity': 'Change Security',
       'attendanceReminder': 'Attendance Reminder',
+      'companyInviteCode': 'Company Invite Code',
       'language': 'Language',
       'switchToUserMode': 'Switch to User Mode',
       'helpSupport': 'Help & Support',
@@ -821,7 +825,21 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     _MenuItem(
       icon: Icons.access_time_outlined,
       title: _t('attendanceReminder'),
-      onTap: _showComingSoonDialog,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const PengingatAbsenScreen()),
+      ),
+    ),
+    _MenuItem(
+      icon: Icons.vpn_key_outlined,
+      title: _t('companyInviteCode'),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              CompanyInviteScreen(userId: _profileDisplay?.userId ?? ''),
+        ),
+      ),
     ),
     _MenuItem(
       icon: Icons.swap_horiz,
