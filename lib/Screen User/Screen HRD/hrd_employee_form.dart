@@ -1,6 +1,4 @@
-// Screen HRD/hrd_employee_form.dart — FULL REPLACE
 // ignore_for_file: use_build_context_synchronously, library_private_types_in_public_api, deprecated_member_use
-
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -26,9 +24,6 @@ import '../../utils/web_file_download.dart';
 import '../fitur/profile fitur/listkaryawan.dart';
 import 'hrd_employee_service.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// CUSTOM CROP DIALOG — bekerja di semua platform (Web, Desktop, Mobile)
-// ═══════════════════════════════════════════════════════════════════════════════
 class _CropDialog extends StatefulWidget {
   final Uint8List imageBytes;
   const _CropDialog({required this.imageBytes});
@@ -115,11 +110,15 @@ class _CropDialogState extends State<_CropDialog> {
     final cropWInImg = cropWInBox / renderedW;
     final cropHInImg = cropHInBox / renderedH;
 
-    // Clamp agar tidak keluar gambar
+    // Clamp agar tidak keluar gambar.
+    // BUG lama: kalau crop box digeser mepet ke tepi kanan/bawah gambar,
+    // `iw - srcX` bisa jadi < 1.0 — dan clamp(1.0, sesuatu < 1.0) throw
+    // ArgumentError di Dart (min harus <= max), bikin crop-nya crash.
+    // math.max(1.0, ...) menjamin batas atas tidak pernah di bawah batas bawah.
     final srcX = (cropXInImg * iw).clamp(0.0, iw).round();
     final srcY = (cropYInImg * ih).clamp(0.0, ih).round();
-    final srcW = (cropWInImg * iw).clamp(1.0, iw - srcX).round();
-    final srcH = (cropHInImg * ih).clamp(1.0, ih - srcY).round();
+    final srcW = (cropWInImg * iw).clamp(1.0, math.max(1.0, iw - srcX)).round();
+    final srcH = (cropHInImg * ih).clamp(1.0, math.max(1.0, ih - srcY)).round();
 
     // Render ke offscreen canvas 400×400
     const out = 400.0;
@@ -357,11 +356,19 @@ class _CropDialogState extends State<_CropDialog> {
         top: ay == 0 ? -hSize / 2 : null,
         bottom: ay == 1 ? -hSize / 2 : null,
         child: GestureDetector(
+          // BUG lama: tanda ds cuma benar untuk sudut kiri-atas (ax+ay==0).
+          // Untuk 3 sudut lain, dy dan dx butuh tanda BERBEDA (bergantung
+          // sisi mana yang aktif per sumbu), bukan 1 tanda seragam untuk
+          // seluruh sudut — makanya drag di kanan-atas/kiri-bawah bikin
+          // crop box melompat/tidak sesuai arah jari. signX/signY dihitung
+          // per sumbu supaya menjauh dari sudut tetap (di seberangnya)
+          // selalu memperbesar, mendekat selalu memperkecil, di semua sudut.
           onPanUpdate: (d) => setState(() {
             final dx = d.delta.dx / boxW;
             final dy = d.delta.dy / boxH;
-            final ds =
-                (dx.abs() > dy.abs() ? dx : dy) * (ax + ay == 0 ? -1 : 1);
+            final signX = ax == 0 ? -1 : 1;
+            final signY = ay == 0 ? -1 : 1;
+            final ds = dx.abs() > dy.abs() ? dx * signX : dy * signY;
             if (ax == 0) _left += dx;
             if (ay == 0) _top += dy;
             _size += ds;
@@ -461,6 +468,7 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
   bool get _isEdit => widget.employee != null;
   late TabController _tabController;
   bool _isSaving = false;
+  int _currentTabIndex = 0;
 
   // ── Photo ──────────────────────────────────────────────────────────────────
   Uint8List? _newPhotoBytes;
@@ -556,6 +564,15 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: _isEdit ? 5 : 4, vsync: this);
+    // Tombol "Simpan" global disembunyikan saat tab File Karyawan aktif —
+    // tab itu sudah punya tombol "Unggah Dokumen" sendiri dan setiap aksi
+    // (upload/edit/hapus file) langsung tersimpan ke server saat itu juga,
+    // jadi "Simpan" di situ cuma bikin bingung (2 tombol biru bertumpuk).
+    _tabController.addListener(() {
+      if (_tabController.index != _currentTabIndex) {
+        setState(() => _currentTabIndex = _tabController.index);
+      }
+    });
     if (_isEdit) {
       _fillFromEmployee(widget.employee!);
       _loadExistingWorkDays();
@@ -652,8 +669,13 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
 
     _skills.addAll(e.skills);
     _existingPhotoBase64 = e.foto.isNotEmpty ? e.foto : null;
-    // manager userid — resolve dari nama jika perlu setelah list loaded
-    _selectedMgrUserId = null; // akan di-match setelah manager list loaded
+    // BUG lama: di sini sengaja dikosongkan lalu di-"tebak" balik di
+    // _loadManagerList() dengan mencocokkan NAMA ke daftar manager yang baru
+    // di-load — padahal backend sudah mengirim managerUserId asli (ID
+    // pasti, bukan nama). Name-matching itu rapuh: pecah kalau ada 2
+    // karyawan bernama sama, atau beda spasi/kapital sedikit saja.
+    // managerUserId sudah pasti benar, langsung dipakai di sini.
+    _selectedMgrUserId = e.managerUserId;
   }
 
   // ── Load manager list ──────────────────────────────────────────────────────
@@ -666,12 +688,23 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
       if (res.success && res.data != null && mounted) {
         setState(() {
           _managerList = res.data!;
-          // Coba match nama manager ke userid
-          if (_isEdit && widget.employee?.manager.isNotEmpty == true) {
-            final match = _managerList
-                .where((m) => m.name == widget.employee!.manager)
-                .firstOrNull;
-            _selectedMgrUserId = match?.userId;
+          // _selectedMgrUserId sudah diisi langsung dari e.managerUserId di
+          // _fillFromEmployee. Tapi kalau manager itu ternyata TIDAK ada di
+          // daftar yang baru di-load (mis. manager-nya sudah resign/nonaktif
+          // sehingga tidak ikut ke-load), DropdownButtonFormField akan crash
+          // karena value tidak cocok item manapun — sisipkan entri sintetis
+          // pakai nama yang sudah ada supaya tetap kelihatan & tidak crash.
+          if (_selectedMgrUserId != null &&
+              !_managerList.any((m) => m.userId == _selectedMgrUserId)) {
+            final fallbackName = widget.employee?.manager;
+            if (fallbackName != null && fallbackName.isNotEmpty) {
+              _managerList = [
+                ManagerItem(userId: _selectedMgrUserId!, name: fallbackName),
+                ..._managerList,
+              ];
+            } else {
+              _selectedMgrUserId = null;
+            }
           }
         });
       }
@@ -941,7 +974,9 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
               ],
             ),
           ),
-          _buildSaveBar(),
+          // Sembunyikan saat tab "File Karyawan" (indeks 4) aktif — lihat
+          // catatan di initState().
+          if (!(_isEdit && _currentTabIndex == 4)) _buildSaveBar(),
         ],
       ),
     );
@@ -1763,14 +1798,24 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
   }) async {
     if (_accessToken == null) {
       await _getToken();
-      if (_accessToken == null) throw Exception('Unable to obtain access token');
+      if (_accessToken == null) {
+        throw Exception('Unable to obtain access token');
+      }
     }
     final authHeaders = {...headers, 'Authorization': 'Bearer $_accessToken'};
-    var response = await http.post(Uri.parse(url), headers: authHeaders, body: body);
+    var response = await http.post(
+      Uri.parse(url),
+      headers: authHeaders,
+      body: body,
+    );
     if (response.statusCode == 401) {
       await _getToken();
       authHeaders['Authorization'] = 'Bearer $_accessToken';
-      response = await http.post(Uri.parse(url), headers: authHeaders, body: body);
+      response = await http.post(
+        Uri.parse(url),
+        headers: authHeaders,
+        body: body,
+      );
     }
     return response;
   }
@@ -1785,7 +1830,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
         final List<dynamic> data = json.decode(response.body);
         if (mounted) {
           setState(
-            () => _categories = data.map((e) => FileCategory.fromJson(e)).toList(),
+            () => _categories = data
+                .map((e) => FileCategory.fromJson(e))
+                .toList(),
           );
         }
       }
@@ -1808,7 +1855,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
         final body = json.decode(response.body);
         final data = body['Data'] ?? {};
         final List<dynamic> filesJson = data['Files'] ?? [];
-        final all = filesJson.map((e) => FileUserAdminResponse.fromJson(e)).toList();
+        final all = filesJson
+            .map((e) => FileUserAdminResponse.fromJson(e))
+            .toList();
         if (mounted) {
           setState(
             () => _files = all.where((f) => f.userId == widget.userId).toList(),
@@ -1835,7 +1884,8 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
   }
 
   String _buildDisplayName(FileUserAdminResponse file) {
-    String sanitize(String s) => s.trim().replaceAll(RegExp(r'[^A-Za-z0-9]+'), '');
+    String sanitize(String s) =>
+        s.trim().replaceAll(RegExp(r'[^A-Za-z0-9]+'), '');
     final namePart = sanitize(widget.employeeName);
     final catPart = sanitize(file.fileCategory);
     final dotIndex = file.name.lastIndexOf('.');
@@ -1857,7 +1907,10 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
   }
 
   Future<void> _pickAndUpload() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      withData: true,
+    );
     if (result == null || !mounted) return;
     final name = result.files.single.name;
     final bytes = result.files.single.bytes;
@@ -1889,7 +1942,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       barrierDismissible: false,
       builder: (_) => StatefulBuilder(
         builder: (context, setDS) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: [
               const Icon(Icons.upload_file, color: Color(0xFF3B82F6)),
@@ -1910,7 +1965,10 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
               children: [
                 Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                 const SizedBox(height: 14),
-                const Text('Kategori', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Kategori',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1923,19 +1981,27 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
                       value: selCat,
                       isExpanded: true,
                       items: uploadCats
-                          .map((c) => DropdownMenuItem(value: c, child: Text(c.name)))
+                          .map(
+                            (c) =>
+                                DropdownMenuItem(value: c, child: Text(c.name)),
+                          )
                           .toList(),
                       onChanged: (v) => setDS(() => selCat = v),
                     ),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text('Deskripsi', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Deskripsi',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: descCtrl,
                   decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   maxLines: 3,
                 ),
@@ -1948,7 +2014,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
               child: const Text('Batal'),
             ),
             ElevatedButton(
-              onPressed: selCat == null ? null : () => Navigator.pop(context, true),
+              onPressed: selCat == null
+                  ? null
+                  : () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF3B82F6),
                 foregroundColor: Colors.white,
@@ -1994,12 +2062,18 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       if (!mounted) return;
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File berhasil diunggah'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('File berhasil diunggah'),
+            backgroundColor: Colors.green,
+          ),
         );
         await _loadFiles();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengunggah: ${response.body}'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Gagal mengunggah: ${response.body}'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (e) {
@@ -2014,12 +2088,19 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
 
   Future<void> _startEdit(FileUserAdminResponse f) async {
     final descCtrl = TextEditingController(text: f.description);
-    FileCategory? selCat = _categories.firstWhere(
-      (c) => c.name == f.fileCategory,
-      orElse: () => _categories.isNotEmpty
-          ? _categories.first
-          : FileCategory(id: 0, name: f.fileCategory),
-    );
+    // BUG lama: kalau kategori file ini sudah tidak ada di daftar kategori
+    // aktif (mis. dihapus/diganti nama setelah file diupload), fallback-nya
+    // diam-diam pindah ke "kategori pertama" di daftar — jadi begitu HRD
+    // tekan Simpan tanpa sadar, kategori dokumen berubah jadi sesuatu yang
+    // sama sekali tidak berkaitan. Sekarang: kalau tidak ada yang cocok,
+    // pertahankan nama kategori aslinya (disisipkan ke pilihan dropdown
+    // supaya tetap valid dipilih, bukan langsung diganti begitu saja).
+    final matches = _categories.where((c) => c.name == f.fileCategory);
+    final matchedCat = matches.isEmpty ? null : matches.first;
+    FileCategory? selCat = matchedCat ?? FileCategory(id: 0, name: f.fileCategory);
+    final editCatOptions = matchedCat != null
+        ? _categories
+        : [selCat, ..._categories];
     Uint8List? newBytes;
     String? newName;
     String? newMime;
@@ -2030,7 +2111,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       barrierDismissible: false,
       builder: (_) => StatefulBuilder(
         builder: (context, setDS) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: [
               const Icon(Icons.edit, color: Color(0xFF3B82F6)),
@@ -2051,8 +2134,10 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
               children: [
                 OutlinedButton.icon(
                   onPressed: () async {
-                    final result =
-                        await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
+                    final result = await FilePicker.platform.pickFiles(
+                      type: FileType.any,
+                      withData: true,
+                    );
                     if (result == null) return;
                     final name = result.files.single.name;
                     final bytes = result.files.single.bytes;
@@ -2060,7 +2145,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('File tidak dapat dibaca. Silakan pilih ulang.'),
+                            content: Text(
+                              'File tidak dapat dibaca. Silakan pilih ulang.',
+                            ),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -2074,10 +2161,15 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
                     });
                   },
                   icon: const Icon(Icons.attach_file, size: 18),
-                  label: Text(newName ?? 'Ganti File (opsional, kosongkan = tetap)'),
+                  label: Text(
+                    newName ?? 'Ganti File (opsional, kosongkan = tetap)',
+                  ),
                 ),
                 const SizedBox(height: 14),
-                const Text('Kategori', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Kategori',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -2089,20 +2181,28 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
                     child: DropdownButton<FileCategory>(
                       value: selCat,
                       isExpanded: true,
-                      items: _categories
-                          .map((c) => DropdownMenuItem(value: c, child: Text(c.name)))
+                      items: editCatOptions
+                          .map(
+                            (c) =>
+                                DropdownMenuItem(value: c, child: Text(c.name)),
+                          )
                           .toList(),
                       onChanged: (v) => setDS(() => selCat = v),
                     ),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text('Deskripsi', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Deskripsi',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: descCtrl,
                   decoration: InputDecoration(
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   maxLines: 3,
                 ),
@@ -2115,7 +2215,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
               child: const Text('Batal'),
             ),
             ElevatedButton(
-              onPressed: selCat == null ? null : () => Navigator.pop(context, true),
+              onPressed: selCat == null
+                  ? null
+                  : () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF3B82F6),
                 foregroundColor: Colors.white,
@@ -2162,12 +2264,18 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       if (!mounted) return;
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Dokumen berhasil diperbarui'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Dokumen berhasil diperbarui'),
+            backgroundColor: Colors.green,
+          ),
         );
         await _loadFiles();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal memperbarui: ${response.body}'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Gagal memperbarui: ${response.body}'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (e) {
@@ -2186,7 +2294,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Hapus Dokumen'),
-        content: Text('Hapus dokumen "${f.name}"? Tindakan ini tidak dapat dibatalkan.'),
+        content: Text(
+          'Hapus dokumen "${f.name}"? Tindakan ini tidak dapat dibatalkan.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -2219,18 +2329,28 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       final response = await _makeAuthenticatedRequest(
         url: '$baseURL/api/asn/file/delete',
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'Id': f.id, 'UserId': widget.userId, 'Mail': widget.email}),
+        body: json.encode({
+          'Id': f.id,
+          'UserId': widget.userId,
+          'Mail': widget.email,
+        }),
       );
       if (mounted) Navigator.pop(context);
       if (!mounted) return;
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File berhasil dihapus'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('File berhasil dihapus'),
+            backgroundColor: Colors.green,
+          ),
         );
         await _loadFiles();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal menghapus: ${response.body}'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Gagal menghapus: ${response.body}'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } catch (e) {
@@ -2267,7 +2387,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
           context: context,
           builder: (_) => Dialog(
             backgroundColor: Colors.black87,
-            child: InteractiveViewer(child: Image.memory(bytes, fit: BoxFit.contain)),
+            child: InteractiveViewer(
+              child: Image.memory(bytes, fit: BoxFit.contain),
+            ),
           ),
         );
         return;
@@ -2298,7 +2420,10 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal membuka file: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Gagal membuka file: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -2327,21 +2452,30 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
       if (kIsWeb) {
         downloadFileWeb(safeName, bytes);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File sedang diunduh.'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('File sedang diunduh.'),
+            backgroundColor: Colors.green,
+          ),
         );
       } else {
         final dir = await getApplicationDocumentsDirectory();
         final f = File('${dir.path}/$safeName');
         await f.writeAsBytes(bytes, flush: true);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('File tersimpan: ${f.path}'), backgroundColor: Colors.green),
+          SnackBar(
+            content: Text('File tersimpan: ${f.path}'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengunduh file: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Gagal mengunduh file: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -2371,76 +2505,85 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _filtered.isEmpty
-                  ? ListView(
-                      children: const [
-                        SizedBox(height: 80),
-                        Center(
-                          child: Text(
-                            'Belum ada dokumen untuk karyawan ini.',
-                            style: TextStyle(color: Colors.black45),
-                          ),
-                        ),
-                      ],
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                      itemCount: _filtered.length,
-                      itemBuilder: (ctx, i) {
-                        final f = _filtered[i];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Material(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            clipBehavior: Clip.antiAlias,
-                            child: ListTile(
-                              onTap: () => _openFile(f),
-                              leading: CircleAvatar(
-                                backgroundColor: const Color(0xFFEFF6FF),
-                                child: Icon(
-                                  f.fileType.startsWith('image/')
-                                      ? Icons.image_outlined
-                                      : Icons.description_outlined,
-                                  color: const Color(0xFF3B82F6),
-                                ),
-                              ),
-                              title: Text(f.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                              subtitle: Text(
-                                '${f.fileCategory}${f.description.isNotEmpty ? ' • ${f.description}' : ''}',
-                                style: const TextStyle(fontSize: 12),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: PopupMenuButton<String>(
-                                onSelected: (v) {
-                                  if (v == 'download') _downloadFile(f);
-                                  if (v == 'edit') _startEdit(f);
-                                  if (v == 'delete') _confirmDelete(f);
-                                },
-                                itemBuilder: (ctx) => [
-                                  const PopupMenuItem(
-                                    value: 'download',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.download, color: Colors.grey),
-                                        SizedBox(width: 8),
-                                        Text('Unduh'),
-                                      ],
-                                    ),
-                                  ),
-                                  const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                  const PopupMenuItem(value: 'delete', child: Text('Hapus')),
-                                ],
-                              ),
+              ? ListView(
+                  children: const [
+                    SizedBox(height: 80),
+                    Center(
+                      child: Text(
+                        'Belum ada dokumen untuk karyawan ini.',
+                        style: TextStyle(color: Colors.black45),
+                      ),
+                    ),
+                  ],
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+                  itemCount: _filtered.length,
+                  itemBuilder: (ctx, i) {
+                    final f = _filtered[i];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          onTap: () => _openFile(f),
+                          leading: CircleAvatar(
+                            backgroundColor: const Color(0xFFEFF6FF),
+                            child: Icon(
+                              f.fileType.startsWith('image/')
+                                  ? Icons.image_outlined
+                                  : Icons.description_outlined,
+                              color: const Color(0xFF3B82F6),
                             ),
                           ),
-                        );
-                      },
-                    ),
+                          title: Text(
+                            f.name,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            '${f.fileCategory}${f.description.isNotEmpty ? ' • ${f.description}' : ''}',
+                            style: const TextStyle(fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (v) {
+                              if (v == 'download') _downloadFile(f);
+                              if (v == 'edit') _startEdit(f);
+                              if (v == 'delete') _confirmDelete(f);
+                            },
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(
+                                value: 'download',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.download, color: Colors.grey),
+                                    SizedBox(width: 8),
+                                    Text('Unduh'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Edit'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Hapus'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
         ),
         Padding(
           padding: const EdgeInsets.all(16),
@@ -2454,7 +2597,9 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
                 backgroundColor: const Color(0xFF3B82F6),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
