@@ -3748,10 +3748,13 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
         return;
       }
 
-      final safeName = widget.item.userName.replaceAll(' ', '_');
+      // Samakan dengan pola Dokumen DL (jenis + id + tanggal) supaya
+      // konsisten di kedua layar (karyawan & HRD).
       final safeJenis = widget.item.jenisTimeOff.replaceAll(' ', '_');
-      final fileName =
-          'Formulir_${safeJenis}_${safeName}_${widget.item.id}.pdf'; // ← .pdf
+      final tanggal = DateTime.now();
+      final tglStr =
+          '${tanggal.year}${tanggal.month.toString().padLeft(2, '0')}${tanggal.day.toString().padLeft(2, '0')}';
+      final fileName = 'Formulir_${safeJenis}_${widget.item.id}_$tglStr.pdf';
 
       if (kIsWeb) {
         downloadFileWeb(res.data!, fileName);

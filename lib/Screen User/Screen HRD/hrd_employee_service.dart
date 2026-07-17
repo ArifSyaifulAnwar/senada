@@ -20,11 +20,18 @@ class ManagerItem {
     this.organization,
   });
 
+  // BUG lama: cuma cek key camelCase/lowercase ('userId', 'name', dst),
+  // padahal endpoint ini (list-karyawan) mengirim PascalCase ('UserId',
+  // 'Name', dst) — tidak ada konfigurasi camelCase apa pun di backend.
+  // Akibatnya SETIAP manager di daftar jadi kosong (userId & name selalu
+  // ''), dropdown Manager kelihatan blank walau datanya sebenarnya ada.
+  // HrdEmployeeService._get() sudah nyoba PascalCase dulu baru fallback
+  // ke apa adanya — dipakai di sini juga (masih 1 library/file yang sama).
   factory ManagerItem.fromJson(Map<String, dynamic> j) => ManagerItem(
-    userId: j['userId']?.toString() ?? j['userid']?.toString() ?? '',
-    name: j['name']?.toString() ?? '',
-    jobPosition: j['jobPosition']?.toString() ?? j['job_position']?.toString(),
-    organization: j['organization']?.toString(),
+    userId: HrdEmployeeService._get(j, 'userId')?.toString() ?? '',
+    name: HrdEmployeeService._get(j, 'name')?.toString() ?? '',
+    jobPosition: HrdEmployeeService._get(j, 'jobPosition')?.toString(),
+    organization: HrdEmployeeService._get(j, 'organization')?.toString(),
   );
 
   String get displayName => jobPosition != null && jobPosition!.isNotEmpty

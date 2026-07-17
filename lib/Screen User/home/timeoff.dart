@@ -236,9 +236,15 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
         _showSnackBar(res.message, isError: true);
         return;
       }
+      // Sebelumnya: 'Formulir_${jenis}_${widget.userId}_${timeOff.id}.pdf' —
+      // widget.userId itu NIK/kode karyawan (angka mentah, tidak informatif),
+      // bikin nama file seperti "Formulir_Sakit_24090029_5063.pdf". Samakan
+      // dengan pola Dokumen DL (jenis + id + tanggal, tanpa ID karyawan).
       final safeJenis = _safeFileName(timeOff.jenisTimeOff);
-      final fileName =
-          'Formulir_${safeJenis}_${widget.userId}_${timeOff.id}.pdf';
+      final tanggal = DateTime.now();
+      final tglStr =
+          '${tanggal.year}${tanggal.month.toString().padLeft(2, '0')}${tanggal.day.toString().padLeft(2, '0')}';
+      final fileName = 'Formulir_${safeJenis}_${timeOff.id}_$tglStr.pdf';
       if (kIsWeb) {
         downloadFileWeb(res.data!, fileName);
       } else {
