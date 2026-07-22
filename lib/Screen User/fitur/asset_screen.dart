@@ -4951,6 +4951,10 @@ class _InventoryItemFormState extends State<_InventoryItemForm> {
                     ),
                     const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
+                      // BUG lama: daftar cuma 3 opsi, padahal _markConditionDialog
+                      // (tombol "Tandai Kondisi") bisa menyetel kondisi ke 'Hilang'
+                      // juga — begitu aset ditandai Hilang lalu dibuka Edit Barang,
+                      // dropdown ini crash karena value 'Hilang' tidak ada di items.
                       value: _kondisi,
                       decoration: _inputDecoration(null),
                       items: const [
@@ -4963,6 +4967,7 @@ class _InventoryItemFormState extends State<_InventoryItemForm> {
                           value: 'Rusak Berat',
                           child: Text('Rusak Berat'),
                         ),
+                        DropdownMenuItem(value: 'Hilang', child: Text('Hilang')),
                       ],
                       onChanged: (v) => setState(() => _kondisi = v ?? 'Baik'),
                     ),

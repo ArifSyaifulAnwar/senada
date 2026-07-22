@@ -146,15 +146,21 @@ class OfficeLocationCheck {
     required this.isWithinRange,
   });
 
+  // BUG lama: cuma cek key camelCase, padahal backend (LocationCheckResult
+  // C#) mengirim PascalCase ('Id', 'OfficeName', dst) — semua field diam-
+  // diam jadi 0/kosong/false, sama seperti bug ManagerItem.
+  static dynamic _get(Map<String, dynamic> j, String k) =>
+      j[k[0].toUpperCase() + k.substring(1)] ?? j[k];
+
   factory OfficeLocationCheck.fromJson(Map<String, dynamic> json) {
     return OfficeLocationCheck(
-      id: json['id'] ?? 0,
-      officeName: json['officeName'] ?? '',
-      latitude: (json['latitude'] ?? 0.0).toDouble(),
-      longitude: (json['longitude'] ?? 0.0).toDouble(),
-      radiusMeters: (json['radiusMeters'] ?? 0.0).toDouble(),
-      distanceMeters: (json['distanceMeters'] ?? 0.0).toDouble(),
-      isWithinRange: json['isWithinRange'] ?? false,
+      id: _get(json, 'id') ?? 0,
+      officeName: _get(json, 'officeName') ?? '',
+      latitude: (_get(json, 'latitude') ?? 0.0).toDouble(),
+      longitude: (_get(json, 'longitude') ?? 0.0).toDouble(),
+      radiusMeters: (_get(json, 'radiusMeters') ?? 0.0).toDouble(),
+      distanceMeters: (_get(json, 'distanceMeters') ?? 0.0).toDouble(),
+      isWithinRange: _get(json, 'isWithinRange') ?? false,
     );
   }
 
@@ -182,13 +188,18 @@ class OfficeLocation {
     required this.radiusMeters,
   });
 
+  // Sama seperti OfficeLocationCheck.fromJson di atas — backend mengirim
+  // PascalCase, cek itu dulu baru fallback camelCase.
+  static dynamic _get(Map<String, dynamic> j, String k) =>
+      j[k[0].toUpperCase() + k.substring(1)] ?? j[k];
+
   factory OfficeLocation.fromJson(Map<String, dynamic> json) {
     return OfficeLocation(
-      id: json['id'] ?? 0,
-      officeName: json['officeName'] ?? '',
-      latitude: (json['latitude'] ?? 0.0).toDouble(),
-      longitude: (json['longitude'] ?? 0.0).toDouble(),
-      radiusMeters: (json['radiusMeters'] ?? 0.0).toDouble(),
+      id: _get(json, 'id') ?? 0,
+      officeName: _get(json, 'officeName') ?? '',
+      latitude: (_get(json, 'latitude') ?? 0.0).toDouble(),
+      longitude: (_get(json, 'longitude') ?? 0.0).toDouble(),
+      radiusMeters: (_get(json, 'radiusMeters') ?? 0.0).toDouble(),
     );
   }
 

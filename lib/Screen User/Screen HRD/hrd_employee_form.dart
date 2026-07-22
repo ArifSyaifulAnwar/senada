@@ -1255,12 +1255,33 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
     );
   }
 
+  List<ManagerItem> _dedupManagerList(List<ManagerItem> list) {
+    final seen = <String>{};
+    final result = <ManagerItem>[];
+    for (final m in list) {
+      if (seen.add(m.userId)) result.add(m);
+    }
+    return result;
+  }
+
   Widget _buildManagerDropdown() {
+    final dedupedManagers = _dedupManagerList(_managerList);
+    // Race condition: _selectedMgrUserId sudah diisi sinkron di initState()
+    // dari data karyawan, tapi _managerList baru terisi belakangan lewat
+    // _loadManagerList() yang async — frame pertama bisa digambar sebelum
+    // fetch itu selesai, saat _managerList masih kosong. Value harus
+    // dijaga di sini juga (bukan cuma di fallback _loadManagerList),
+    // supaya frame pertama itu tidak crash.
+    final safeMgrValue =
+        _selectedMgrUserId != null &&
+            dedupedManagers.any((m) => m.userId == _selectedMgrUserId)
+        ? _selectedMgrUserId
+        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DropdownButtonFormField<String>(
-          value: _selectedMgrUserId,
+          value: safeMgrValue,
           onChanged: (v) => setState(() => _selectedMgrUserId = v),
           decoration: InputDecoration(
             labelText: 'Manager',
@@ -1304,7 +1325,7 @@ class _HrdEmployeeFormPageState extends State<HrdEmployeeFormPage>
               value: null,
               child: Text('-- Tidak Ada Manager --'),
             ),
-            ..._managerList.map(
+            ...dedupedManagers.map(
               (m) => DropdownMenuItem(
                 value: m.userId,
                 child: Text(m.displayName, overflow: TextOverflow.ellipsis),

@@ -20,18 +20,23 @@ class OfficeLocation {
     required this.statusText,
   });
 
+  // BUG lama: cuma cek key camelCase, padahal backend mengirim PascalCase
+  // ('Id', 'OfficeName', dst) — semua field diam-diam jadi 0/kosong/false.
+  static dynamic _get(Map<String, dynamic> j, String k) =>
+      j[k[0].toUpperCase() + k.substring(1)] ?? j[k];
+
   factory OfficeLocation.fromJson(Map<String, dynamic> json) {
     return OfficeLocation(
-      id: json['id'] ?? 0,
-      officeName: json['officeName'] ?? '',
-      latitude: (json['latitude'] ?? 0.0).toDouble(),
-      longitude: (json['longitude'] ?? 0.0).toDouble(),
-      radiusMeters: (json['radiusMeters'] ?? 0.0).toDouble(),
-      isActive: json['isActive'] ?? false,
+      id: _get(json, 'id') ?? 0,
+      officeName: _get(json, 'officeName') ?? '',
+      latitude: (_get(json, 'latitude') ?? 0.0).toDouble(),
+      longitude: (_get(json, 'longitude') ?? 0.0).toDouble(),
+      radiusMeters: (_get(json, 'radiusMeters') ?? 0.0).toDouble(),
+      isActive: _get(json, 'isActive') ?? false,
       createdAt: DateTime.parse(
-        json['createdAt'] ?? DateTime.now().toIso8601String(),
+        _get(json, 'createdAt') ?? DateTime.now().toIso8601String(),
       ),
-      statusText: json['statusText'] ?? '',
+      statusText: _get(json, 'statusText') ?? '',
     );
   }
 

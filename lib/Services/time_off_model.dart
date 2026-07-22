@@ -598,12 +598,18 @@ class AnnualQuota {
     required this.quotaSisa,
   });
 
+  // Backend (AnnualQuotaResponse) mengirim PascalCase ('UserId', 'Tahun',
+  // dst) — cek PascalCase dulu baru fallback camelCase, supaya tidak
+  // semua field diam-diam jadi kosong/0 seperti bug ManagerItem.
+  static dynamic _get(Map<String, dynamic> j, String k) =>
+      j[k[0].toUpperCase() + k.substring(1)] ?? j[k];
+
   factory AnnualQuota.fromJson(Map<String, dynamic> json) => AnnualQuota(
-    userId: json['userId']?.toString() ?? '',
-    tahun: json['tahun'] as int? ?? 0,
-    quotaAwal: json['quotaAwal'] as int? ?? 0,
-    quotaTerpakai: json['quotaTerpakai'] as int? ?? 0,
-    quotaSisa: json['quotaSisa'] as int? ?? 0,
+    userId: _get(json, 'userId')?.toString() ?? '',
+    tahun: _get(json, 'tahun') as int? ?? 0,
+    quotaAwal: _get(json, 'quotaAwal') as int? ?? 0,
+    quotaTerpakai: _get(json, 'quotaTerpakai') as int? ?? 0,
+    quotaSisa: _get(json, 'quotaSisa') as int? ?? 0,
   );
 }
 

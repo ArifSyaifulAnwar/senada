@@ -51,7 +51,7 @@ class FcmService {
         ?.createNotificationChannel(_channel);
 
     const initSettings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('ic_stat_senada'),
       iOS: DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
@@ -189,7 +189,7 @@ class FcmService {
           channelDescription: _channel.description,
           importance: Importance.high,
           priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
+          icon: 'ic_stat_senada',
         ),
         iOS: const DarwinNotificationDetails(),
       ),

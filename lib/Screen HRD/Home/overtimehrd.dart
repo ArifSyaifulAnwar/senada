@@ -2000,17 +2000,21 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   );
 
   Widget _buildUserFilter() {
-    final opts = ['Semua User'] + _users.map((u) => u.name).toList();
-    String cur = 'Semua User';
-    if (_selectedUserId != null) {
-      try {
-        cur = _users.firstWhere((u) => u.userId == _selectedUserId).name;
-      } catch (_) {
-        _selectedUserId = null;
-      }
-    }
-    return DropdownButtonFormField<String>(
-      value: cur,
+    // BUG lama: dropdown ini dibangun dari NAMA (String), bukan ID — lihat
+    // catatan lengkap di overtimeadmin.dart _buildUserFilter(). Dropdown
+    // dengan 2 item bernilai sama (2 karyawan nama sama) bisa crash saat
+    // render, dan salah pilih karyawan pada pencocokan nama. Versi lama
+    // juga mutasi _selectedUserId langsung di dalam build() (di luar
+    // setState) sebagai efek samping try/catch — pola yang rapuh.
+    // Sekarang dibangun langsung dari ID, tanpa mutasi state saat build.
+    final validSelectedId =
+        _selectedUserId != null &&
+            _users.any((u) => u.userId == _selectedUserId)
+        ? _selectedUserId
+        : null;
+
+    return DropdownButtonFormField<String?>(
+      value: validSelectedId,
       decoration: InputDecoration(
         labelText: 'Karyawan',
         labelStyle: TextStyle(fontSize: _getResponsiveFontSize(context, 11)),
@@ -2023,18 +2027,17 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
         color: Colors.black,
       ),
       isExpanded: true,
-      items: opts
-          .map(
-            (name) => DropdownMenuItem(
-              value: name,
-              child: Text(name, overflow: TextOverflow.ellipsis, maxLines: 1),
-            ),
-          )
-          .toList(),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('Semua User')),
+        ..._users.map(
+          (u) => DropdownMenuItem<String?>(
+            value: u.userId,
+            child: Text(u.name, overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
+        ),
+      ],
       onChanged: (v) => setState(() {
-        _selectedUserId = v == 'Semua User'
-            ? null
-            : _users.firstWhere((u) => u.name == v).userId;
+        _selectedUserId = v;
         _applyFilters();
       }),
     );

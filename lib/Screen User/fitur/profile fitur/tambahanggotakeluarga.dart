@@ -479,7 +479,13 @@ class _AddFamilyMemberScreenState extends State<AddFamilyMemberScreen>
                   title: 'Hubungan Keluarga',
                   description: 'Pilih hubungan keluarga dengan Anda',
                   child: DropdownButtonFormField<String>(
-                    value: _selectedRelationship.isEmpty
+                    // Guard: kalau data lama punya nilai 'relationship' yang
+                    // sudah tidak ada di _relationships (mis. dulu diisi
+                    // beda format), jangan kirim value itu ke dropdown —
+                    // crash kalau tidak ada item yang cocok.
+                    value:
+                        _selectedRelationship.isEmpty ||
+                            !_relationships.contains(_selectedRelationship)
                         ? null
                         : _selectedRelationship,
                     decoration: _buildModernInputDecoration(

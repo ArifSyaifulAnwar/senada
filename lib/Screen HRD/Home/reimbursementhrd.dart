@@ -2194,13 +2194,19 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   Widget _buildUserFilter() {
-    final userOptions =
-        ['Semua User'] + _users.map((user) => user.name).toList();
+    // BUG lama: dropdown ini dibangun dari NAMA (String), bukan ID — lihat
+    // catatan lengkap di overtimeadmin.dart _buildUserFilter(). Dropdown
+    // dengan 2 item bernilai sama (2 karyawan nama sama) bisa crash saat
+    // render, dan salah pilih karyawan pada pencocokan nama. Sekarang
+    // dibangun langsung dari ID.
+    final validSelectedId =
+        _selectedUserId != null &&
+            _users.any((u) => u.userId == _selectedUserId)
+        ? _selectedUserId
+        : null;
 
-    return DropdownButtonFormField<String>(
-      value: _selectedUserId == null
-          ? 'Semua User'
-          : _users.firstWhere((u) => u.userId == _selectedUserId).name,
+    return DropdownButtonFormField<String?>(
+      value: validSelectedId,
       decoration: InputDecoration(
         labelText: 'Karyawan',
         labelStyle: TextStyle(fontSize: _getResponsiveFontSize(context, 12)),
@@ -2213,19 +2219,18 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
         color: Colors.black,
       ),
       isExpanded: true,
-      items: userOptions.map((userName) {
-        return DropdownMenuItem(
-          value: userName,
-          child: Text(userName, overflow: TextOverflow.ellipsis, maxLines: 1),
-        );
-      }).toList(),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('Semua User')),
+        ..._users.map(
+          (user) => DropdownMenuItem<String?>(
+            value: user.userId,
+            child: Text(user.name, overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
+        ),
+      ],
       onChanged: (value) {
         setState(() {
-          if (value == 'Semua User') {
-            _selectedUserId = null;
-          } else {
-            _selectedUserId = _users.firstWhere((u) => u.name == value).userId;
-          }
+          _selectedUserId = value;
           _applyFilters();
         });
       },

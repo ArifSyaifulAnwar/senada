@@ -126,14 +126,22 @@ class OvertimeSummary {
     required this.rataRataJam,
   });
 
+  // BUG lama: cuma cek key camelCase, padahal backend (OvertimeSummary C#)
+  // mengirim PascalCase ('TotalPengajuan', dst) — dan pakai `as int` keras
+  // (bukan `as int?`), jadi begitu lookup-nya null, langsung throw saat
+  // runtime, bukan cuma tampil kosong. Cek PascalCase dulu + fallback ke 0.
+  static dynamic _get(Map<String, dynamic> j, String k) =>
+      j[k[0].toUpperCase() + k.substring(1)] ?? j[k];
+
   factory OvertimeSummary.fromJson(Map<String, dynamic> json) {
     return OvertimeSummary(
-      totalPengajuan: json['totalPengajuan'] as int,
-      pending: json['pending'] as int,
-      approved: json['approved'] as int,
-      rejected: json['rejected'] as int,
-      totalJamDisetujui: (json['totalJamDisetujui'] as num).toDouble(),
-      rataRataJam: (json['rataRataJam'] as num).toDouble(),
+      totalPengajuan: _get(json, 'totalPengajuan') as int? ?? 0,
+      pending: _get(json, 'pending') as int? ?? 0,
+      approved: _get(json, 'approved') as int? ?? 0,
+      rejected: _get(json, 'rejected') as int? ?? 0,
+      totalJamDisetujui:
+          (_get(json, 'totalJamDisetujui') as num?)?.toDouble() ?? 0,
+      rataRataJam: (_get(json, 'rataRataJam') as num?)?.toDouble() ?? 0,
     );
   }
 }

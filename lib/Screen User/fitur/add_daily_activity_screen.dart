@@ -66,6 +66,15 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
       setState(() {
         _categories = categories;
         _officeLocations = locations;
+        // BUG lama: kalau _loadMasterData dipanggil ulang (mis. tombol
+        // "Muat Ulang") setelah user sudah pilih lokasi kantor, instance
+        // OfficeLocation lama tidak pernah di-cek ulang terhadap daftar
+        // baru — objeknya beda identity walau kantor yang sama, dropdown
+        // bisa crash. Reset kalau lokasi yang dipilih sudah tidak ada.
+        if (_selectedOfficeLocation != null &&
+            !locations.any((l) => l.id == _selectedOfficeLocation!.id)) {
+          _selectedOfficeLocation = null;
+        }
         if (categories.isNotEmpty) _selectedCategory = categories.first;
       });
     } catch (_) {

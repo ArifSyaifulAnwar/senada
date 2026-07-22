@@ -2968,7 +2968,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       final p = perfByUser.putIfAbsent(
         d.userId,
-        () => _PerfData(d.userName, d.department),
+        () => _PerfData(d.userId, d.userName, d.department),
       );
 
       p.total++;
@@ -2990,11 +2990,17 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     // Pastikan semua karyawan tetap dihitung, walaupun tidak punya record absensi.
     if (_selectedAnalyticsEmployee == null) {
       for (final e in employees) {
-        perfByUser.putIfAbsent(e.userId, () => _PerfData(e.name, e.department));
+        perfByUser.putIfAbsent(
+          e.userId,
+          () => _PerfData(e.userId, e.name, e.department),
+        );
       }
     } else {
       final e = _selectedAnalyticsEmployee!;
-      perfByUser.putIfAbsent(e.userId, () => _PerfData(e.name, e.department));
+      perfByUser.putIfAbsent(
+        e.userId,
+        () => _PerfData(e.userId, e.name, e.department),
+      );
     }
 
     final deptRate = <String, double>{};
@@ -3036,9 +3042,14 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (p.effectiveWorkDays <= 0) continue;
 
       if (p.attendancePercent < 70) {
+        // BUG lama: mencari karyawan lewat cocokkan NAMA ke daftar
+        // `employees`, padahal p.userId (ID asli) sudah ada sejak awal
+        // (perfByUser di-key dari userId). Kalau ada 2 karyawan nama sama,
+        // tombol "Detail" di laporan ini bisa membuka data absensi
+        // karyawan yang SALAH. Sekarang cocokkan lewat ID langsung.
         final emp = employees.firstWhere(
-          (e) => e.name == p.name,
-          orElse: () => Employee(userId: '', name: p.name),
+          (e) => e.userId == p.userId,
+          orElse: () => Employee(userId: p.userId, name: p.name),
         );
 
         problematic.add(emp);
@@ -6328,6 +6339,7 @@ class _WebNavItem {
 }
 
 class _PerfData {
+  final String userId;
   final String name;
   final String? department;
 
@@ -6344,7 +6356,7 @@ class _PerfData {
   final Set<String> hadirDates = <String>{};
   final Set<String> cutiDates = <String>{};
 
-  _PerfData(this.name, this.department);
+  _PerfData(this.userId, this.name, this.department);
 }
 
 class _AnalyticsDetailItem {

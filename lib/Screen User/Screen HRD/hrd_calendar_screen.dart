@@ -1605,10 +1605,26 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 DropdownButtonFormField<int>(
                   value: selectedYear,
                   decoration: _periodInputDecoration('Tahun'),
-                  items: List.generate(11, (i) {
-                    final year = DateTime.now().year - 5 + i;
-                    return DropdownMenuItem(value: year, child: Text('$year'));
-                  }),
+                  // BUG lama: jendela tahun cuma currentYear-5..+5 — kalau
+                  // edit periode kerja lama yang tahunnya di luar jendela
+                  // itu (mis. rekap dari beberapa tahun lalu), value tidak
+                  // ada di items dan dropdown-nya crash. Selalu sisipkan
+                  // selectedYear supaya tetap valid dipilih.
+                  items:
+                      ({
+                            ...List.generate(
+                              11,
+                              (i) => DateTime.now().year - 5 + i,
+                            ),
+                            selectedYear,
+                          }.toList()..sort())
+                          .map(
+                            (year) => DropdownMenuItem(
+                              value: year,
+                              child: Text('$year'),
+                            ),
+                          )
+                          .toList(),
                   onChanged: (v) {
                     if (v == null) return;
                     setDlg(() {

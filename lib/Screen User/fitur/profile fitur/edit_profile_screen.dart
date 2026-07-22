@@ -429,6 +429,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required List<String> items,
     required Function(String?) onChanged,
   }) {
+    // BUG lama: value langsung dari data profil (bisa data lama/beda format
+    // dari daftar opsi saat ini) diteruskan apa adanya ke DropdownButton —
+    // kalau tidak persis cocok dengan salah satu item, Flutter crash
+    // ("There should be exactly one item with [DropdownButton]'s value").
+    // Fallback ke null (tampilkan hint "Pilih ...") lebih aman daripada
+    // crash; field-field ini (gender/status kawin/gol. darah/agama) memang
+    // harus salah satu dari daftar tetap, jadi tidak pas untuk disisipkan
+    // sebagai opsi sintetis seperti pola manager/kategori file.
+    final safeValue = (value != null && items.contains(value)) ? value : null;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -461,7 +470,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
-                  value: value,
+                  value: safeValue,
                   isExpanded: true,
                   hint: Text(
                     'Pilih $label',

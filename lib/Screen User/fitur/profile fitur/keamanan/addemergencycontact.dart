@@ -596,7 +596,17 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen>
                         title: 'Hubungan',
                         description: 'Pilih hubungan Anda dengan kontak ini',
                         child: DropdownButtonFormField<String>(
-                          value: _selectedRelationship.isEmpty
+                          // BUG lama: _selectedRelationship (dari
+                          // contact.relationship saat edit) dikirim apa
+                          // adanya walau belum tentu ada di _relationships
+                          // yang baru dimuat dari server — kalau kategori
+                          // hubungan itu sudah diganti/dihapus, tidak ada
+                          // item yang cocok dan dropdown-nya crash.
+                          value:
+                              _selectedRelationship.isEmpty ||
+                                  !_relationships.contains(
+                                    _selectedRelationship,
+                                  )
                               ? null
                               : _selectedRelationship,
                           decoration: _buildModernInputDecoration(

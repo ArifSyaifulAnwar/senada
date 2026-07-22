@@ -1120,10 +1120,11 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
               Icons.calendar_today,
               Colors.teal,
             ),
-            if (emp.workingPeriodYear != null)
+            if (emp.tanggalBergabung.isNotEmpty &&
+                DateTime.tryParse(emp.tanggalBergabung) != null)
               _detailRow(
                 'Masa Kerja',
-                '${emp.workingPeriodYear} thn ${emp.workingPeriodMonth} bln',
+                _fmtMasaKerja(DateTime.parse(emp.tanggalBergabung)),
                 Icons.schedule,
                 Colors.amber,
               ),
@@ -1908,5 +1909,22 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
     } catch (_) {
       return iso;
     }
+  }
+
+  // Dihitung live dari tanggal bergabung (bukan kolom working_period_*
+  // di backend, yang cuma diisi sekali saat karyawan dibuat dan tidak
+  // pernah di-refresh saat tanggal bergabung diedit).
+  String _fmtMasaKerja(DateTime joinDate) {
+    final now = DateTime.now();
+    int years = now.year - joinDate.year;
+    int months = now.month - joinDate.month;
+    if (now.day < joinDate.day) months--;
+    if (months < 0) {
+      years--;
+      months += 12;
+    }
+    if (years < 0) years = 0;
+    if (months < 0) months = 0;
+    return '$years thn $months bln';
   }
 }

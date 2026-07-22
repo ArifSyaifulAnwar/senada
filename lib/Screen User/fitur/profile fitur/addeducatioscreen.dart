@@ -545,7 +545,13 @@ class _AddEducationExperienceScreenState
           title: 'Jenjang Pendidikan',
           description: 'Pilih jenjang pendidikan yang sesuai',
           child: DropdownButtonFormField<String>(
-            value: _degreeController.text.isEmpty
+            // Guard: kalau data lama punya nilai 'degree' yang sudah tidak
+            // ada di _educationDegrees (mis. dulu diisi manual/beda format),
+            // jangan kirim value itu ke dropdown — crash kalau tidak ada
+            // item yang cocok.
+            value:
+                _degreeController.text.isEmpty ||
+                    !_educationDegrees.contains(_degreeController.text)
                 ? null
                 : _degreeController.text,
             decoration: _buildModernInputDecoration(

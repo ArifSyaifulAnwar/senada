@@ -164,7 +164,14 @@ class _HalamanAjukanReimbursementState
         ],
       ),
       child: DropdownButtonFormField<String>(
-        value: _selectedFinanceUserId,
+        // BUG lama: _selectedFinanceUserId (dari item.financeTargetUserId saat
+        // edit/revisi pengajuan lama) dikirim apa adanya ke value — kalau Finance
+        // itu sudah nonaktif/dihapus dari _financeUsers, tidak ada item yang
+        // cocok dan Flutter crash. Fallback ke null (tampilkan hint) kalau
+        // sudah tidak ada di daftar Finance yang aktif saat ini.
+        value: _financeUsers.any((f) => f.userId == _selectedFinanceUserId)
+            ? _selectedFinanceUserId
+            : null,
         decoration: _buildModernInputDecoration(
           labelText: 'Tujukan ke Finance',
           prefixIcon: Icon(
@@ -723,6 +730,15 @@ class _HalamanAjukanReimbursementState
             categories.any((c) => c.name == widget.existingItem!.category);
         if (hasExistingCategory) {
           _selectedCategory = widget.existingItem!.category;
+        } else if (_isEditMode) {
+          // BUG lama: _selectedCategory sudah diisi item.category duluan
+          // (lewat _prefillFromExistingItem, sebelum daftar kategori ini
+          // selesai dimuat), jadi kondisi `_selectedCategory.isEmpty` di
+          // bawah tidak pernah kena walau kategori aslinya sudah tidak ada
+          // di daftar aktif sekarang (mis. sudah di-rename/dihapus admin)
+          // — dropdown-nya crash. Reset ke kosong (bukan diam-diam ganti ke
+          // kategori lain) supaya user sadar harus pilih ulang.
+          _selectedCategory = '';
         } else if (categories.isNotEmpty && _selectedCategory.isEmpty) {
           _selectedCategory = categories.first.name;
         }

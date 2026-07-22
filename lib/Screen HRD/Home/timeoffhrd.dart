@@ -2068,7 +2068,13 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   }
 
   Widget _buildDepartmentFilter() => DropdownButtonFormField<String>(
-    value: _selectedDepartment,
+    // BUG lama: _departments dihitung ulang tiap kali dari _users (live
+    // getter) — kalau karyawan terakhir di departemen yang sedang dipilih
+    // hilang/pindah departemen setelah refresh, _selectedDepartment tidak
+    // pernah direset dan dropdown-nya crash. Guard di sini sebelum dipakai.
+    value: _selectedDepartment != null && !_departments.contains(_selectedDepartment)
+        ? null
+        : _selectedDepartment,
     decoration: InputDecoration(
       labelText: 'Departemen',
       labelStyle: TextStyle(fontSize: _fs(12)),
@@ -2094,14 +2100,19 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   );
 
   Widget _buildUserFilter() {
-    final opts = ['Semua User'] + _users.map((u) => u.name).toList();
-    final currentName = _selectedUserId == null
-        ? 'Semua User'
-        : (_users.where((u) => u.userId == _selectedUserId).isNotEmpty
-              ? _users.firstWhere((u) => u.userId == _selectedUserId).name
-              : 'Semua User');
-    return DropdownButtonFormField<String>(
-      value: currentName,
+    // BUG lama: dropdown ini dibangun dari NAMA (String), bukan ID — lihat
+    // catatan lengkap di overtimeadmin.dart _buildUserFilter(). Dropdown
+    // dengan 2 item bernilai sama (2 karyawan nama sama) bisa crash saat
+    // render, dan salah pilih karyawan pada pencocokan nama. Sekarang
+    // dibangun langsung dari ID.
+    final validSelectedId =
+        _selectedUserId != null &&
+            _users.any((u) => u.userId == _selectedUserId)
+        ? _selectedUserId
+        : null;
+
+    return DropdownButtonFormField<String?>(
+      value: validSelectedId,
       decoration: InputDecoration(
         labelText: 'Karyawan',
         labelStyle: TextStyle(fontSize: _fs(12)),
@@ -2111,19 +2122,18 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       ),
       style: TextStyle(fontSize: _fs(13), color: Colors.black),
       isExpanded: true,
-      items: opts
-          .map(
-            (n) => DropdownMenuItem(
-              value: n,
-              child: Text(n, overflow: TextOverflow.ellipsis, maxLines: 1),
-            ),
-          )
-          .toList(),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('Semua User')),
+        ..._users.map(
+          (u) => DropdownMenuItem<String?>(
+            value: u.userId,
+            child: Text(u.name, overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
+        ),
+      ],
       onChanged: (v) {
         setState(() {
-          _selectedUserId = v == 'Semua User'
-              ? null
-              : _users.firstWhere((u) => u.name == v).userId;
+          _selectedUserId = v;
           _applyFilters();
         });
       },

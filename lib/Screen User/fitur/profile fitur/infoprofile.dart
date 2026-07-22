@@ -361,13 +361,20 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
     unawaited(_ensureHRDEmployeePickerLoaded());
 
     final descCtrl = TextEditingController(text: f.description);
+    // BUG lama: kalau kategori file ini sudah tidak ada di daftar kategori
+    // aktif, fallback-nya diam-diam pindah ke "kategori pertama" di daftar —
+    // begitu tombol Simpan ditekan tanpa sadar, kategori dokumen berubah
+    // jadi sesuatu yang sama sekali tidak berkaitan. Sama persis bug yang
+    // sudah diperbaiki di hrd_employee_form.dart — pertahankan nama
+    // kategori aslinya (disisipkan ke pilihan dropdown supaya tetap valid
+    // dipilih, bukan langsung diganti begitu saja).
     final uploadCats = _categories.where((c) => c.name != 'Semua').toList();
-    FileCategory? selCat = uploadCats.firstWhere(
-      (c) => c.name == f.fileCategory,
-      orElse: () => uploadCats.isNotEmpty
-          ? uploadCats.first
-          : FileCategory(id: 0, name: f.fileCategory),
-    );
+    final matches = uploadCats.where((c) => c.name == f.fileCategory);
+    final matchedCat = matches.isEmpty ? null : matches.first;
+    FileCategory? selCat = matchedCat ?? FileCategory(id: 0, name: f.fileCategory);
+    final editCatOptions = matchedCat != null
+        ? uploadCats
+        : [selCat, ...uploadCats];
 
     Uint8List? newFileBytes;
     String? newFileName;
@@ -458,7 +465,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
                     child: DropdownButton<FileCategory>(
                       value: selCat,
                       isExpanded: true,
-                      items: uploadCats
+                      items: editCatOptions
                           .map(
                             (c) =>
                                 DropdownMenuItem(value: c, child: Text(c.name)),

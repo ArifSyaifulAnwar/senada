@@ -1160,28 +1160,39 @@ class _OvertimeAdminScreenState extends State<OvertimeAdminScreen>
   }
 
   Widget _buildUserFilter() {
-    final userOptions =
-        ['Semua User'] + _users.map((user) => user.name).toList();
+    // BUG lama: dropdown ini dibangun dari NAMA (String), bukan ID —
+    // value dicari balik dari ID→nama, dan onChanged mengubah nama
+    // terpilih balik jadi ID lewat pencocokan nama. Kalau ada 2 karyawan
+    // nama sama: (a) dropdown-nya sendiri jadi punya 2 item dengan value
+    // yang identik → Flutter crash saat render (dropdown mensyaratkan
+    // setiap value di items unik), dan (b) kalaupun tidak crash, memilih
+    // salah satu nama bisa salah resolve ke ID karyawan yang lain.
+    // Sekarang dibangun langsung dari ID — tidak ada lagi round-trip
+    // nama↔ID, dan otomatis aman juga kalau _selectedUserId sudah tidak
+    // ada di _users terbaru (mis. setelah pull-to-refresh).
+    final validSelectedId =
+        _selectedUserId != null &&
+            _users.any((u) => u.userId == _selectedUserId)
+        ? _selectedUserId
+        : null;
 
-    return DropdownButtonFormField<String>(
-      value: _selectedUserId == null
-          ? 'Semua User'
-          : _users.firstWhere((u) => u.userId == _selectedUserId).name,
+    return DropdownButtonFormField<String?>(
+      value: validSelectedId,
       decoration: InputDecoration(
         labelText: 'User',
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       ),
-      items: userOptions.map((userName) {
-        return DropdownMenuItem(value: userName, child: Text(userName));
-      }).toList(),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('Semua User')),
+        ..._users.map(
+          (user) =>
+              DropdownMenuItem<String?>(value: user.userId, child: Text(user.name)),
+        ),
+      ],
       onChanged: (value) {
         setState(() {
-          if (value == 'Semua User') {
-            _selectedUserId = null;
-          } else {
-            _selectedUserId = _users.firstWhere((u) => u.name == value).userId;
-          }
+          _selectedUserId = value;
           _applyFilters();
         });
       },

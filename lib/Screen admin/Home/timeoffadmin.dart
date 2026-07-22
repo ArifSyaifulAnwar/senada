@@ -829,14 +829,21 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
   );
 
   Widget _buildUserFilter() {
-    final opts = ['Semua User'] + _users.map((u) => u.name).toList();
-    final currentName = _selectedUserId == null
-        ? 'Semua User'
-        : (_users.any((u) => u.userId == _selectedUserId)
-              ? _users.firstWhere((u) => u.userId == _selectedUserId).name
-              : 'Semua User');
-    return DropdownButtonFormField<String>(
-      value: currentName,
+    // BUG lama: dropdown ini dibangun dari NAMA (String), bukan ID —
+    // walau "value" sudah dijaga (baris `_users.any(...)` di atas), items-
+    // nya sendiri tetap daftar NAMA — kalau ada 2 karyawan nama sama,
+    // dropdown itu punya 2 item dengan value yang identik dan Flutter
+    // crash saat render (mensyaratkan value di items unik). onChanged juga
+    // mencocokkan balik ke ID lewat nama, bisa salah karyawan. Sekarang
+    // dibangun langsung dari ID — tidak ada lagi round-trip nama↔ID.
+    final validSelectedId =
+        _selectedUserId != null &&
+            _users.any((u) => u.userId == _selectedUserId)
+        ? _selectedUserId
+        : null;
+
+    return DropdownButtonFormField<String?>(
+      value: validSelectedId,
       decoration: InputDecoration(
         labelText: 'Karyawan',
         labelStyle: TextStyle(fontSize: _fs(12)),
@@ -846,19 +853,18 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
       ),
       style: TextStyle(fontSize: _fs(13), color: Colors.black),
       isExpanded: true,
-      items: opts
-          .map(
-            (n) => DropdownMenuItem(
-              value: n,
-              child: Text(n, overflow: TextOverflow.ellipsis, maxLines: 1),
-            ),
-          )
-          .toList(),
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('Semua User')),
+        ..._users.map(
+          (u) => DropdownMenuItem<String?>(
+            value: u.userId,
+            child: Text(u.name, overflow: TextOverflow.ellipsis, maxLines: 1),
+          ),
+        ),
+      ],
       onChanged: (v) {
         setState(() {
-          _selectedUserId = v == 'Semua User'
-              ? null
-              : _users.firstWhere((u) => u.name == v).userId;
+          _selectedUserId = v;
           _applyFilters();
         });
       },
