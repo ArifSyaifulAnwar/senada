@@ -99,6 +99,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     setState(() => _isLoading = true);
     final events = await CompanyCalendarService.getByYear(
       _selectedYear,
+      userId: _hrdUserId,
       forceRefresh: true,
     );
     if (mounted) {
@@ -139,6 +140,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return const Color(0xFF10B981);
       case 'INFO':
         return const Color(0xFF3B82F6);
+      case 'ULTAH':
+        return const Color(0xFFEC4899);
       default:
         return Colors.grey;
     }
@@ -152,6 +155,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return Icons.home_work_rounded;
       case 'INFO':
         return Icons.info_outline;
+      case 'ULTAH':
+        return Icons.cake_rounded;
       default:
         return Icons.event;
     }
@@ -165,6 +170,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return 'Work From Home';
       case 'INFO':
         return 'Info / Pengumuman';
+      case 'ULTAH':
+        return 'Ulang Tahun';
       default:
         return tipe;
     }
@@ -1921,12 +1928,13 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 visualDensity: VisualDensity.compact,
               ),
               const Spacer(),
-              // Filter chips: SEMUA | LIBUR | WFH | INFO
+              // Filter chips: SEMUA | LIBUR | WFH | INFO | ULTAH
               ...[
                 ('SEMUA', Colors.grey),
                 ('LIBUR', const Color(0xFFEF4444)),
                 ('WFH', const Color(0xFF10B981)),
                 ('INFO', const Color(0xFF3B82F6)),
+                ('ULTAH', const Color(0xFFEC4899)),
               ].map((item) {
                 final sel = _filterTipe == item.$1;
                 return GestureDetector(
@@ -2185,36 +2193,38 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
               ),
             ),
             const SizedBox(width: 6),
-            // Menu edit/delete
-            PopupMenuButton<String>(
-              onSelected: (val) {
-                if (val == 'edit') _showFormDialog(existing: event);
-                if (val == 'delete') _confirmDelete(event);
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit, size: 16, color: Color(0xFF6366F1)),
-                      SizedBox(width: 8),
-                      Text('Edit'),
-                    ],
+            // Menu edit/delete — disembunyikan untuk entri ulang tahun
+            // (dihitung live oleh backend, tidak ada baris DB untuk diedit).
+            if (!event.isUltah)
+              PopupMenuButton<String>(
+                onSelected: (val) {
+                  if (val == 'edit') _showFormDialog(existing: event);
+                  if (val == 'delete') _confirmDelete(event);
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit, size: 16, color: Color(0xFF6366F1)),
+                        SizedBox(width: 8),
+                        Text('Edit'),
+                      ],
+                    ),
                   ),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete, size: 16, color: Color(0xFFEF4444)),
-                      SizedBox(width: 8),
-                      Text('Hapus'),
-                    ],
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, size: 16, color: Color(0xFFEF4444)),
+                        SizedBox(width: 8),
+                        Text('Hapus'),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-              child: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
-            ),
+                ],
+                child: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+              ),
           ],
         ),
       ),
@@ -2761,30 +2771,34 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                               ],
                             ),
                           ),
-                          IconButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _showFormDialog(existing: e);
-                            },
-                            icon: const Icon(
-                              Icons.edit,
-                              size: 16,
-                              color: Color(0xFF6366F1),
+                          // Ulang tahun dihitung live oleh backend — tidak
+                          // ada baris DB untuk diedit/dihapus.
+                          if (!e.isUltah) ...[
+                            IconButton(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _showFormDialog(existing: e);
+                              },
+                              icon: const Icon(
+                                Icons.edit,
+                                size: 16,
+                                color: Color(0xFF6366F1),
+                              ),
+                              visualDensity: VisualDensity.compact,
                             ),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          IconButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _confirmDelete(e);
-                            },
-                            icon: const Icon(
-                              Icons.delete,
-                              size: 16,
-                              color: Color(0xFFEF4444),
+                            IconButton(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _confirmDelete(e);
+                              },
+                              icon: const Icon(
+                                Icons.delete,
+                                size: 16,
+                                color: Color(0xFFEF4444),
+                              ),
+                              visualDensity: VisualDensity.compact,
                             ),
-                            visualDensity: VisualDensity.compact,
-                          ),
+                          ],
                         ],
                       ),
                     ),

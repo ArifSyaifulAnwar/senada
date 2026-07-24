@@ -42,6 +42,9 @@ class CompanyCalendarEvent {
   bool get isLibur => tipe == 'LIBUR';
   bool get isWfh => tipe == 'WFH';
   bool get isInfo => tipe == 'INFO';
+  // Entri ulang tahun dihitung live oleh backend, bukan disimpan di DB —
+  // tidak boleh diedit/dihapus lewat form event biasa.
+  bool get isUltah => tipe == 'ULTAH';
   bool get blocksAttendance => isLibur;
   bool get isInfoOnly => isInfo;
 
@@ -53,6 +56,8 @@ class CompanyCalendarEvent {
         return const Color(0xFF10B981);
       case 'INFO':
         return const Color(0xFF3B82F6);
+      case 'ULTAH':
+        return const Color(0xFFEC4899);
       default:
         return const Color(0xFF6B7280);
     }
@@ -66,6 +71,8 @@ class CompanyCalendarEvent {
         return 'Work From Home';
       case 'INFO':
         return 'Info / Pengumuman';
+      case 'ULTAH':
+        return 'Ulang Tahun';
       default:
         return tipe;
     }
@@ -79,6 +86,8 @@ class CompanyCalendarEvent {
         return '🟢';
       case 'INFO':
         return '🔵';
+      case 'ULTAH':
+        return '🎂';
       default:
         return '⚪';
     }
@@ -267,8 +276,11 @@ class CompanyCalendarService {
   }
 
   // ── Ambil semua event company untuk 1 tahun ───────────────────────
+  // [userId] dipakai backend untuk scoping company + menghitung ulang
+  // tahun karyawan aktif di perusahaan yang sama secara live (tipe 'ULTAH').
   static Future<List<CompanyCalendarEvent>> getByYear(
     int tahun, {
+    String? userId,
     bool forceRefresh = false,
   }) async {
     if (!forceRefresh && _cache.containsKey(tahun)) return _cache[tahun]!;
@@ -278,7 +290,10 @@ class CompanyCalendarService {
           .post(
             Uri.parse('$baseURL/api/calendar/list'),
             headers: await _headers(),
-            body: json.encode({'tahun': tahun}),
+            body: json.encode({
+              'tahun': tahun,
+              if (userId != null) 'userId': userId,
+            }),
           )
           .timeout(const Duration(seconds: 15));
 

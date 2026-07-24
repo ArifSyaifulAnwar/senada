@@ -1,13 +1,14 @@
 // screens/overtime_hrd_screen.dart
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:absensikaryawan/Screen%20admin/Home/overtimeadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/model/overtimemodeladmin.dart';
+import 'package:absensikaryawan/Screen%20admin/service/admin_attendance_service.dart'
+    hide ApiResponse;
 import 'package:absensikaryawan/Screen%20admin/service/overtimeadminservice.dart';
+import 'package:absensikaryawan/Services/excel_export_service.dart';
 import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -101,6 +102,27 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     }
   }
 
+  // Periode Kerja custom yang di-setting HRD (misal "Juli" = 25 Jun-24 Jul)
+  // tidak selalu sama dengan bulan kalender. Kalau ada periode custom untuk
+  // bulan/tahun yang dipilih, pakai tanggal mulai/selesainya — bukan cuma
+  // filter nomor bulan mentah. Kalau tidak ada (belum di-setting), null
+  // dikembalikan dan fallback ke filter bulan kalender seperti biasa.
+  Future<DateTimeRange?> _resolvePeriodRange(int year, int month) async {
+    try {
+      final res = await AdminAttendanceService().getWorkPeriodsByYear(
+        tahun: year,
+      );
+      if (res.success && res.data != null) {
+        for (final p in res.data!) {
+          if (p.bulan == month) {
+            return DateTimeRange(start: p.tanggalMulai, end: p.tanggalSelesai);
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
     try {
@@ -108,22 +130,32 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
         throw Exception('User ID tidak tersedia.');
       }
       try {
+        final periodRange = _selectedMonth != null
+            ? await _resolvePeriodRange(_selectedYear, _selectedMonth!)
+            : null;
+
         final futures =
             await Future.wait([
               OvertimeAdminService.getAllOvertimes(
                 adminId: _currentUserId!,
                 yearFilter: _selectedYear,
                 monthFilter: _selectedMonth,
+                startDate: periodRange?.start,
+                endDate: periodRange?.end,
               ),
               OvertimeAdminService.getUsersWithOvertimes(
                 adminId: _currentUserId!,
                 year: _selectedYear,
                 month: _selectedMonth,
+                startDate: periodRange?.start,
+                endDate: periodRange?.end,
               ),
               OvertimeAdminService.getAdminStatistics(
                 adminId: _currentUserId!,
                 year: _selectedYear,
                 month: _selectedMonth,
+                startDate: periodRange?.start,
+                endDate: periodRange?.end,
               ),
             ]).timeout(
               const Duration(seconds: 30),
@@ -243,12 +275,18 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     List<UserWithOvertimes> users = [];
     OvertimeAdminStatistics? statistics;
 
+    final periodRange = _selectedMonth != null
+        ? await _resolvePeriodRange(_selectedYear, _selectedMonth!)
+        : null;
+
     try {
       overtimes =
           (await OvertimeAdminService.getAllOvertimes(
             adminId: _currentUserId!,
             yearFilter: _selectedYear,
             monthFilter: _selectedMonth,
+            startDate: periodRange?.start,
+            endDate: periodRange?.end,
           )).data ??
           [];
     } catch (e) {
@@ -261,6 +299,8 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
             adminId: _currentUserId!,
             year: _selectedYear,
             month: _selectedMonth,
+            startDate: periodRange?.start,
+            endDate: periodRange?.end,
           )).data ??
           [];
     } catch (e) {
@@ -272,6 +312,8 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
         adminId: _currentUserId!,
         year: _selectedYear,
         month: _selectedMonth,
+        startDate: periodRange?.start,
+        endDate: periodRange?.end,
       )).data;
     } catch (_) {}
 
@@ -1534,7 +1576,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -1550,9 +1592,11 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
             ),
           ],
         ),
+        // Nilai (angka) dibungkus Expanded+FittedBox di bawah supaya
+        // benar-benar dipaksa fit ke sisa tinggi kartu — bukan cuma
+        // dikasih kesempatan mengecil (yang ternyata tidak cukup).
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1597,15 +1641,22 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                 ),
               ],
             ),
-            const Spacer(),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                value,
-                style: TextStyle(
-                  fontSize: _getResponsiveFontSize(context, 22),
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF1F2937),
+            const SizedBox(height: 6),
+            // Expanded wajib di sini — FittedBox saja tidak akan mengecil
+            // kalau tidak diberi batas tinggi yang jelas oleh parent-nya,
+            // dan Column biasa memberi child non-flex tinggi selonggar
+            // yang dia mau (bukan dibatasi sisa ruang).
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: _getResponsiveFontSize(context, 22),
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1F2937),
+                  ),
                 ),
               ),
             ),
@@ -2823,133 +2874,37 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     _showSuccessSnackBar('Policy overtime berhasil disimpan');
   }
 
-  String _csv(String value) {
-    if (value.contains(',') || value.contains('"') || value.contains('\n')) {
-      return '"${value.replaceAll('"', '""')}"';
-    }
-    return value;
-  }
-
-  String _formatReportDate(DateTime date) {
-    return DateFormat('dd/MM/yyyy HH:mm', 'id_ID').format(date);
-  }
-
-  Future<void> _downloadOvertimeReportCsv(List<AdminOvertimeData> data) async {
+  Future<void> _downloadOvertimeReportExcel(
+    List<AdminOvertimeData> data,
+  ) async {
     if (data.isEmpty) {
       _showErrorSnackBar('Tidak ada data overtime untuk dibuat laporan');
       return;
     }
 
-    final totalJam = data.fold<double>(0, (sum, item) => sum + item.totalJam);
-    final pending = data
-        .where((e) => e.status.toLowerCase() == 'pending')
-        .length;
-    final approved = data
-        .where((e) => e.status.toLowerCase() == 'approved')
-        .length;
-    final rejected = data
-        .where((e) => e.status.toLowerCase() == 'rejected')
-        .length;
-
-    final Map<String, double> jamByUser = {};
-    final Map<String, int> countByUser = {};
-    final Map<String, double> jamByDept = {};
-
-    for (final item in data) {
-      jamByUser[item.userName] =
-          (jamByUser[item.userName] ?? 0) + item.totalJam;
-      countByUser[item.userName] = (countByUser[item.userName] ?? 0) + 1;
-
-      final dept = _getUserDepartment(item);
-      jamByDept[dept] = (jamByDept[dept] ?? 0) + item.totalJam;
+    final departmentByUserId = <String, String>{};
+    for (final d in data) {
+      departmentByUserId.putIfAbsent(d.userId, () => _getUserDepartment(d));
     }
 
-    final topUsers = jamByUser.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    final sortedDates = data.map((d) => d.tanggalOvertime).toList()..sort();
+    final periodLabel =
+        '${DateFormat('dd MMM yyyy', 'id_ID').format(sortedDates.first)} - '
+        '${DateFormat('dd MMM yyyy', 'id_ID').format(sortedDates.last)}';
 
-    final topDepartments = jamByDept.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    final buffer = StringBuffer();
-
-    buffer.writeln('\uFEFFLAPORAN OVERTIME HRD');
-    buffer.writeln(
-      'Tanggal Export,${DateFormat('dd MMM yyyy HH:mm', 'id_ID').format(DateTime.now())}',
-    );
-    buffer.writeln('Dibuat Oleh,${_csv(_currentUserName ?? '-')}');
-    buffer.writeln('Total Data,${data.length}');
-    buffer.writeln('');
-
-    buffer.writeln('RINGKASAN');
-    buffer.writeln('Total Pengajuan,${data.length}');
-    buffer.writeln('Pending,$pending');
-    buffer.writeln('Approved,$approved');
-    buffer.writeln('Rejected,$rejected');
-    buffer.writeln('Total Jam Overtime,${totalJam.toStringAsFixed(1)} jam');
-    buffer.writeln(
-      'Rata-rata Jam per Pengajuan,${(totalJam / data.length).toStringAsFixed(1)} jam',
-    );
-    buffer.writeln('');
-
-    buffer.writeln('POLICY YANG BERLAKU');
-    buffer.writeln(
-      'Maksimal Overtime Harian,${_policyMaxDailyHours.toStringAsFixed(1)} jam',
-    );
-    buffer.writeln(
-      'Maksimal Overtime Bulanan,${_policyMaxMonthlyHours.toStringAsFixed(1)} jam',
-    );
-    buffer.writeln(
-      'Auto Approve Di Bawah,${_policyAutoApproveUnderHours.toStringAsFixed(1)} jam',
-    );
-    buffer.writeln(
-      'Wajib Approval Di Atas,${_policyRequireApprovalAboveHours.toStringAsFixed(1)} jam',
-    );
-    buffer.writeln('Boleh Weekend,${_policyAllowWeekend ? "Ya" : "Tidak"}');
-    buffer.writeln('Wajib Catatan,${_policyRequireNote ? "Ya" : "Tidak"}');
-    buffer.writeln('');
-
-    buffer.writeln('REKAP PER KARYAWAN');
-    buffer.writeln('Nama,Jumlah Pengajuan,Total Jam');
-    for (final entry in topUsers) {
-      buffer.writeln(
-        '${_csv(entry.key)},${countByUser[entry.key] ?? 0},${entry.value.toStringAsFixed(1)}',
-      );
-    }
-    buffer.writeln('');
-
-    buffer.writeln('REKAP PER DEPARTEMEN');
-    buffer.writeln('Departemen,Total Jam');
-    for (final entry in topDepartments) {
-      buffer.writeln('${_csv(entry.key)},${entry.value.toStringAsFixed(1)}');
-    }
-    buffer.writeln('');
-
-    buffer.writeln('DETAIL DATA OVERTIME');
-    buffer.writeln(
-      'ID,Nama,Departemen,Jabatan,Tanggal,Jam Mulai - Selesai,Total Jam,Status,Catatan,Alasan Penolakan,Diajukan',
+    final bytes = ExcelExportService.buildOvertimeExcel(
+      data,
+      periodLabel: periodLabel,
+      departmentByUserId: departmentByUserId,
     );
 
-    for (final item in data) {
-      buffer.writeln(
-        [
-          item.id,
-          _csv(item.userName),
-          _csv(_getUserDepartment(item)),
-          _csv(item.userJob ?? '-'),
-          _csv(item.formattedDate),
-          _csv(item.formattedTimeRange),
-          item.totalJam.toStringAsFixed(1),
-          _csv(item.statusText),
-          _csv(item.catatan ?? '-'),
-          _csv(item.rejectionReason ?? '-'),
-          _csv(_formatReportDate(item.submittedAt)),
-        ].join(','),
-      );
+    if (bytes == null) {
+      _showErrorSnackBar('Gagal encode excel');
+      return;
     }
 
-    final bytes = Uint8List.fromList(utf8.encode(buffer.toString()));
     final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final fileName = 'Laporan_Overtime_HRD_$timestamp.csv';
+    final fileName = 'Laporan_Overtime_HRD_$timestamp.xlsx';
 
     try {
       if (kIsWeb) {
@@ -3139,7 +3094,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Laporan akan digenerate dalam format CSV dan bisa dibuka di Excel.',
+                                'Laporan akan digenerate dalam format Excel (.xlsx) dengan format rapi seperti Laporan Absensi.',
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Color(0xFF4338CA),
@@ -3163,7 +3118,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                       ? null
                       : () async {
                           Navigator.pop(dialogContext);
-                          await _downloadOvertimeReportCsv(reportData);
+                          await _downloadOvertimeReportExcel(reportData);
                         },
                   icon: const Icon(Icons.download, size: 16),
                   label: const Text('Generate'),

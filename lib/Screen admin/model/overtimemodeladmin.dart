@@ -243,11 +243,17 @@ class AdminOvertimeStatisticsRequest {
   String? adminId; // ← Pastikan ini ada
   int? year;
   int? month;
+  // Kalau diisi, dipakai backend menggantikan year/month — untuk filter
+  // sesuai Periode Kerja custom yang di-setting HRD.
+  DateTime? startDate;
+  DateTime? endDate;
 
   AdminOvertimeStatisticsRequest({
     this.adminId, // ← Dan ini
     this.year,
     this.month,
+    this.startDate,
+    this.endDate,
   });
 
   Map<String, dynamic> toJson() {
@@ -255,6 +261,9 @@ class AdminOvertimeStatisticsRequest {
       'adminId': adminId, // ← Dan ini
       'year': year,
       'month': month,
+      if (startDate != null)
+        'startDate': startDate!.toIso8601String().split('T')[0],
+      if (endDate != null) 'endDate': endDate!.toIso8601String().split('T')[0],
     };
   }
 }
@@ -265,6 +274,10 @@ class AdminOvertimeListRequest {
   final String? userId;
   final int? yearFilter;
   final int? monthFilter;
+  // Kalau diisi, dipakai backend menggantikan yearFilter/monthFilter —
+  // untuk filter sesuai Periode Kerja custom yang di-setting HRD.
+  final DateTime? startDate;
+  final DateTime? endDate;
 
   AdminOvertimeListRequest({
     required this.adminId,
@@ -272,6 +285,8 @@ class AdminOvertimeListRequest {
     this.userId,
     this.yearFilter,
     this.monthFilter,
+    this.startDate,
+    this.endDate,
   });
 
   Map<String, dynamic> toJson() {
@@ -281,6 +296,10 @@ class AdminOvertimeListRequest {
       'userId': userId,
       'yearFilter': yearFilter,
       'monthFilter': monthFilter,
+      if (startDate != null)
+        'startDate': startDate!.toIso8601String().split('T')[0],
+      if (endDate != null)
+        'endDate': endDate!.toIso8601String().split('T')[0],
     };
   }
 }

@@ -1,9 +1,17 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
+import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import '../../Services/excel_export_service.dart';
+import '../../Services/web_download.dart';
 import '../model/admin_attendance_model.dart';
 import '../service/admin_attendance_service.dart';
 
@@ -260,7 +268,9 @@ class _HalamanAdminAbsensiState extends State<HalamanAdminAbsensi> {
           ? selectedStatusFilter
           : null;
 
-      final response = await _adminService.exportAttendanceData(
+      // Ambil SEMUA data yang cocok filter — attendanceData di layar ini
+      // dipaginasi 20/halaman, tidak cukup untuk export lengkap.
+      final response = await _adminService.getAllAttendanceData(
         filterUserId: selectedEmployee?.userId,
         timeRange: timeRangeToSend,
         startDate: startDateToSend,
@@ -268,34 +278,150 @@ class _HalamanAdminAbsensiState extends State<HalamanAdminAbsensi> {
         statusFilter: statusFilter,
         officeId: selectedOffice?.id,
         searchTerm: searchTerm.isNotEmpty ? searchTerm : null,
+        page: 1,
+        pageSize: 5000,
       );
 
-      if (response.success && response.data != null) {
-        // Copy CSV data to clipboard
-        await Clipboard.setData(ClipboardData(text: response.data!));
+      final exportData = response.data?.data ?? [];
 
+      if (!response.success || exportData.isEmpty) {
+        _showErrorSnackBar(
+          response.message.isNotEmpty
+              ? response.message
+              : 'Tidak ada data absensi untuk diexport',
+        );
+        if (mounted) setState(() => isExporting = false);
+        return;
+      }
+
+      final sortedDates = exportData.map((d) => d.attendanceDate).toList()
+        ..sort();
+      final exportStartDate = DateTime(
+        sortedDates.first.year,
+        sortedDates.first.month,
+        sortedDates.first.day,
+      );
+      final exportEndDate = DateTime(
+        sortedDates.last.year,
+        sortedDates.last.month,
+        sortedDates.last.day,
+      );
+      final periodLabel =
+          '${DateFormat('dd MMM yyyy', 'id_ID').format(exportStartDate)} - '
+          '${DateFormat('dd MMM yyyy', 'id_ID').format(exportEndDate)}';
+
+      // Hari kerja: Senin-Jumat dalam rentang tanggal data. Beda dengan
+      // layar HRD, di sini tidak disinkronkan ke kalender libur perusahaan
+      // (fitur itu spesifik ke layar HRD).
+      int totalHariKerja = 0;
+      var cursor = exportStartDate;
+      while (!cursor.isAfter(exportEndDate)) {
+        if (cursor.weekday != DateTime.saturday &&
+            cursor.weekday != DateTime.sunday) {
+          totalHariKerja++;
+        }
+        cursor = cursor.add(const Duration(days: 1));
+      }
+
+      final bytes = ExcelExportService.buildAbsensiExcel(
+        exportData,
+        periodLabel: periodLabel,
+        totalHariKerja: totalHariKerja,
+      );
+
+      if (bytes == null) {
+        throw Exception('Gagal encode excel');
+      }
+
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final fileName = 'Absensi_$timestamp.xlsx';
+
+      // ── Export Web ──────────────────────────────────────────────────
+      if (kIsWeb) {
+        downloadFileWeb(bytes, fileName);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Data CSV berhasil disalin ke clipboard'),
+            const SnackBar(
+              content: Text('File Excel berhasil diunduh!'),
               backgroundColor: Colors.green,
               behavior: SnackBarBehavior.floating,
             ),
           );
         }
-      } else {
-        if (mounted) {
-          _showErrorSnackBar(response.message);
+        if (mounted) setState(() => isExporting = false);
+        return;
+      }
+
+      // ── Permission Android ──────────────────────────────────────────
+      if (Platform.isAndroid) {
+        final info = await DeviceInfoPlugin().androidInfo;
+        final permission = info.version.sdkInt >= 33
+            ? Permission.photos
+            : Permission.storage;
+
+        var status = await permission.status;
+        if (status.isDenied || status.isPermanentlyDenied) {
+          status = await permission.request();
         }
+
+        if (!status.isGranted) {
+          _showErrorSnackBar('Izin penyimpanan diperlukan untuk export');
+          if (mounted) setState(() => isExporting = false);
+          return;
+        }
+      }
+
+      // ── Simpan file mobile ──────────────────────────────────────────
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) {
+        throw Exception('Tidak dapat mengakses direktori');
+      }
+
+      final path = '${dir.path}/$fileName';
+      File(path)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(bytes);
+
+      if (mounted) {
+        final open = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Berhasil'),
+            content: Text('File tersimpan di:\n$path\n\nBuka sekarang?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Nanti'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Buka'),
+              ),
+            ],
+          ),
+        );
+
+        if (open == true) {
+          await OpenFile.open(path);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Export berhasil!'),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Gagal mengekspor data: ${e.toString()}');
+        _showErrorSnackBar('Gagal export: $e');
       }
     } finally {
-      setState(() {
-        isExporting = false;
-      });
+      if (mounted) {
+        setState(() {
+          isExporting = false;
+        });
+      }
     }
   }
 

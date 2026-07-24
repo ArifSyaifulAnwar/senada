@@ -436,6 +436,53 @@ class HrdAttendanceService {
     }
   }
 
+  // ── Input izin manual (Approved langsung) dari Edit Absensi ─────────────
+  // Dinas Luar tidak didukung — alurnya butuh dokumen & approval bertahap,
+  // harus tetap lewat form Izin biasa.
+  static Future<_ApiResult<void>> insertManualTimeOff({
+    required String targetUserId,
+    required String jenisTimeOff,
+    required String tanggal,
+    String? catatan,
+  }) async {
+    try {
+      final hrdUserId = await _getUserId();
+      if (hrdUserId == null) {
+        return _ApiResult(success: false, message: 'UserID tidak ditemukan.');
+      }
+
+      final res = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/timeoff/hrd-manual-insert'),
+        body: jsonEncode({
+          'HrdUserId': hrdUserId,
+          'TargetUserId': targetUserId,
+          'JenisTimeOff': jenisTimeOff,
+          'Tanggal': tanggal,
+          'Catatan': catatan,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final j = jsonDecode(res.body);
+        return _ApiResult(
+          success: j['success'] == true || j['Success'] == true,
+          message: j['message'] ?? j['Message'] ?? '',
+        );
+      }
+      try {
+        final j = jsonDecode(res.body);
+        return _ApiResult(
+          success: false,
+          message: j['message'] ?? j['Message'] ?? 'HTTP ${res.statusCode}',
+        );
+      } catch (_) {
+        return _ApiResult(success: false, message: 'HTTP ${res.statusCode}');
+      }
+    } catch (e) {
+      return _ApiResult(success: false, message: 'Network error: $e');
+    }
+  }
+
   // ── Edit Log ──────────────────────────────────────────────────────────────
 
   static Future<_ApiResult<List<HrdAttendanceEditLog>>> getEditLog({

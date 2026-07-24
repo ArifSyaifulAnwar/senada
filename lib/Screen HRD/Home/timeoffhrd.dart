@@ -1154,7 +1154,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     onTap: onTap,
     borderRadius: BorderRadius.circular(12),
     child: Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -1170,9 +1170,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           ),
         ],
       ),
+      // Nilai (angka) dibungkus Expanded+FittedBox di bawah supaya
+      // benar-benar dipaksa fit ke sisa tinggi kartu.
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1208,13 +1209,19 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 ),
             ],
           ),
-          const Spacer(),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: _fs(22),
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF1F2937),
+          const SizedBox(height: 6),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: _fs(22),
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF1F2937),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 3),
@@ -1222,6 +1229,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
             title,
             style: TextStyle(fontSize: _fs(11), color: const Color(0xFF6B7280)),
             overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
         ],
       ),

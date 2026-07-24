@@ -14,6 +14,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../Screen admin/model/admin_attendance_model.dart';
 import '../../Screen admin/service/admin_attendance_service.dart';
 import '../../Screen admin/service/hrd_attendance_service.dart';
+import '../../Screen admin/service/timeoffserviceadmin.dart';
+import '../../Screen admin/service/overtimeadminservice.dart';
 import '../../Screen User/Screen HRD/hrd_employee_service.dart';
 import '../../Services/company_calendar_service.dart';
 import '../doa_karyawan_screen.dart';
@@ -86,6 +88,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   Future<void> _loadDefaultWorkPeriod() async {
     try {
       final result = await _adminService.getCurrentWorkPeriod();
+      if (!mounted) return;
 
       if (result.success && result.data != null) {
         setState(() {
@@ -103,6 +106,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         });
       }
     } catch (_) {
+      if (!mounted) return;
       final now = DateTime.now();
       setState(() {
         selectedTimeRange = 'Pilih Periode';
@@ -594,6 +598,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   Future<void> _loadEmployees() async {
     try {
       final r = await _adminService.getEmployees();
+      if (!mounted) return;
       if (r.success) {
         setState(() {
           employees = r.data ?? [];
@@ -603,7 +608,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         });
       }
     } catch (_) {
-      setState(() => employees = []);
+      if (mounted) setState(() => employees = []);
     }
   }
 
@@ -615,9 +620,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   Future<void> _loadOffices() async {
     try {
       final r = await _adminService.getOffices();
+      if (!mounted) return;
       if (r.success) setState(() => offices = r.data ?? []);
     } catch (_) {
-      setState(() => offices = []);
+      if (mounted) setState(() => offices = []);
     }
   }
 
@@ -659,11 +665,47 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       // hari), di sini cukup dipanggil setiap refresh untuk hari ini.
       if (isToday) unawaited(_adminService.checkBelumAbsenNotify());
 
+      // Karyawan yang izinnya sudah di-ACC (mencakup tanggal yang dipilih)
+      // tidak dianggap "belum absen"/"tidak hadir" — dia memang tidak masuk
+      // karena izin, bukan lupa/bolos.
+      final izinUserIds = <String>{};
+      try {
+        final izinRes = await TimeOffAdminService.getAllTimeOffs(
+          adminId: _currentUserId ?? '',
+          status: 'Approved',
+          yearFilter: targetDate.year,
+          monthFilter: targetDate.month,
+        );
+        if (izinRes.success && izinRes.data != null) {
+          for (final izin in izinRes.data!) {
+            final mulai = DateTime(
+              izin.tanggalMulai.year,
+              izin.tanggalMulai.month,
+              izin.tanggalMulai.day,
+            );
+            final selesai = DateTime(
+              izin.tanggalSelesai.year,
+              izin.tanggalSelesai.month,
+              izin.tanggalSelesai.day,
+            );
+            final target = DateTime(
+              targetDate.year,
+              targetDate.month,
+              targetDate.day,
+            );
+            if (!target.isBefore(mulai) && !target.isAfter(selesai)) {
+              izinUserIds.add(izin.userId);
+            }
+          }
+        }
+      } catch (_) {}
+
       // Karyawan dengan jadwal kustom (mis. hanya Senin-Rabu) tidak dianggap
       // "belum absen"/"tidak hadir" di hari yang bukan jadwal kerjanya.
       final targetIsoWeekday = targetDate.weekday; // 1=Senin ... 7=Minggu
       final tidakHadir = employees
           .where((e) => e.isActive && !hadirUserIds.contains(e.userId))
+          .where((e) => !izinUserIds.contains(e.userId))
           .where((e) {
             final customDays = _workDaysMap[e.userId];
             return customDays == null || customDays.contains(targetIsoWeekday);
@@ -706,9 +748,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         startDate: startDateToSend,
         endDate: endDateToSend,
       );
+      if (!mounted) return;
       if (r.success) setState(() => stats = r.data ?? AdminAttendanceStats());
     } catch (_) {
-      setState(() => stats = AdminAttendanceStats());
+      if (mounted) setState(() => stats = AdminAttendanceStats());
     }
   }
 
@@ -802,6 +845,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         page: currentPage,
         pageSize: 50,
       );
+      if (!mounted) return;
       if (r.success) {
         setState(() {
           if (refresh)
@@ -824,6 +868,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         isLoading = false;
         errorMessage = 'Terjadi kesalahan: $e';
@@ -907,12 +952,116 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   }
   // ────────────────────────────────────────────────────────────────────
 
+  // ── Ambil izin/DL yang sudah Approved dalam rentang export, dipetakan
+  // ke userId_yyyy-MM-dd -> jenis izin. Dipakai supaya gap-fill "Tidak
+  // Hadir" tidak menimpa hari yang sebenarnya karyawan sedang izin/DL.
+  Future<Map<String, String>> _getApprovedIzinMapForExportRange(
+    DateTime startDate,
+    DateTime endDate,
+  ) async {
+    final map = <String, String>{};
+    try {
+      // Kumpulkan semua kombinasi (tahun, bulan) yang dilewati rentang
+      // export — getAllTimeOffs difilter per bulan, jadi range yang
+      // melintasi beberapa bulan perlu beberapa kali panggil.
+      final months = <String, (int, int)>{};
+      var cursor = DateTime(startDate.year, startDate.month, 1);
+      final endCursor = DateTime(endDate.year, endDate.month, 1);
+      while (!cursor.isAfter(endCursor)) {
+        months['${cursor.year}-${cursor.month}'] = (cursor.year, cursor.month);
+        cursor = DateTime(cursor.year, cursor.month + 1, 1);
+      }
+
+      for (final ym in months.values) {
+        final res = await TimeOffAdminService.getAllTimeOffs(
+          adminId: _currentUserId ?? '',
+          status: 'Approved',
+          yearFilter: ym.$1,
+          monthFilter: ym.$2,
+        );
+        if (!res.success || res.data == null) continue;
+
+        for (final izin in res.data!) {
+          final mulai = DateTime(
+            izin.tanggalMulai.year,
+            izin.tanggalMulai.month,
+            izin.tanggalMulai.day,
+          );
+          final selesai = DateTime(
+            izin.tanggalSelesai.year,
+            izin.tanggalSelesai.month,
+            izin.tanggalSelesai.day,
+          );
+          var d = mulai;
+          while (!d.isAfter(selesai)) {
+            if (!d.isBefore(startDate) && !d.isAfter(endDate)) {
+              final key =
+                  '${izin.userId}_${DateFormat('yyyy-MM-dd').format(d)}';
+              map[key] = izin.jenisTimeOff;
+            }
+            d = d.add(const Duration(days: 1));
+          }
+        }
+      }
+    } catch (_) {}
+    return map;
+  }
+
+  // ── Overtime yang sudah disetujui (Approved) via fitur Lembur, dalam
+  // rentang export, dipetakan ke yyyy-MM-dd_userId -> total jam. REKAP
+  // "Lembur Biasa"/"Lembur Libur" (dan kolom Lembur per baris) HANYA
+  // menghitung hari yang memang ada pengajuan lembur resmi & disetujui —
+  // karyawan tetap boleh absen di hari libur/tanggal merah, tapi supaya
+  // masuk rekap sebagai lembur, harus mengajukan lembur dan disetujui HRD.
+  Future<Map<String, double>> _getApprovedOvertimeMapForExportRange(
+    DateTime startDate,
+    DateTime endDate,
+  ) async {
+    final map = <String, double>{};
+    try {
+      final res = await OvertimeAdminService.getAllOvertimes(
+        adminId: _currentUserId ?? '',
+        status: 'Approved',
+        startDate: startDate,
+        endDate: endDate,
+      );
+      if (!res.success || res.data == null) return map;
+
+      for (final ovt in res.data!) {
+        final key =
+            '${DateFormat('yyyy-MM-dd').format(ovt.tanggalOvertime)}_${ovt.userId.toLowerCase()}';
+        map[key] = (map[key] ?? 0) + ovt.totalJam;
+      }
+    } catch (_) {}
+    return map;
+  }
+
+  // ── Tanggal bergabung tiap karyawan aktif — supaya karyawan baru tidak
+  // ditandai "Tidak Hadir" untuk hari-hari sebelum dia bergabung.
+  Future<Map<String, DateTime>> _getJoinDateMap() async {
+    final map = <String, DateTime>{};
+    try {
+      final res = await HrdEmployeeService.getEmployeeList(pageSize: 1000);
+      if (res.success && res.data != null) {
+        for (final e in res.data!.data) {
+          final jd = e.joinDate;
+          if (jd != null) {
+            map[e.userId] = DateTime(jd.year, jd.month, jd.day);
+          }
+        }
+      }
+    } catch (_) {}
+    return map;
+  }
+
   // ── TAMBAH: Inject baris "Tidak Hadir" untuk export multi-hari ───────
   List<AdminAttendanceData> _buildDataWithTidakHadir(
     List<AdminAttendanceData> rawData, {
     required DateTime startDate,
     required DateTime endDate,
     required List<CompanyCalendarEvent> calendarEvents,
+    Map<String, String>? izinMap,
+    Map<String, DateTime>? joinDateMap,
   }) {
     if (rawData.isEmpty) return rawData;
 
@@ -955,9 +1104,21 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             continue;
           }
 
+          // Karyawan baru tidak ditandai "Tidak Hadir" untuk hari-hari
+          // sebelum tanggal dia bergabung — belum jadi karyawan.
+          final joinDate = joinDateMap?[uid];
+          if (joinDate != null && current.isBefore(joinDate)) {
+            continue;
+          }
+
           final key = '${uid}_${DateFormat('yyyy-MM-dd').format(current)}';
 
           if (!existingKeys.contains(key)) {
+            // Kalau hari ini sebenarnya izin/DL yang sudah Approved,
+            // pakai jenis izinnya — bukan ditandai "Tidak Hadir".
+            final jenisIzin = izinMap?[key];
+            final status = jenisIzin ?? 'Tidak Hadir / Tidak Absen';
+
             result.add(
               AdminAttendanceData(
                 id: -1,
@@ -976,7 +1137,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 checkOutOfficeId: null,
                 checkInOfficeName: null,
                 checkOutOfficeName: null,
-                checkInStatus: 'Tidak Hadir / Tidak Absen',
+                checkInStatus: status,
                 checkOutStatus: '',
                 checkInFaceConfidence: null,
                 checkOutFaceConfidence: null,
@@ -985,7 +1146,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 notes: '',
                 createdAt: current,
                 updatedAt: current,
-                displayStatus: 'Tidak Hadir / Tidak Absen',
+                displayStatus: status,
                 formattedCheckIn: '-',
                 formattedCheckOut: '-',
               ),
@@ -1242,14 +1403,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         return;
       }
 
-      // ── Inject "Tidak Hadir" sinkron kalender HRD ───────────────────
+      // ── Inject "Tidak Hadir" sinkron kalender HRD + izin/DL approved ──
       final isHariIni =
           selectedTimeRange == 'Hari Ini' || selectedTimeRange == '1 Hari';
 
       List<AdminAttendanceData> exportData = filteredAttendanceData;
+      final joinDateMap = await _getJoinDateMap();
 
       if (!isHariIni) {
         final calendarEvents = await _getCalendarEventsForExportRange(
+          exportStartDate,
+          exportEndDate,
+        );
+        final izinMap = await _getApprovedIzinMapForExportRange(
           exportStartDate,
           exportEndDate,
         );
@@ -1259,7 +1425,40 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           startDate: exportStartDate,
           endDate: exportEndDate,
           calendarEvents: calendarEvents,
+          izinMap: izinMap,
+          joinDateMap: joinDateMap,
         );
+      }
+
+      // Buang baris apapun (data asli maupun hasil gap-fill) yang
+      // tanggalnya sebelum karyawan itu bergabung — backend kadang sudah
+      // punya record "Tidak Hadir" placeholder untuk hari sebelum dia
+      // jadi karyawan, jadi tidak cukup cuma dicegah nambah baru.
+      if (joinDateMap.isNotEmpty) {
+        exportData = exportData.where((d) {
+          final jd = joinDateMap[d.userId];
+          if (jd == null) return true;
+          final dateOnly = DateTime(
+            d.attendanceDate.year,
+            d.attendanceDate.month,
+            d.attendanceDate.day,
+          );
+          return !dateOnly.isBefore(jd);
+        }).toList();
+      }
+
+      // Sama seperti tanggal gabung: buang record "Tidak Hadir" placeholder
+      // untuk karyawan berjadwal kustom di hari yang memang bukan jadwal
+      // kerjanya. Kalau ternyata dia BENERAN absen di hari itu (misal
+      // lembur/gantiin di luar jadwal), data itu tetap dipertahankan —
+      // yang dibuang cuma placeholder "tidak hadir"-nya.
+      if (_workDaysMap.isNotEmpty) {
+        exportData = exportData.where((d) {
+          final customDays = _workDaysMap[d.userId];
+          if (customDays == null || customDays.isEmpty) return true;
+          if (customDays.contains(d.attendanceDate.weekday)) return true;
+          return d.checkInTime != null;
+        }).toList();
       }
 
       // ── Build Excel ─────────────────────────────────────────────────
@@ -1277,12 +1476,30 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         calendarEvents: calendarEventsForTotal,
       );
 
+      // Tanggal libur/tanggal merah (weekend + event kalender LIBUR) dalam
+      // rentang export — dipakai aturan minimum lembur di REKAP.
+      final liburDateKeys = <String>{};
+      var liburCursor = exportStartDate;
+      while (!liburCursor.isAfter(exportEndDate)) {
+        if (_isLiburExport(liburCursor, calendarEventsForTotal)) {
+          liburDateKeys.add(DateFormat('yyyy-MM-dd').format(liburCursor));
+        }
+        liburCursor = liburCursor.add(const Duration(days: 1));
+      }
+
+      final overtimeApprovedMap = await _getApprovedOvertimeMapForExportRange(
+        exportStartDate,
+        exportEndDate,
+      );
+
       // ── Build Excel ─────────────────────────────────────────────────
       final bytes = ExcelExportService.buildAbsensiExcel(
         exportData,
         periodLabel: periodLabel,
         doaMap: _doaMap,
         totalHariKerja: totalHariKerja,
+        liburDateKeys: liburDateKeys,
+        overtimeApprovedMap: overtimeApprovedMap,
       );
 
       if (bytes == null) {

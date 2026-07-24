@@ -468,7 +468,7 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
     onTap: onTap,
     borderRadius: BorderRadius.circular(12),
     child: Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -484,9 +484,10 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
           ),
         ],
       ),
+      // Nilai (angka) dibungkus Expanded+FittedBox di bawah supaya
+      // benar-benar dipaksa fit ke sisa tinggi kartu.
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Container(
             padding: const EdgeInsets.all(7),
@@ -496,13 +497,19 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
             ),
             child: Icon(icon, color: color, size: 18),
           ),
-          const Spacer(),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: _fs(22),
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF1F2937),
+          const SizedBox(height: 6),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: _fs(22),
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF1F2937),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 3),
@@ -510,6 +517,7 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
             title,
             style: TextStyle(fontSize: _fs(11), color: const Color(0xFF6B7280)),
             overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
         ],
       ),

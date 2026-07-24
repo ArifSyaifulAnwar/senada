@@ -1017,6 +1017,22 @@ class EditAttendanceSheetState extends State<EditAttendanceSheet> {
   String? _checkInStatus;
   String? _checkOutStatus;
 
+  // Jenis izin ini kalau dipilih, otomatis diinput langsung ke tabel Izin
+  // (auto-Approved, seperti kalau HRD approve pengajuan karyawan) — bukan
+  // cuma ganti tampilan status absensi. Dinas Luar sengaja tidak
+  // disertakan — alurnya butuh dokumen & approval bertahap, harus lewat
+  // form Izin biasa. Key = label di dropdown, value = jenis_timeoff asli
+  // yang dikirim ke backend (beda untuk 'Izin Sakit' -> 'Sakit').
+  static const _izinOptions = <String, String>{
+    'Izin Sakit': 'Sakit',
+    'Izin Tahunan': 'Izin Tahunan',
+    'Umrah dan Haji': 'Umrah dan Haji',
+    'Izin Datang Terlambat': 'Izin Datang Terlambat',
+    'Izin Lahiran': 'Izin Lahiran',
+    'Keluarga Meninggal': 'Keluarga Meninggal',
+    'Bencana Alam': 'Bencana Alam',
+  };
+
   static const _statusOptions = [
     'Tepat Waktu',
     'Terlambat',
@@ -1024,6 +1040,13 @@ class EditAttendanceSheetState extends State<EditAttendanceSheet> {
     'Cuti',
     'Tidak Hadir',
     'Waktu Pulang',
+    'Izin Sakit',
+    'Izin Tahunan',
+    'Umrah dan Haji',
+    'Izin Datang Terlambat',
+    'Izin Lahiran',
+    'Keluarga Meninggal',
+    'Bencana Alam',
   ];
   String? _safeDropdownValue(String? value) {
     final cleaned = value?.trim();
@@ -1133,6 +1156,29 @@ class EditAttendanceSheetState extends State<EditAttendanceSheet> {
       checkOutStatus: _checkOutStatus,
       notes: newNotes,
     );
+
+    // Kalau status yang dipilih itu jenis izin, sekalian auto-insert ke
+    // tabel Izin (Approved langsung) — supaya REKAP & fitur Izin lain
+    // ikut sinkron, bukan cuma tampilan status absensi yang berubah.
+    final izinJenis = _izinOptions[_checkInStatus];
+    if (res.success &&
+        izinJenis != null &&
+        widget.data.attendanceDate != null) {
+      final izinRes = await HrdAttendanceService.insertManualTimeOff(
+        targetUserId: widget.data.userId,
+        jenisTimeOff: izinJenis,
+        tanggal: widget.data.attendanceDate!,
+        catatan: _reasonCtrl.text.trim(),
+      );
+      if (!izinRes.success) {
+        setState(() => _isSaving = false);
+        _showSnack(
+          'Absensi tersimpan, tapi gagal input izin: ${izinRes.message}',
+          isError: true,
+        );
+        return;
+      }
+    }
 
     setState(() => _isSaving = false);
 

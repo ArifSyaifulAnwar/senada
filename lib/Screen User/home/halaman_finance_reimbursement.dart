@@ -1364,19 +1364,26 @@ class _HalamanFinanceReimbursementState
               ),
               child: Icon(icon, color: color, size: 18),
             ),
-            const Spacer(),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Color(0xFF1F2937),
-                fontWeight: FontWeight.w800,
-                fontSize: 23,
+            const SizedBox(height: 6),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2937),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 23,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 2),
             Text(
               title,
               overflow: TextOverflow.ellipsis,
+              maxLines: 1,
               style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
             ),
           ],

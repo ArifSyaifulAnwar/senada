@@ -1701,7 +1701,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -1727,9 +1727,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               ),
           ],
         ),
+        // Nilai (angka) dibungkus Expanded+FittedBox di bawah supaya
+        // benar-benar dipaksa fit ke sisa tinggi kartu.
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             // PERBAIKAN: Row dengan Expanded untuk mencegah overflow
             Row(
@@ -1794,15 +1795,18 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                 ),
               ],
             ),
-            const Spacer(),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                value,
-                style: TextStyle(
-                  fontSize: _getResponsiveFontSize(context, 24),
-                  fontWeight: FontWeight.w700,
-                  color: urgent ? Colors.red : const Color(0xFF1F2937),
+            const SizedBox(height: 6),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: _getResponsiveFontSize(context, 24),
+                    fontWeight: FontWeight.w700,
+                    color: urgent ? Colors.red : const Color(0xFF1F2937),
+                  ),
                 ),
               ),
             ),
@@ -3544,15 +3548,18 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, color: color, size: 24),
-          const Spacer(),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: _getResponsiveFontSize(context, 20),
-                fontWeight: FontWeight.w700,
-                color: const Color(0xFF1F2937),
+          const SizedBox(height: 6),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: _getResponsiveFontSize(context, 20),
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF1F2937),
+                ),
               ),
             ),
           ),
@@ -3564,6 +3571,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
               color: const Color(0xFF6B7280),
             ),
             overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
         ],
       ),

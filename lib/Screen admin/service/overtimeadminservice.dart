@@ -60,6 +60,8 @@ class OvertimeAdminService {
     String? adminId,
     int? year,
     int? month,
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
     try {
       final url = Uri.parse('$baseURL$adminEndpoint/statistics');
@@ -68,6 +70,8 @@ class OvertimeAdminService {
         adminId: adminId,
         year: year,
         month: month,
+        startDate: startDate,
+        endDate: endDate,
       );
 
       final response = await http
@@ -108,6 +112,8 @@ class OvertimeAdminService {
     String? userId,
     int? yearFilter,
     int? monthFilter,
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
     try {
       final url = Uri.parse('$baseURL$adminEndpoint/getall');
@@ -118,6 +124,8 @@ class OvertimeAdminService {
         userId: userId,
         yearFilter: yearFilter,
         monthFilter: monthFilter,
+        startDate: startDate,
+        endDate: endDate,
       );
 
       final response = await http
@@ -300,6 +308,8 @@ class OvertimeAdminService {
     required String adminId,
     int? year,
     int? month,
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
     try {
       final url = Uri.parse('$baseURL$adminEndpoint/users');
@@ -308,6 +318,8 @@ class OvertimeAdminService {
         adminId: adminId,
         year: year,
         month: month,
+        startDate: startDate,
+        endDate: endDate,
       );
 
       final response = await http
