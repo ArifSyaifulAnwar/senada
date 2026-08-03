@@ -1602,6 +1602,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                     fontSize: 14 * scale,
                     fontWeight: FontWeight.w600,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 SizedBox(height: 3 * scale),
                 Text(
@@ -1610,25 +1612,33 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                     fontSize: 12 * scale,
                     color: Colors.grey[600],
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-          Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: 8 * scale,
-              vertical: 4 * scale,
-            ),
-            decoration: BoxDecoration(
-              color: sc.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              status,
-              style: TextStyle(
-                fontSize: 10 * scale,
-                color: sc,
-                fontWeight: FontWeight.w600,
+          SizedBox(width: 8 * scale),
+          Flexible(
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: 8 * scale,
+                vertical: 4 * scale,
+              ),
+              decoration: BoxDecoration(
+                color: sc.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                status,
+                style: TextStyle(
+                  fontSize: 10 * scale,
+                  color: sc,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
               ),
             ),
           ),
