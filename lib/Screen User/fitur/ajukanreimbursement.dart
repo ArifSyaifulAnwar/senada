@@ -239,7 +239,7 @@ class _HalamanAjukanReimbursementState
   Future<void> _initializeNotifications() async {
     // Android initialization
     const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_stat_senada');
 
     // iOS initialization
     const DarwinInitializationSettings initializationSettingsIOS =
@@ -388,7 +388,7 @@ class _HalamanAjukanReimbursementState
             priority: Priority.high,
             playSound: true,
             enableVibration: true,
-            icon: '@mipmap/ic_launcher',
+            icon: 'ic_stat_senada',
             largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
             styleInformation: bigTextStyle,
             actions: <AndroidNotificationAction>[

@@ -314,21 +314,27 @@ class _PinInputScreenState extends State<PinInputScreen>
     try {
       final prefs = await SharedPreferences.getInstance();
       final role = prefs.getString('Role') ?? '';
+      final viewMode = prefs.getString('ViewMode')?.toLowerCase();
 
       Widget destination;
 
-      // Tentukan halaman tujuan berdasarkan role
-      switch (role.toLowerCase()) {
-        case 'admin':
-          destination = const HomePageAdmin();
-          break;
-        // case 'hrd':
-        //   destination = const HomePageHRD();
-        //   break;
-        case 'user':
-        default:
-          destination = const HomePage();
-          break;
+      if (viewMode == 'director' &&
+          prefs.getBool('IsDirectorCrossLogin') == true) {
+        destination = const HomePageAdmin();
+      } else {
+        // Tentukan halaman tujuan berdasarkan role
+        switch (role.toLowerCase()) {
+          case 'admin':
+            destination = const HomePageAdmin();
+            break;
+          // case 'hrd':
+          //   destination = const HomePageHRD();
+          //   break;
+          case 'user':
+          default:
+            destination = const HomePage();
+            break;
+        }
       }
 
       // Navigasi ke halaman yang sesuai

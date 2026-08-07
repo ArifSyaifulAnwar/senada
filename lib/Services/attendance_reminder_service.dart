@@ -95,7 +95,7 @@ class AttendanceReminderService {
             channelDescription: highImportanceChannel.description,
             importance: Importance.high,
             priority: Priority.high,
-            icon: '@mipmap/ic_launcher',
+            icon: 'ic_stat_senada',
           ),
           iOS: const DarwinNotificationDetails(),
         ),

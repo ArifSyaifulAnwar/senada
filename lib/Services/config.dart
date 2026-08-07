@@ -5,4 +5,3 @@ const String baseURL = 'https://harpi.intrasdbcorp.co.id'; //production
 // const String baseURL = 'https://localhost:44397'; // local
 // const String baseURL = 'https://sedayudanabanda.com';
 // const String urlBayar ='https://sandbox.onebrick.io';
-    

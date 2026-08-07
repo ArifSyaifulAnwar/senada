@@ -141,7 +141,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
   void _initializeNotification() async {
     await _requestNotificationPermission();
     const AndroidInitializationSettings androidInit =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_stat_senada');
     const DarwinInitializationSettings iosInit = DarwinInitializationSettings(
       requestSoundPermission: true,
       requestBadgePermission: true,
@@ -315,7 +315,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
             priority: Priority.high,
             playSound: true,
             enableVibration: true,
-            icon: '@mipmap/ic_launcher',
+            icon: 'ic_stat_senada',
             largeIcon: const DrawableResourceAndroidBitmap(
               '@mipmap/ic_launcher',
             ),

@@ -1874,7 +1874,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
 
   Future<void> _initNotifications() async {
     const init = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('ic_stat_senada'),
       iOS: DarwinInitializationSettings(
         requestAlertPermission: true,
         requestBadgePermission: true,

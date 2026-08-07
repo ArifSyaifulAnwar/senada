@@ -25,6 +25,8 @@ import '../../Screen User/splash_screen.dart';
 import '../../Services/config.dart';
 import '../../Services/profile.dart';
 import '../../Screen HRD/Home/company_invite_screen.dart';
+import '../../Screen HRD/homehrd.dart';
+import '../homeadmin.dart';
 
 bool _isWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -39,7 +41,10 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
   bool _isLoadingDisplay = true;
   bool _isUploadingPhoto = false;
   bool _isDeletingAccount = false;
+  bool _isSwitchingDirector = false;
+  bool _isDirectorCrossLogin = false;
   String _email = '';
+  String _currentRole = '';
   ProfileDisplay? _profileDisplay;
   final ImagePicker _picker = ImagePicker();
   String _selectedLanguage = 'system';
@@ -63,15 +68,23 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'companyInviteCode': 'Kode Undangan Perusahaan',
       'language': 'Bahasa',
       'switchToUserMode': 'Masuk ke Mode User',
+      'switchToDirector': 'Masuk sebagai Direktur',
+      'returnToHrd': 'Kembali ke Akun HRD',
+      'returnToHrdConfirm':
+          'Sesi Manager akan ditutup dan Anda akan kembali ke akun HRD tanpa login ulang. Lanjutkan?',
+      'yesReturnToHrd': 'Ya, Kembali',
       'helpSupport': 'Bantuan & Dukungan',
       'privacyPolicy': 'Kebijakan Privasi',
       'contactUs': 'Hubungi Kami',
       'logout': 'Keluar',
       'logoutConfirm': 'Apakah Anda yakin ingin keluar?',
       'switchModeConfirm': 'Apakah Anda yakin ingin beralih ke mode user?',
+      'switchDirectorConfirm':
+          'Anda akan masuk otomatis sebagai Direktur pada perusahaan yang sama. Lanjutkan?',
       'cancel': 'Batal',
       'yes': 'Ya, Keluar',
       'yesSwitch': 'Ya, Beralih',
+      'yesDirector': 'Ya, Masuk',
       'selectFromGallery': 'Pilih dari Galeri',
       'takePhoto': 'Ambil Foto Kamera',
       'deleteAccount': 'Hapus Akun',
@@ -104,15 +117,23 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       'companyInviteCode': 'Company Invite Code',
       'language': 'Language',
       'switchToUserMode': 'Switch to User Mode',
+      'switchToDirector': 'Sign in as Director',
+      'returnToHrd': 'Return to HRD Account',
+      'returnToHrdConfirm':
+          'The Manager session will be closed and you will return to the HRD account without signing in again. Continue?',
+      'yesReturnToHrd': 'Yes, Return',
       'helpSupport': 'Help & Support',
       'privacyPolicy': 'Privacy Policy',
       'contactUs': 'Contact Us',
       'logout': 'Logout',
       'logoutConfirm': 'Are you sure you want to logout?',
       'switchModeConfirm': 'Are you sure you want to switch to user mode?',
+      'switchDirectorConfirm':
+          'You will automatically sign in as the Director of the same company. Continue?',
       'cancel': 'Cancel',
       'yes': 'Yes, Logout',
       'yesSwitch': 'Yes, Switch',
+      'yesDirector': 'Yes, Sign In',
       'selectFromGallery': 'Select from Gallery',
       'takePhoto': 'Take Photo',
       'deleteAccount': 'Delete Account',
@@ -172,6 +193,11 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
 
   Future<void> _initializeUserInfo() async {
     setState(() => _isLoadingDisplay = true);
+    final prefs = await SharedPreferences.getInstance();
+    _currentRole = prefs.getString('Role') ?? '';
+    _isDirectorCrossLogin =
+        prefs.getBool('IsDirectorCrossLogin') == true &&
+        prefs.getString('CrossLoginSourceUserID')?.isNotEmpty == true;
     final token = await _getToken();
     if (token == null) {
       setState(() => _isLoadingDisplay = false);
@@ -846,6 +872,18 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       title: _t('switchToUserMode'),
       onTap: _showSwitchModeBottomSheet,
     ),
+    if (_currentRole.toLowerCase() == 'hrd')
+      _MenuItem(
+        icon: Icons.manage_accounts_outlined,
+        title: _t('switchToDirector'),
+        onTap: _showDirectorCrossLoginBottomSheet,
+      ),
+    if (_isDirectorCrossLogin)
+      _MenuItem(
+        icon: Icons.keyboard_return_outlined,
+        title: _t('returnToHrd'),
+        onTap: _showReturnToHrdBottomSheet,
+      ),
   ];
 
   List<_MenuItem> _helpItems() => [
@@ -1118,6 +1156,272 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       ),
     ),
   );
+
+  void _showDirectorCrossLoginBottomSheet() => showModalBottomSheet(
+    context: context,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    backgroundColor: Colors.white,
+    builder: (_) => Padding(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.manage_accounts_outlined,
+              color: Color(0xFF2E57C9), size: 42),
+          const SizedBox(height: 12),
+          Text(
+            _t('switchToDirector'),
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: Color(0xFF2E57C9),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _t('switchDirectorConfirm'),
+            style: const TextStyle(fontSize: 16),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(_t('cancel')),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E57C9),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  onPressed: _isSwitchingDirector
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          _performDirectorCrossLogin();
+                        },
+                  child: Text(
+                    _t('yesDirector'),
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> _performDirectorCrossLogin() async {
+    if (_currentRole.toLowerCase() != 'hrd' || _isSwitchingDirector) return;
+
+    setState(() => _isSwitchingDirector = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hrdUserId = prefs.getString('UserID') ?? '';
+      if (hrdUserId.isEmpty) {
+        _showErrorSnackBar('UserID HRD tidak ditemukan.');
+        return;
+      }
+
+      final token = await _getToken();
+      if (token == null) {
+        _showErrorSnackBar('Gagal mendapatkan token autentikasi.');
+        return;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/asn/cross-login/director'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: json.encode({'HrdUserId': hrdUserId}),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      if (response.statusCode != 200 || data['success'] != true) {
+        _showErrorSnackBar(
+          data['message']?.toString() ??
+              'Akun Direktur pada perusahaan ini tidak ditemukan.',
+        );
+        return;
+      }
+
+      final directorUserId = data['UserId']?.toString() ?? '';
+      final directorEmail = data['Email']?.toString() ?? '';
+      if (directorUserId.isEmpty || directorEmail.isEmpty) {
+        _showErrorSnackBar('Data akun Direktur belum lengkap.');
+        return;
+      }
+
+      // Simpan identitas HRD asal untuk audit/kebutuhan pengembalian sesi.
+      await prefs.setString('CrossLoginSourceUserID', hrdUserId);
+      await prefs.setString(
+        'CrossLoginSourceName',
+        prefs.getString('Name') ?? '',
+      );
+      await prefs.setString(
+        'CrossLoginSourceEmail',
+        prefs.getString('Email') ?? '',
+      );
+      await prefs.setString('CrossLoginSourceRole', _currentRole);
+      await prefs.setString(
+        'CrossLoginSourceFotoProfil',
+        prefs.getString('FotoProfil') ?? '',
+      );
+      await prefs.setString(
+        'CrossLoginSourceViewMode',
+        prefs.getString('ViewMode') ?? '',
+      );
+      await prefs.setBool('IsDirectorCrossLogin', true);
+
+      await prefs.setString('Name', data['Name']?.toString() ?? '');
+      await prefs.setString('Email', directorEmail);
+      await prefs.setString('UserID', directorUserId);
+      await prefs.setString('FotoProfil', data['FotoProfil']?.toString() ?? '');
+      await prefs.setString('Role', data['Role']?.toString() ?? 'User');
+      await prefs.setString('ViewMode', 'director');
+
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomePageAdmin()),
+        (route) => false,
+      );
+    } on FormatException {
+      _showErrorSnackBar('Respons server cross-login tidak valid.');
+    } catch (e) {
+      _showErrorSnackBar('Gagal masuk sebagai Direktur: $e');
+    } finally {
+      if (mounted) setState(() => _isSwitchingDirector = false);
+    }
+  }
+
+  void _showReturnToHrdBottomSheet() => showModalBottomSheet(
+    context: context,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    backgroundColor: Colors.white,
+    builder: (_) => Padding(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.keyboard_return_outlined,
+            color: Color(0xFF2E57C9),
+            size: 42,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _t('returnToHrd'),
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: Color(0xFF2E57C9),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _t('returnToHrdConfirm'),
+            style: const TextStyle(fontSize: 16),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(_t('cancel')),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E57C9),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _returnToHrdAccount();
+                  },
+                  child: Text(
+                    _t('yesReturnToHrd'),
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> _returnToHrdAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final sourceUserId = prefs.getString('CrossLoginSourceUserID') ?? '';
+    final sourceEmail = prefs.getString('CrossLoginSourceEmail') ?? '';
+    final sourceRole = prefs.getString('CrossLoginSourceRole') ?? '';
+
+    if (prefs.getBool('IsDirectorCrossLogin') != true ||
+        sourceUserId.isEmpty ||
+        sourceEmail.isEmpty ||
+        sourceRole.toLowerCase() != 'hrd') {
+      _showErrorSnackBar(
+        'Sesi asal HRD tidak ditemukan. Silakan keluar lalu login kembali.',
+      );
+      return;
+    }
+
+    await prefs.setString(
+      'Name',
+      prefs.getString('CrossLoginSourceName') ?? '',
+    );
+    await prefs.setString('Email', sourceEmail);
+    await prefs.setString('UserID', sourceUserId);
+    await prefs.setString('Role', sourceRole);
+    await prefs.setString(
+      'FotoProfil',
+      prefs.getString('CrossLoginSourceFotoProfil') ?? '',
+    );
+
+    final sourceViewMode =
+        prefs.getString('CrossLoginSourceViewMode')?.trim() ?? '';
+    if (sourceViewMode.isEmpty) {
+      await prefs.remove('ViewMode');
+    } else {
+      await prefs.setString('ViewMode', sourceViewMode);
+    }
+
+    await prefs.remove('CrossLoginSourceUserID');
+    await prefs.remove('CrossLoginSourceName');
+    await prefs.remove('CrossLoginSourceEmail');
+    await prefs.remove('CrossLoginSourceRole');
+    await prefs.remove('CrossLoginSourceFotoProfil');
+    await prefs.remove('CrossLoginSourceViewMode');
+    await prefs.remove('IsDirectorCrossLogin');
+
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const HomePageHRD()),
+      (route) => false,
+    );
+  }
 
   void _showDeleteAccountBottomSheet() {
     final TextEditingController passwordController = TextEditingController();

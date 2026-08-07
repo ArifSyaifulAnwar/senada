@@ -130,22 +130,30 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
-  void _navigateByRole(String role) {
+  Future<void> _navigateByRole(String role) async {
     Widget destination;
+    final prefs = await SharedPreferences.getInstance();
+    final viewMode = prefs.getString('ViewMode')?.toLowerCase();
 
-    switch (role.toLowerCase()) {
-      case 'admin':
-        destination = const HomePageAdmin();
-        break;
-      case 'hrd':
-        destination = const HomePageHRD(); // Halaman HRD
-        break;
-      case 'user':
-      default:
-        destination = const HomePage();
-        break;
+    if (viewMode == 'director' &&
+        prefs.getBool('IsDirectorCrossLogin') == true) {
+      destination = const HomePageAdmin();
+    } else {
+      switch (role.toLowerCase()) {
+        case 'admin':
+          destination = const HomePageAdmin();
+          break;
+        case 'hrd':
+          destination = const HomePageHRD(); // Halaman HRD
+          break;
+        case 'user':
+        default:
+          destination = const HomePage();
+          break;
+      }
     }
 
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 1200),

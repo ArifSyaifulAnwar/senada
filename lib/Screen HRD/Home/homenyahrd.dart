@@ -1173,12 +1173,16 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         ),
         if (status != null) ...[
           Text(' • ', style: TextStyle(color: Colors.grey[400])),
-          Text(
-            _formatStatus(status),
-            style: TextStyle(
-              fontSize: 11 * scale,
-              fontWeight: FontWeight.w500,
-              color: _getStatusColor(status),
+          Expanded(
+            child: Text(
+              _formatStatus(status),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11 * scale,
+                fontWeight: FontWeight.w500,
+                color: _getStatusColor(status),
+              ),
             ),
           ),
         ],
