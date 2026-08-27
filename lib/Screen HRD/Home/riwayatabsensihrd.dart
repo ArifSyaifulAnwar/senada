@@ -950,6 +950,72 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
     if (mounted) setState(() => _doaMap = newMap);
   }
+
+  Future<Map<String, String>> _getDoaMapForExport(
+    List<AdminAttendanceData> exportData,
+  ) async {
+    if (_currentUserId == null || exportData.isEmpty) {
+      return <String, String>{};
+    }
+
+    final uniqueDates = exportData
+        .map(
+          (d) => DateTime(
+            d.attendanceDate.year,
+            d.attendanceDate.month,
+            d.attendanceDate.day,
+          ),
+        )
+        .toSet()
+        .toList();
+
+    final recordsByDate = await Future.wait(
+      uniqueDates.map((tanggal) async {
+        try {
+          return await DoaService.getDoaByTanggal(_currentUserId!, tanggal);
+        } catch (_) {
+          return <DoaRecord>[];
+        }
+      }),
+    );
+
+    final result = <String, String>{};
+    for (final records in recordsByDate) {
+      for (final rec in records) {
+        final dateKey = DateFormat('yyyy-MM-dd').format(
+          DateTime(rec.tanggal.year, rec.tanggal.month, rec.tanggal.day),
+        );
+        result['${dateKey}_${rec.pemimpinDoaId.toLowerCase()}'] = 'ikut';
+        for (final userId in rec.pesertaIds) {
+          result['${dateKey}_${userId.toLowerCase()}'] = 'ikut';
+        }
+      }
+    }
+
+    final datesWithDoa = result.keys.map((key) => key.substring(0, 10)).toSet();
+    for (final attendance in exportData) {
+      final status = attendance.displayStatus.toLowerCase();
+      if (status.contains('tidak hadir') ||
+          status.contains('tidak absen') ||
+          status.contains('absent')) {
+        continue;
+      }
+
+      final dateKey = DateFormat('yyyy-MM-dd').format(
+        DateTime(
+          attendance.attendanceDate.year,
+          attendance.attendanceDate.month,
+          attendance.attendanceDate.day,
+        ),
+      );
+      final key = '${dateKey}_${attendance.userId.toLowerCase()}';
+      if (datesWithDoa.contains(dateKey) && !result.containsKey(key)) {
+        result[key] = 'tidak';
+      }
+    }
+
+    return result;
+  }
   // ────────────────────────────────────────────────────────────────────
 
   // ── Ambil izin/DL yang sudah Approved dalam rentang export, dipetakan
@@ -1491,12 +1557,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         exportStartDate,
         exportEndDate,
       );
+      final doaMapForExport = await _getDoaMapForExport(exportData);
 
       // ── Build Excel ─────────────────────────────────────────────────
       final bytes = ExcelExportService.buildAbsensiExcel(
         exportData,
         periodLabel: periodLabel,
-        doaMap: _doaMap,
+        doaMap: doaMapForExport,
         totalHariKerja: totalHariKerja,
         liburDateKeys: liburDateKeys,
         overtimeApprovedMap: overtimeApprovedMap,

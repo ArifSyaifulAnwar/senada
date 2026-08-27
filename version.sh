@@ -1,20 +1,7 @@
-#!/bin/bash
-
-FILE="pubspec.yaml"
-
-# Ambil version sekarang
-CURRENT=$(grep '^version:' $FILE | awk '{print $2}')
-
-# Pisahkan version dan build number
-NAME=$(echo $CURRENT | cut -d'+' -f1)
-BUILD=$(echo $CURRENT | cut -d'+' -f2)
-
-# Tambah build number
-NEW_BUILD=$((BUILD + 1))
-
-NEW_VERSION="$NAME+$NEW_BUILD"
-
-# Replace di pubspec.yaml
-sed -i "s/version: $CURRENT/version: $NEW_VERSION/" $FILE
-
-echo "Version updated to $NEW_VERSION"
+#!/usr/bin/env bash
+set -euo pipefail
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_NAME="$(sed -nE 's/^version:[[:space:]]*([^+[:space:]]+)(\+[0-9]+)?[[:space:]]*$/\1/p' "$PROJECT_ROOT/pubspec.yaml" | head -n 1)"
+BUILD_NUMBER="$(( $(date -u +%s) / 60 ))"
+printf '%s+%s\n' "$BUILD_NAME" "$BUILD_NUMBER"
+printf '%s\n' 'pubspec.yaml tidak diubah.'

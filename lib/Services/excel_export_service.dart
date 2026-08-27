@@ -347,7 +347,6 @@ class ExcelExportService {
           bgColor: rowBg,
           hAlign: ex.HorizontalAlign.Center,
         );
-        final statusStyle = _statusCellStyle(d.displayStatus, rowBg, borderHex);
         final tanggalKey =
             '${DateFormat('yyyy-MM-dd').format(d.attendanceDate)}_${d.userId.toLowerCase()}';
         final doaVal = doaMap?[tanggalKey] ?? '';
@@ -357,6 +356,14 @@ class ExcelExportService {
             ? (submittedJam * 60).round()
             : null;
         final hasOvt = ovtMin != null && ovtMin > 0 && ovtMin < 1440;
+        final statusAbsensi = d.displayStatus.trim();
+        final excelStatus = hasOvt &&
+                !statusAbsensi.toLowerCase().contains('lembur')
+            ? (statusAbsensi.isEmpty
+                  ? 'Lembur'
+                  : '$statusAbsensi / Lembur')
+            : d.displayStatus;
+        final statusStyle = _statusCellStyle(excelStatus, rowBg, borderHex);
         final lemburText = hasOvt
             ? '${(ovtMin / 60).toStringAsFixed(1)} jam'
             : '-';
@@ -407,7 +414,7 @@ class ExcelExportService {
         setCell(
           col: 7,
           row: rowIndex,
-          value: ex.TextCellValue(d.displayStatus),
+          value: ex.TextCellValue(excelStatus),
           style: statusStyle,
         );
         setCell(
