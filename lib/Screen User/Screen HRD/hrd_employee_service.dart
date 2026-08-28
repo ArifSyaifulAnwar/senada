@@ -2,9 +2,17 @@
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/models/employee_models.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _EmployeeListCacheEntry {
+  final EmployeeListResponse data;
+  final DateTime savedAt;
+
+  const _EmployeeListCacheEntry({required this.data, required this.savedAt});
+}
 
 // ── Manager dropdown item ─────────────────────────────────────────────────────
 class ManagerItem {
@@ -227,19 +235,11 @@ class HrdCreateEmployeeRequest {
 // ── Service ───────────────────────────────────────────────────────────────────
 class HrdEmployeeService {
   static const String _base = '$baseURL/api/hrd/employee';
+  static final Map<String, _EmployeeListCacheEntry> _employeeListCache = {};
+  static const Duration _employeeListCacheTtl = Duration(seconds: 45);
 
   static Future<String?> _getToken() async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (r.statusCode == 200) return json.decode(r.body)['access_token'];
-    } catch (_) {}
-    return null;
+    return TokenService.getToken();
   }
 
   static Future<Map<String, String>> _headers() async {
@@ -267,11 +267,32 @@ class HrdEmployeeService {
     String? sortBy,
     int page = 1,
     int pageSize = 50,
+    bool forceRefresh = false,
   }) async {
     try {
       final uid = await _userId();
       if (uid == null || uid.isEmpty) {
         return ApiResponse(success: false, message: 'UserId tidak ditemukan');
+      }
+
+      final cacheKey = [
+        uid,
+        searchQuery ?? '',
+        department ?? '',
+        status ?? '',
+        sortBy ?? 'name_asc',
+        '$page',
+        '$pageSize',
+      ].join('|');
+      final cached = _employeeListCache[cacheKey];
+      if (!forceRefresh &&
+          cached != null &&
+          DateTime.now().difference(cached.savedAt) < _employeeListCacheTtl) {
+        return ApiResponse(
+          success: true,
+          message: '',
+          data: cached.data,
+        );
       }
 
       final body = <String, dynamic>{
@@ -295,10 +316,15 @@ class HrdEmployeeService {
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body);
         if (_get(j, 'success') == true && _get(j, 'data') != null) {
+          final parsed = EmployeeListResponse.fromJson(_get(j, 'data'));
+          _employeeListCache[cacheKey] = _EmployeeListCacheEntry(
+            data: parsed,
+            savedAt: DateTime.now(),
+          );
           return ApiResponse(
             success: true,
             message: '',
-            data: EmployeeListResponse.fromJson(_get(j, 'data')),
+            data: parsed,
           );
         }
         return ApiResponse(
@@ -310,6 +336,10 @@ class HrdEmployeeService {
     } catch (e) {
       return ApiResponse(success: false, message: 'Network error: $e');
     }
+  }
+
+  static void invalidateEmployeeListCache() {
+    _employeeListCache.clear();
   }
 
   // ── Employee detail ─────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ import 'package:absensikaryawan/Services/office_file_service.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -205,22 +206,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
 
   /// Mendapatkan token akses dari endpoint auth.
   static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        final token = data['access_token'];
-        if (token is String && token.isNotEmpty) return token;
-      }
-    } catch (_) {}
-    return null;
+    return TokenService.getToken();
   }
 
   // ── Refresh Orchestration ──────────────────────────────────────────────────
@@ -272,7 +258,10 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     });
 
     try {
-      final token = await _getToken();
+      final userIdFuture = _loadUserId();
+      final tokenFuture = _getToken();
+      final token = await tokenFuture;
+      await userIdFuture;
       if (token == null) {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan token akses';
@@ -281,9 +270,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         return;
       }
 
-      // Jalankan profile + userId + org count secara paralel
-      await Future.wait([_loadProfileData(token), _loadUserId()]);
-      await _loadPendingOrgCount();
+      await Future.wait([_loadProfileData(token), _loadPendingOrgCount()]);
     } catch (e) {
       _safeSetState(() {
         _errorMessage = 'Error inisialisasi: $e';

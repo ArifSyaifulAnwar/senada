@@ -1,6 +1,7 @@
 // ignore_for_file: curly_braces_in_flow_control_structures, library_private_types_in_public_api, deprecated_member_use, use_build_context_synchronously
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:absensikaryawan/Services/employee_service.dart';
 import 'package:absensikaryawan/models/employee_models.dart';
@@ -134,6 +135,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
   int totalCount = 0;
 
   final TextEditingController _searchController = TextEditingController();
+  final Map<String, Uint8List> _avatarBytesCache = {};
 
   EmployeeData? _selectedEmployee;
   bool _isLoadingDetail = false;
@@ -152,9 +154,9 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
-  Future<void> _loadEmployeeData() async {
+  Future<void> _loadEmployeeData({bool forceRefresh = false}) async {
     setState(() {
-      isLoading = true;
+      isLoading = allEmployeeData.isEmpty;
       errorMessage = '';
     });
     try {
@@ -165,7 +167,9 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
         sortBy: _convertSort(sortBy),
         page: currentPage,
         pageSize: 50,
+        forceRefresh: forceRefresh,
       );
+      if (!mounted) return;
       if (response.success && response.data != null) {
         setState(() {
           allEmployeeData = response.data!.data
@@ -184,6 +188,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
         _snackError(response.message);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         errorMessage = 'Terjadi kesalahan: $e';
         isLoading = false;
@@ -209,7 +214,8 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
 
   Future<void> _refreshData() async {
     currentPage = 1;
-    await _loadEmployeeData();
+    EmployeeService.invalidateEmployeeListCache();
+    await _loadEmployeeData(forceRefresh: true);
   }
 
   void _onSearchChanged(String v) {
@@ -1811,11 +1817,17 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
   Widget _buildProfileImage(String? b64, double size) {
     if (b64 != null && b64.isNotEmpty) {
       try {
+        final bytes = _avatarBytesCache.putIfAbsent(
+          b64,
+          () => base64Decode(b64),
+        );
         return Image.memory(
-          base64Decode(b64),
+          bytes,
           width: size,
           height: size,
           fit: BoxFit.cover,
+          cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+          cacheHeight: (size * MediaQuery.devicePixelRatioOf(context)).round(),
           errorBuilder: (_, __, ___) => _buildDefaultAvatar(size),
         );
       } catch (_) {}

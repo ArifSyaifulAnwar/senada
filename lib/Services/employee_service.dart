@@ -3,12 +3,22 @@
 
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/models/employee_models.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+class _EmployeeListCacheEntry {
+  final EmployeeListResponse data;
+  final DateTime savedAt;
+
+  const _EmployeeListCacheEntry({required this.data, required this.savedAt});
+}
+
 class EmployeeService {
   static const String _baseUrl = '$baseURL/api/employee';
+  static final Map<String, _EmployeeListCacheEntry> _employeeListCache = {};
+  static const Duration _employeeListCacheTtl = Duration(seconds: 45);
 
   static Future<Map<String, String>> _getHeaders() async {
     final token = await _getToken();
@@ -20,24 +30,7 @@ class EmployeeService {
   }
 
   static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
+    return TokenService.getToken();
   }
 
   /// Ambil userId dari SharedPreferences
@@ -58,6 +51,7 @@ class EmployeeService {
     String? sortBy,
     int? page,
     int? pageSize,
+    bool forceRefresh = false,
   }) async {
     try {
       // Get userId dari SharedPreferences
@@ -70,6 +64,28 @@ class EmployeeService {
         );
       }
 
+      final resolvedPage = page ?? 1;
+      final resolvedPageSize = pageSize ?? 1000;
+      final cacheKey = [
+        userId,
+        searchQuery ?? '',
+        department ?? '',
+        status ?? '',
+        sortBy ?? 'name_asc',
+        '$resolvedPage',
+        '$resolvedPageSize',
+      ].join('|');
+      final cached = _employeeListCache[cacheKey];
+      if (!forceRefresh &&
+          cached != null &&
+          DateTime.now().difference(cached.savedAt) < _employeeListCacheTtl) {
+        return ApiResponse<EmployeeListResponse>(
+          success: true,
+          message: 'Success',
+          data: cached.data,
+        );
+      }
+
       // Buat request body - SIMPLE dan sesuai struktur API
       final requestBody = {
         'UserId': userId, // Penting: sesuaikan case dengan yang diharapkan API
@@ -79,8 +95,8 @@ class EmployeeService {
           'Department': department,
         if (status != null && status.isNotEmpty) 'Status': status,
         'SortBy': sortBy ?? 'name_asc',
-        'Page': page ?? 1,
-        'PageSize': pageSize ?? 1000,
+        'Page': resolvedPage,
+        'PageSize': resolvedPageSize,
       };
 
 
@@ -99,6 +115,10 @@ class EmployeeService {
         if (jsonData['Success'] == true && jsonData['Data'] != null) {
           final employeeListResponse = EmployeeListResponse.fromJson(
             jsonData['Data'],
+          );
+          _employeeListCache[cacheKey] = _EmployeeListCacheEntry(
+            data: employeeListResponse,
+            savedAt: DateTime.now(),
           );
           return ApiResponse<EmployeeListResponse>(
             success: true,
@@ -151,6 +171,10 @@ class EmployeeService {
         message: 'Network error: $e',
       );
     }
+  }
+
+  static void invalidateEmployeeListCache() {
+    _employeeListCache.clear();
   }
 
   /// Get employee detail dengan support Id, UserId, atau EmployeeId

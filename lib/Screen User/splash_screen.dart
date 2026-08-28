@@ -20,6 +20,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
+  bool _hasNavigated = false;
 
   @override
   void initState() {
@@ -27,16 +28,13 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(milliseconds: 600),
     )..forward();
 
-    // Delay sedikit lebih lama untuk web karena loading initial bisa lebih lama
-    final delay = kIsWeb
-        ? const Duration(seconds: 4)
-        : const Duration(seconds: 3);
-
-    Future.delayed(delay, () {
-      _checkLoginStatus();
+    // Beri kesempatan satu frame untuk menampilkan splash, lalu langsung
+    // periksa sesi. Tidak perlu menunggu 3-4 detik secara tetap.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 250), _checkLoginStatus);
     });
   }
 
@@ -53,8 +51,25 @@ class _SplashScreenState extends State<SplashScreen>
           email.isNotEmpty &&
           userId != null &&
           userId.isNotEmpty) {
-        // Cek status PIN user dengan role
-        await _checkPinStatus(userId, role ?? '');
+        // Status PIN yang sudah pernah diverifikasi digunakan langsung agar
+        // pengguna lama tidak menunggu dua request API setiap membuka app.
+        if (prefs.containsKey('PinEnabled') && prefs.containsKey('HasPin')) {
+          final pinEnabled = prefs.getBool('PinEnabled') ?? false;
+          final hasPin = prefs.getBool('HasPin') ?? false;
+
+          if (pinEnabled && hasPin) {
+            await prefs.setString('PendingRole', role ?? '');
+            _navigateToPinInput();
+          } else {
+            _navigateByRole(role ?? '');
+          }
+
+          // Sinkronkan cache tanpa menahan perpindahan menuju home/PIN.
+          _checkPinStatus(userId, role ?? '', navigateAfterCheck: false);
+        } else {
+          // Hanya startup pertama yang perlu menunggu status PIN dari server.
+          await _checkPinStatus(userId, role ?? '');
+        }
       } else {
         _navigateToSignIn();
       }
@@ -64,14 +79,20 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   // Fungsi untuk mengecek status PIN dari server
-  Future<void> _checkPinStatus(String userId, String role) async {
+  Future<void> _checkPinStatus(
+    String userId,
+    String role, {
+    bool navigateAfterCheck = true,
+  }) async {
     try {
       // Get access token
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-      );
+      final tokenResponse = await http
+          .post(
+            Uri.parse('$baseURL/api/auth/token'),
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          )
+          .timeout(const Duration(seconds: 4));
 
       if (tokenResponse.statusCode == 200) {
         final tokenData = json.decode(tokenResponse.body);
@@ -79,14 +100,16 @@ class _SplashScreenState extends State<SplashScreen>
 
         if (accessToken != null) {
           // Check PIN status
-          final pinResponse = await http.post(
-            Uri.parse('$baseURL/api/pin/status'),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-            body: json.encode({'UserId': userId}),
-          );
+          final pinResponse = await http
+              .post(
+                Uri.parse('$baseURL/api/pin/status'),
+                headers: {
+                  'Authorization': 'Bearer $accessToken',
+                  'Content-Type': 'application/json',
+                },
+                body: json.encode({'UserId': userId}),
+              )
+              .timeout(const Duration(seconds: 4));
 
           if (pinResponse.statusCode == 200) {
             final pinData = json.decode(pinResponse.body);
@@ -101,6 +124,8 @@ class _SplashScreenState extends State<SplashScreen>
               await prefs.setBool('HasPin', hasPin);
 
               // Logika navigasi berdasarkan status PIN
+              if (!navigateAfterCheck) return;
+
               if (pinEnabled && hasPin) {
                 // PIN aktif dan user punya PIN, arahkan ke halaman input PIN
                 // Simpan role untuk digunakan di PIN input screen
@@ -112,25 +137,26 @@ class _SplashScreenState extends State<SplashScreen>
               }
             } else {
               // Gagal get status PIN, navigasi berdasarkan role
-              _navigateByRole(role);
+              if (navigateAfterCheck) _navigateByRole(role);
             }
           } else {
             // Error response, navigasi berdasarkan role
-            _navigateByRole(role);
+            if (navigateAfterCheck) _navigateByRole(role);
           }
         } else {
-          _navigateByRole(role);
+          if (navigateAfterCheck) _navigateByRole(role);
         }
       } else {
-        _navigateByRole(role);
+        if (navigateAfterCheck) _navigateByRole(role);
       }
     } catch (e) {
       // Jika terjadi error, navigasi berdasarkan role
-      _navigateByRole(role);
+      if (navigateAfterCheck) _navigateByRole(role);
     }
   }
 
   Future<void> _navigateByRole(String role) async {
+    if (_hasNavigated) return;
     Widget destination;
     final prefs = await SharedPreferences.getInstance();
     final viewMode = prefs.getString('ViewMode')?.toLowerCase();
@@ -153,10 +179,11 @@ class _SplashScreenState extends State<SplashScreen>
       }
     }
 
-    if (!mounted) return;
+    if (!mounted || _hasNavigated) return;
+    _hasNavigated = true;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 1200),
+        transitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (_, __, ___) => destination,
         transitionsBuilder: (_, animation, __, child) {
           final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -183,9 +210,11 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _navigateToPinInput() {
+    if (!mounted || _hasNavigated) return;
+    _hasNavigated = true;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 1200),
+        transitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (_, __, ___) => const PinInputScreen(),
         transitionsBuilder: (_, animation, __, child) {
           final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -212,9 +241,11 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   void _navigateToSignIn() {
+    if (!mounted || _hasNavigated) return;
+    _hasNavigated = true;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 1200),
+        transitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (_, __, ___) => const IntroScreenOne(),
         transitionsBuilder: (_, animation, __, child) {
           final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:ui';
 import 'package:http/http.dart' as http;
 import 'config.dart';
+import 'token_service.dart';
 
 class CompanyCalendarEvent {
   final int id;
@@ -141,19 +142,7 @@ class CompanyCalendarService {
   static final Map<int, List<CompanyCalendarEvent>> _cache = {};
 
   static Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return json.decode(res.body)['access_token'];
-      return null;
-    } catch (_) {
-      return null;
-    }
+    return TokenService.getToken();
   }
 
   static Future<List<WorkPeriod>> getWorkPeriodsByYear(

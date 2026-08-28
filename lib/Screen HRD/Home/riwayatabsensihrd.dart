@@ -223,21 +223,22 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Future<void> _initAll() async {
     await _loadCurrentUser();
-    await _loadDefaultWorkPeriod();
-    await _loadAnalyticsPeriods();
+    await Future.wait([_loadDefaultWorkPeriod(), _loadAnalyticsPeriods()]);
     await _loadInitialData();
   }
 
   Future<void> _loadAnalyticsPeriods() async {
     try {
-      final result = await _adminService.getWorkPeriodsByYear(
+      final periodsFuture = _adminService.getWorkPeriodsByYear(
         tahun: _analyticsYear,
       );
 
-      final calendarEvents = await CompanyCalendarService.getByYear(
+      final calendarFuture = CompanyCalendarService.getByYear(
         _analyticsYear,
         forceRefresh: true,
       );
+      final result = await periodsFuture;
+      final calendarEvents = await calendarFuture;
 
       if (!mounted) return;
 
@@ -376,10 +377,11 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _loadDashboardStats(),
       _loadWorkDaysMap(),
     ]);
-    await _loadAttendanceData(refresh: true);
-    await _loadHRDAnalytics();
-    await _loadTidakHadirList(); // ← load sendiri, tidak bergantung attendanceData
-    await _loadAnalyticsData(); // ← load data untuk tab Analitik (terpisah dari _loadHRDAnalytics)
+    await Future.wait([
+      _loadAttendanceData(refresh: true),
+      _loadTidakHadirList(),
+      _loadAnalyticsData(),
+    ]);
   }
 
   // Ambil SEMUA data absensi tahun berjalan (loop semua halaman, page_size 1000)
@@ -639,13 +641,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       final jam17 = 17 * 60;
 
       // Load data absensi untuk tanggal yang dipilih
-      final r = await _adminService.getAllAttendanceData(
+      final attendanceFuture = _adminService.getAllAttendanceData(
         timeRange: isToday ? 'Hari Ini' : null,
         startDate: isToday ? null : targetDate,
         endDate: isToday ? null : targetDate,
         page: 1,
         pageSize: 500,
       );
+      final timeOffFuture = TimeOffAdminService.getAllTimeOffs(
+        adminId: _currentUserId ?? '',
+        status: 'Approved',
+        yearFilter: targetDate.year,
+        monthFilter: targetDate.month,
+      );
+      final r = await attendanceFuture;
 
       final hadirUserIds = (r.data?.data ?? [])
           .where(
@@ -670,12 +679,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       // karena izin, bukan lupa/bolos.
       final izinUserIds = <String>{};
       try {
-        final izinRes = await TimeOffAdminService.getAllTimeOffs(
-          adminId: _currentUserId ?? '',
-          status: 'Approved',
-          yearFilter: targetDate.year,
-          monthFilter: targetDate.month,
-        );
+        final izinRes = await timeOffFuture;
         if (izinRes.success && izinRes.data != null) {
           for (final izin in izinRes.data!) {
             final mulai = DateTime(
@@ -883,8 +887,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   }
 
   Future<void> _refreshData() async {
-    await _loadDefaultWorkPeriod();
-    await _loadAnalyticsPeriods();
+    await Future.wait([_loadDefaultWorkPeriod(), _loadAnalyticsPeriods()]);
     await _loadInitialData();
   }
 
@@ -907,12 +910,28 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
     final newMap = <String, String>{};
 
-    for (final tanggal in uniqueDates) {
-      try {
-        final records = await DoaService.getDoaByTanggal(
-          _currentUserId!,
-          tanggal,
-        );
+    const batchSize = 6;
+    for (var offset = 0; offset < uniqueDates.length; offset += batchSize) {
+      final end = (offset + batchSize < uniqueDates.length)
+          ? offset + batchSize
+          : uniqueDates.length;
+      final batch = uniqueDates.sublist(offset, end);
+      final results = await Future.wait(
+        batch.map(
+          (tanggal) async {
+            try {
+              return await DoaService.getDoaByTanggal(
+                _currentUserId!,
+                tanggal,
+              );
+            } catch (_) {
+              return <DoaRecord>[];
+            }
+          },
+        ),
+      );
+
+      for (final records in results) {
         for (final rec in records) {
           final tStr = DateFormat('yyyy-MM-dd').format(
             DateTime(rec.tanggal.year, rec.tanggal.month, rec.tanggal.day),
@@ -922,7 +941,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             newMap['${tStr}_${uid.toLowerCase()}'] = 'ikut';
           }
         }
-      } catch (_) {}
+      }
     }
 
     // Karyawan yang HADIR tapi tidak ikut doa → 'tidak'

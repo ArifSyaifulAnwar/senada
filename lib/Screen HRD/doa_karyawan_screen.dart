@@ -268,16 +268,16 @@ class _DoaKaryawanScreenState extends State<DoaKaryawanScreen>
       _hrdUserId = prefs.getString('UserID');
     }
     if (_hrdUserId != null) {
-      await _loadKaryawan();
-      await _loadRiwayat();
+      await Future.wait([_loadKaryawan(), _loadRiwayat()]);
     }
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadKaryawan() async {
     if (_hrdUserId == null) return;
     setState(() => _isLoadingKaryawan = true);
     final list = await DoaService.getKaryawan(_hrdUserId!);
+    if (!mounted) return;
     setState(() {
       _karyawan = list;
       _isLoadingKaryawan = false;
@@ -288,6 +288,7 @@ class _DoaKaryawanScreenState extends State<DoaKaryawanScreen>
     if (_hrdUserId == null) return;
     setState(() => _isLoadingRiwayat = true);
     final list = await DoaService.getDoaByTanggal(_hrdUserId!, _selectedDate);
+    if (!mounted) return;
     setState(() {
       _riwayat = list;
       _isLoadingRiwayat = false;

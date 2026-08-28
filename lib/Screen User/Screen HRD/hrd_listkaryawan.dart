@@ -2,6 +2,7 @@
 //                 use_build_context_synchronously
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:absensikaryawan/models/employee_models.dart';
 import 'package:flutter/material.dart';
@@ -46,6 +47,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
   bool _togglingActive = false;
 
   final TextEditingController _searchCtrl = TextEditingController();
+  final Map<String, Uint8List> _avatarBytesCache = {};
 
   // ─── LIFECYCLE ───────────────────────────────────────────────────────────────
 
@@ -63,9 +65,11 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
 
   // ─── DATA ────────────────────────────────────────────────────────────────────
 
-  Future<void> _loadData() async {
+  Future<void> _loadData({bool forceRefresh = false}) async {
     setState(() {
-      _isLoading = true;
+      // Saat refresh/filter, pertahankan daftar lama tetap terlihat. Skeleton
+      // penuh hanya diperlukan ketika halaman benar-benar belum punya data.
+      _isLoading = _employees.isEmpty;
       _errorMessage = '';
     });
 
@@ -76,6 +80,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
       sortBy: _sortBy,
       page: _currentPage,
       pageSize: 50,
+      forceRefresh: forceRefresh,
     );
 
     if (!mounted) return;
@@ -97,7 +102,8 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
   Future<void> _refresh() async {
     _currentPage = 1;
     _selectedEmployee = null;
-    await _loadData();
+    HrdEmployeeService.invalidateEmployeeListCache();
+    await _loadData(forceRefresh: true);
   }
 
   void _onSearch(String v) {
@@ -1753,11 +1759,17 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
     Widget inner;
     if (b64 != null && b64.isNotEmpty) {
       try {
+        final bytes = _avatarBytesCache.putIfAbsent(
+          b64,
+          () => base64Decode(b64),
+        );
         inner = Image.memory(
-          base64Decode(b64),
+          bytes,
           width: size,
           height: size,
           fit: BoxFit.cover,
+          cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+          cacheHeight: (size * MediaQuery.devicePixelRatioOf(context)).round(),
           errorBuilder: (_, __, ___) => _defaultAvatar(size),
         );
       } catch (_) {

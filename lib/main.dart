@@ -11,10 +11,23 @@ void main() async {
   if (!kIsWeb) {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    await FcmService.init();
   }
 
   runApp(const MyApp());
+
+  // Persiapan channel, permission, dan listener notifikasi tidak perlu
+  // menahan splash screen. Firebase inti tetap disiapkan sebelum runApp.
+  if (!kIsWeb) {
+    _initializeNotificationsInBackground();
+  }
+}
+
+Future<void> _initializeNotificationsInBackground() async {
+  try {
+    await FcmService.init();
+  } catch (_) {
+    // Kegagalan notifikasi tidak boleh menghalangi aplikasi dibuka.
+  }
 }
 
 class MyApp extends StatelessWidget {

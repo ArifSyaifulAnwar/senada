@@ -1,6 +1,7 @@
 // ignore_for_file: library_private_types_in_public_api, use_build_context_synchronously, deprecated_member_use
 
 import 'package:absensikaryawan/Services/attendance_service.dart';
+import 'package:absensikaryawan/Services/company_calendar_service.dart';
 import 'package:absensikaryawan/models/attendancemodel.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -26,8 +27,10 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
   bool _canInputDoa = false;
   String? _currentUserId;
   String errorMessage = '';
-  String selectedTimeRange = '1 Tahun Terakhir';
+  String selectedTimeRange = 'Pilih Periode';
   DateTimeRange? customDateRange;
+  List<WorkPeriod> _workPeriods = [];
+  WorkPeriod? _selectedWorkPeriod;
   String selectedAbsensiType = 'Semua';
 
   List<AttendanceData> attendanceData = [];
@@ -44,8 +47,86 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
   @override
   void initState() {
     super.initState();
-    _loadInitialData();
+    _initializeAttendanceHistory();
     _loadCurrentUserAndDoaAccess();
+  }
+
+  Future<void> _initializeAttendanceHistory() async {
+    await _loadWorkPeriods();
+    await _loadInitialData();
+  }
+
+  Future<void> _loadWorkPeriods() async {
+    final now = DateTime.now();
+    final results = await Future.wait([
+      CompanyCalendarService.getWorkPeriodsByYear(now.year),
+      CompanyCalendarService.getWorkPeriodsByYear(now.year - 1),
+    ]);
+
+    final periodsById = <int, WorkPeriod>{};
+    for (final periods in results) {
+      for (final period in periods) {
+        periodsById[period.id] = period;
+      }
+    }
+
+    final periods = periodsById.values.toList()
+      ..sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
+
+    WorkPeriod? selected;
+    final today = DateTime(now.year, now.month, now.day);
+    for (final period in periods) {
+      final start = DateTime(
+        period.tanggalMulai.year,
+        period.tanggalMulai.month,
+        period.tanggalMulai.day,
+      );
+      final end = DateTime(
+        period.tanggalSelesai.year,
+        period.tanggalSelesai.month,
+        period.tanggalSelesai.day,
+      );
+      if (!today.isBefore(start) && !today.isAfter(end)) {
+        selected = period;
+        break;
+      }
+    }
+
+    selected ??= periods.isNotEmpty ? periods.first : null;
+
+    if (!mounted) return;
+    setState(() {
+      _workPeriods = periods;
+      _selectedWorkPeriod = selected;
+      if (selected != null) {
+        selectedTimeRange = 'Pilih Periode';
+        customDateRange = DateTimeRange(
+          start: selected.tanggalMulai,
+          end: selected.tanggalSelesai,
+        );
+      } else {
+        selectedTimeRange = '1 Tahun Terakhir';
+        customDateRange = null;
+      }
+    });
+  }
+
+  String _workPeriodLabel(WorkPeriod period) {
+    final description = period.keterangan.trim();
+    if (description.isNotEmpty) return description;
+    return 'Periode ${DateFormat('MMMM yyyy', 'id_ID').format(DateTime(period.tahun, period.bulan))}';
+  }
+
+  Future<void> _selectWorkPeriod(WorkPeriod period) async {
+    setState(() {
+      _selectedWorkPeriod = period;
+      selectedTimeRange = 'Pilih Periode';
+      customDateRange = DateTimeRange(
+        start: period.tanggalMulai,
+        end: period.tanggalSelesai,
+      );
+    });
+    await _loadInitialData();
   }
 
   Future<void> _loadInitialData() async {
@@ -755,6 +836,41 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
           ),
         ),
         const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _showWorkPeriodPickerSheet,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              color: _selectedWorkPeriod != null
+                  ? const Color(0xFF3B82F6).withOpacity(0.08)
+                  : Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.event_note,
+                  size: 16,
+                  color: Color(0xFF3B82F6),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _selectedWorkPeriod != null
+                        ? _workPeriodLabel(_selectedWorkPeriod!)
+                        : 'Periode kerja HRD belum tersedia',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const Icon(Icons.chevron_right, size: 16),
+              ],
+            ),
+          ),
+        ),
         ...timeRanges.map((range) {
           final isSelected =
               selectedTimeRange == range && customDateRange == null;
@@ -763,6 +879,7 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
               setState(() {
                 selectedTimeRange = range;
                 customDateRange = null;
+                _selectedWorkPeriod = null;
               });
               _loadInitialData();
             },
@@ -814,6 +931,7 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
               setState(() {
                 customDateRange = picked;
                 selectedTimeRange = 'Pilih Periode';
+                _selectedWorkPeriod = null;
               });
               _loadInitialData();
             }
@@ -822,7 +940,7 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
             margin: const EdgeInsets.only(bottom: 4),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: customDateRange != null
+              color: customDateRange != null && _selectedWorkPeriod == null
                   ? const Color(0xFF3B82F6).withOpacity(0.08)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
@@ -830,23 +948,24 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
             child: Row(
               children: [
                 Icon(
-                  customDateRange != null
+                  customDateRange != null && _selectedWorkPeriod == null
                       ? Icons.radio_button_checked
                       : Icons.radio_button_unchecked,
                   size: 14,
-                  color: customDateRange != null
+                  color: customDateRange != null && _selectedWorkPeriod == null
                       ? const Color(0xFF3B82F6)
                       : Colors.grey[400],
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    customDateRange != null
+                    customDateRange != null && _selectedWorkPeriod == null
                         ? '${_formatDisplayDate(customDateRange!.start)} - ${_formatDisplayDate(customDateRange!.end)}'
                         : 'Pilih Periode',
                     style: TextStyle(
                       fontSize: 12,
-                      color: customDateRange != null
+                      color: customDateRange != null &&
+                              _selectedWorkPeriod == null
                           ? const Color(0xFF3B82F6)
                           : Colors.grey[700],
                     ),
@@ -1280,9 +1399,11 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
-                        selectedTimeRange == 'Pilih Periode' &&
-                                customDateRange != null
-                            ? '${customDateRange!.start.day}/${customDateRange!.start.month} - ${customDateRange!.end.day}/${customDateRange!.end.month}'
+                        _selectedWorkPeriod != null
+                            ? _workPeriodLabel(_selectedWorkPeriod!)
+                            : selectedTimeRange == 'Pilih Periode' &&
+                                    customDateRange != null
+                                ? '${customDateRange!.start.day}/${customDateRange!.start.month} - ${customDateRange!.end.day}/${customDateRange!.end.month}'
                             : selectedTimeRange,
                         style: const TextStyle(
                           fontSize: 12,
@@ -1700,6 +1821,81 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
   }
 
   // ─── Bottom sheet filter (mobile) ────────────────────
+  void _showWorkPeriodPickerSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.72,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Pilih Periode Kerja HRD',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (_workPeriods.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  child: Text(
+                    'Periode kerja belum diatur oleh HRD.',
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _workPeriods.length,
+                    itemBuilder: (_, index) {
+                      final period = _workPeriods[index];
+                      final selected = _selectedWorkPeriod?.id == period.id;
+                      return ListTile(
+                        leading: Icon(
+                          selected
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked,
+                          color: selected ? const Color(0xFF3B82F6) : null,
+                        ),
+                        title: Text(_workPeriodLabel(period)),
+                        subtitle: Text(
+                          '${_formatDisplayDate(period.tanggalMulai)} - ${_formatDisplayDate(period.tanggalSelesai)}',
+                        ),
+                        selected: selected,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _selectWorkPeriod(period);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showDateFilterSheet() {
     showModalBottomSheet(
       context: context,
@@ -1726,6 +1922,20 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
             ),
+            ListTile(
+              leading: const Icon(Icons.event_note),
+              title: const Text('Periode Kerja HRD'),
+              subtitle: _selectedWorkPeriod != null
+                  ? Text(
+                      '${_workPeriodLabel(_selectedWorkPeriod!)}\n${_formatDisplayDate(_selectedWorkPeriod!.tanggalMulai)} - ${_formatDisplayDate(_selectedWorkPeriod!.tanggalSelesai)}',
+                    )
+                  : const Text('Belum ada periode yang dipilih'),
+              selected: _selectedWorkPeriod != null,
+              onTap: () {
+                Navigator.pop(context);
+                _showWorkPeriodPickerSheet();
+              },
+            ),
             for (final range in [
               '1 Hari',
               '7 Hari Terakhir',
@@ -1740,6 +1950,7 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
                   setState(() {
                     selectedTimeRange = range;
                     customDateRange = null;
+                    _selectedWorkPeriod = null;
                   });
                   Navigator.pop(context);
                   _loadInitialData();
@@ -1753,7 +1964,8 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
                       '${_formatDisplayDate(customDateRange!.start)} - ${_formatDisplayDate(customDateRange!.end)}',
                     )
                   : null,
-              selected: selectedTimeRange == 'Pilih Periode',
+              selected: selectedTimeRange == 'Pilih Periode' &&
+                  _selectedWorkPeriod == null,
               onTap: () async {
                 final picked = await showDateRangePicker(
                   context: context,
@@ -1765,6 +1977,7 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
                   setState(() {
                     customDateRange = picked;
                     selectedTimeRange = 'Pilih Periode';
+                    _selectedWorkPeriod = null;
                   });
                   _loadInitialData();
                 }
