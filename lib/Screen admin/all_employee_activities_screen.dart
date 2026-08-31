@@ -784,6 +784,8 @@ class _AllEmployeeActivitiesScreenState
       } else {
         await _downloadAttachment(bytes, att.fileName);
       }
+    } catch (e) {
+      _showSnack('Gagal memproses lampiran: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isAttachmentProcessing = false);
     }

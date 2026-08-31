@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 
 class FaceRecognitionService {
   // Convert File to Base64
@@ -14,24 +15,10 @@ class FaceRecognitionService {
   }
 
   static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
+    // Token dipakai bersama oleh semua service. Sebelumnya setiap proses
+    // wajah meminta token baru sehingga pengiriman absensi tertunda sebelum
+    // request mencapai API (dan sebelum waktu absensi server dicatat).
+    return TokenService.getToken();
   }
 
   // Check if face is registered (FIXED)

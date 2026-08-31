@@ -218,6 +218,8 @@ class DailyActivityHRDItem extends DailyActivityItem {
     super.startTime,
     super.endTime,
     super.attachments,
+    super.status,
+    super.reviewNotes,
     required this.employeeName,
     required this.jobPosition,
     required this.organization,
@@ -242,6 +244,8 @@ class DailyActivityHRDItem extends DailyActivityItem {
       attachments: (json['Attachments'] as List<dynamic>? ?? [])
           .map((e) => DailyActivityAttachment.fromJson(e))
           .toList(),
+      status: json['Status'],
+      reviewNotes: json['ReviewNotes'],
       employeeName: json['EmployeeName'] ?? '-',
       jobPosition: json['JobPosition'] ?? '-',
       organization: json['Organization'] ?? '-',

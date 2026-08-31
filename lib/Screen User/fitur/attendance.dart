@@ -217,7 +217,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
       _cameraController = CameraController(
         camera,
-        ResolutionPreset.high,
+        // Medium tetap cukup untuk verifikasi wajah, tetapi ukuran unggahan
+        // jauh lebih kecil. Waktu absensi dicatat saat request tiba di API,
+        // jadi unggahan foto besar dapat membuat jam terlihat terlambat.
+        ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -249,7 +252,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             : "📸 Mengambil foto...";
       });
 
-      await Future.delayed(Duration(milliseconds: isAutoRetry ? 1200 : 800));
+      // Beri waktu singkat agar preview stabil tanpa sengaja menunda absensi.
+      await Future.delayed(Duration(milliseconds: isAutoRetry ? 300 : 150));
 
       final XFile imageFile = await _cameraController!.takePicture();
       if (!mounted) return;
@@ -262,7 +266,6 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         _faceVerificationMessage = "🔍 Memverifikasi wajah...";
       });
 
-      await Future.delayed(const Duration(milliseconds: 100));
       await _processFaceRecognition();
     } catch (e) {
       if (mounted) {

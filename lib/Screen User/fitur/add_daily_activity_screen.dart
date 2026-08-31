@@ -38,6 +38,8 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   OfficeLocation? _selectedOfficeLocation;
 
   static const int _maxAttachments = 5;
+  static const int _maxAttachmentBytes = 5 * 1024 * 1024;
+  static const int _maxTotalAttachmentBytes = 15 * 1024 * 1024;
 
   @override
   void initState() {
@@ -141,6 +143,27 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
 
   int _toMinutes(TimeOfDay t) => t.hour * 60 + t.minute;
 
+  int get _totalAttachmentBytes => _attachments.fold(
+    0,
+    (total, attachment) => total + attachment.sizeBytes,
+  );
+
+  bool _canAddAttachment(String fileName, int byteLength) {
+    if (byteLength <= 0) {
+      _showSnack('File $fileName kosong atau tidak dapat dibaca', Colors.red);
+      return false;
+    }
+    if (byteLength > _maxAttachmentBytes) {
+      _showSnack('File $fileName melebihi batas 5 MB', Colors.red);
+      return false;
+    }
+    if (_totalAttachmentBytes + byteLength > _maxTotalAttachmentBytes) {
+      _showSnack('Total seluruh lampiran maksimal 15 MB', Colors.red);
+      return false;
+    }
+    return true;
+  }
+
   // ── Attachments ────────────────────────────────────────────────────────
 
   Future<void> _pickFromCamera() async {
@@ -151,6 +174,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
     );
     if (photo == null) return;
     final bytes = await photo.readAsBytes();
+    if (!_canAddAttachment(photo.name, bytes.length)) return;
     setState(() {
       _attachments.add(
         DailyActivityAttachment(
@@ -171,6 +195,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
     final toAdd = images.take(remainingSlot).toList();
     for (final img in toAdd) {
       final bytes = await img.readAsBytes();
+      if (!_canAddAttachment(img.name, bytes.length)) continue;
       final mime = lookupMimeType(img.path) ?? 'image/jpeg';
       _attachments.add(
         DailyActivityAttachment(
@@ -203,6 +228,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
     final files = result.files.take(remainingSlot).toList();
     for (final f in files) {
       if (f.bytes == null) continue;
+      if (!_canAddAttachment(f.name, f.bytes!.length)) continue;
       final mime = lookupMimeType(f.name) ?? 'application/octet-stream';
       _attachments.add(
         DailyActivityAttachment(
@@ -266,6 +292,16 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
     }
     if (_selectedCategory == null) {
       _showSnack('Kategori aktivitas wajib dipilih', Colors.red);
+      return;
+    }
+    if ((_startTime == null) != (_endTime == null)) {
+      _showSnack('Jam mulai dan jam selesai harus diisi bersamaan', Colors.red);
+      return;
+    }
+    if (_startTime != null &&
+        _endTime != null &&
+        _toMinutes(_endTime!) <= _toMinutes(_startTime!)) {
+      _showSnack('Jam selesai harus setelah jam mulai', Colors.red);
       return;
     }
 

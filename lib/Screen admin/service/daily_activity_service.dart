@@ -6,44 +6,15 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 
 import '../../models/dailyactivitymodels.dart';
 
 class DailyActivityService {
-  static String? _accessToken;
-
-  static Future<void> _ensureToken({bool forceRefresh = false}) async {
-    if (_accessToken != null && !forceRefresh) return;
-
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _accessToken = data['access_token'];
-      } else {
-        _accessToken = null;
-      }
-    } catch (_) {
-      _accessToken = null;
-    }
-  }
-
   static Future<String> _userId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('UserID') ?? '';
   }
-
-  static Map<String, String> _headers() => {
-    'Authorization': 'Bearer $_accessToken',
-    'Content-Type': 'application/json',
-  };
 
   /// Format tanggal aman untuk API/SQL Server: yyyy-MM-dd.
   /// Jangan kirim toIso8601String agar tidak terdampak jam atau timezone.
@@ -57,21 +28,11 @@ class DailyActivityService {
 
   /// Wrapper POST dengan refresh token dan retry sekali bila 401.
   static Future<http.Response> _authedPost(String url, {String? body}) async {
-    await _ensureToken();
-
-    var response = await http
-        .post(Uri.parse(url), headers: _headers(), body: body)
-        .timeout(const Duration(seconds: 30));
-
-    if (response.statusCode == 401) {
-      await _ensureToken(forceRefresh: true);
-
-      response = await http
-          .post(Uri.parse(url), headers: _headers(), body: body)
-          .timeout(const Duration(seconds: 30));
-    }
-
-    return response;
+    return TokenService.authorizedPost(
+      Uri.parse(url),
+      body: body,
+      timeout: const Duration(seconds: 45),
+    );
   }
 
   static Future<Uint8List?> downloadAttachmentBytes(int attachmentId) async {
@@ -143,7 +104,7 @@ class DailyActivityService {
 
     final body = {
       'UserId': userId,
-      'ActivityDate': activityDate.toIso8601String(),
+      'ActivityDate': _apiDate(activityDate),
       'CategoryId': categoryId,
       'Description': description,
       'OfficeLocationId': officeLocationId,
@@ -159,7 +120,11 @@ class DailyActivityService {
         body: json.encode(body),
       );
 
-      return response.statusCode == 200;
+      if (response.statusCode != 200) return false;
+
+      final decoded = json.decode(response.body);
+      return decoded is Map<String, dynamic> &&
+          (decoded['Success'] == true || decoded['success'] == true);
     } catch (_) {
       return false;
     }
