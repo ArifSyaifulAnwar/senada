@@ -110,7 +110,7 @@ class FcmService {
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
           )
           .timeout(const Duration(seconds: 10));
       if (tokenRes.statusCode != 200) return;
@@ -152,7 +152,7 @@ class FcmService {
         final tokenRes = await http.post(
           Uri.parse('$baseURL/api/auth/token'),
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
         );
         if (tokenRes.statusCode == 200) {
           final accessToken = json.decode(tokenRes.body)['access_token'] as String?;

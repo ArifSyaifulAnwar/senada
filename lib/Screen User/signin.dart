@@ -78,7 +78,7 @@ class _SignInScreenState extends State<SignInScreen>
         final tokenResponse = await http.post(
           Uri.parse('$baseURL/api/auth/token'),
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+          body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
         );
 
         if (tokenResponse.statusCode == 200) {
@@ -367,7 +367,7 @@ class _SignInScreenState extends State<SignInScreen>
       final tokenResponse = await http.post(
         Uri.parse('$baseURL/api/auth/token'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'ASN_DBS'},
+        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
       );
 
       if (tokenResponse.statusCode != 200) {
@@ -406,17 +406,26 @@ class _SignInScreenState extends State<SignInScreen>
           _showVerificationDialog(email, accessToken);
         }
       } else {
-        String message;
-        switch (response.statusCode) {
-          case 400:
-            message = 'Email harus disertakan.';
-            break;
-          case 404:
-            message = 'Email tidak terdaftar.';
-            break;
-          default:
-            message = 'Terjadi kesalahan yang tidak diketahui.';
+        String? apiMessage;
+        try {
+          final responseData = json.decode(response.body);
+          if (responseData is Map<String, dynamic>) {
+            apiMessage =
+                responseData['message']?.toString() ??
+                responseData['Message']?.toString() ??
+                responseData['error']?.toString();
+          }
+        } catch (_) {
+          // Gunakan pesan fallback jika server tidak mengembalikan JSON.
         }
+
+        final message = apiMessage?.trim().isNotEmpty == true
+            ? apiMessage!.trim()
+            : response.statusCode == 404
+            ? 'Email tidak terdaftar.'
+            : response.statusCode == 400
+            ? 'Permintaan reset password tidak dapat diproses.'
+            : 'Terjadi kesalahan pada server.';
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(message), backgroundColor: Colors.red),
