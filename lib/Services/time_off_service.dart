@@ -12,8 +12,70 @@ import 'package:path/path.dart' as path;
 
 import '../Screen User/fitur/org_approval_screen.dart';
 
+class DlLaporanAttachment {
+  final String name;
+  final Uint8List bytes;
+
+  const DlLaporanAttachment({required this.name, required this.bytes});
+}
+
+class DlFinanceOption {
+  final String userId;
+  final String name;
+  final String? jobPosition;
+
+  const DlFinanceOption({
+    required this.userId,
+    required this.name,
+    this.jobPosition,
+  });
+
+  factory DlFinanceOption.fromJson(Map<String, dynamic> json) =>
+      DlFinanceOption(
+        userId: (json['userId'] ?? json['UserId'] ?? '').toString(),
+        name: (json['name'] ?? json['Name'] ?? '').toString(),
+        jobPosition: (json['jobPosition'] ?? json['JobPosition'])?.toString(),
+      );
+}
+
 class TimeOffService {
   static const String _base = '/api/timeoff';
+
+  static Future<ApiResponse<List<DlFinanceOption>>> getFinanceUsers(
+    String userId,
+  ) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/finance-users'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({'userId': userId}),
+          )
+          .timeout(const Duration(seconds: 20));
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200 && _get(body, 'success') == true) {
+        final raw = _get(body, 'data') as List? ?? const [];
+        return ApiResponse(
+          success: true,
+          message: (_get(body, 'message') ?? '').toString(),
+          data: raw
+              .map((e) => DlFinanceOption.fromJson(e as Map<String, dynamic>))
+              .where((e) => e.userId.isNotEmpty)
+              .toList(),
+        );
+      }
+      return ApiResponse(
+        success: false,
+        message: (_get(body, 'message') ?? 'Daftar Finance gagal dimuat')
+            .toString(),
+      );
+    } catch (e) {
+      return ApiResponse(
+        success: false,
+        message: 'Daftar Finance gagal dimuat: $e',
+      );
+    }
+  }
 
   // Auth token — dulu tiap service punya cache token sendiri-sendiri (fixed
   // 10 menit, tanpa retry) sehingga kalau fetch token gagal (network hiccup,
@@ -30,19 +92,30 @@ class TimeOffService {
     required String hasilPerjalanan,
     required String laporanKepada,
     required String penyelesaian,
+    List<DlLaporanAttachment> anggaranFiles = const [],
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseURL$_base/dl-submit-laporan-form'),
-        headers: await _jsonHeaders(),
-        body: jsonEncode({
-          'timeOffId': timeOffId,
-          'userId': userId,
-          'hasilPerjalanan': hasilPerjalanan,
-          'laporanKepada': laporanKepada,
-          'penyelesaian': penyelesaian,
-        }),
-      );
+      final res = await http
+          .post(
+            Uri.parse('$baseURL$_base/dl-submit-laporan-form'),
+            headers: await _jsonHeaders(),
+            body: jsonEncode({
+              'timeOffId': timeOffId,
+              'userId': userId,
+              'hasilPerjalanan': hasilPerjalanan,
+              'laporanKepada': laporanKepada,
+              'penyelesaian': penyelesaian,
+              'anggaranFiles': anggaranFiles
+                  .map(
+                    (file) => {
+                      'fileName': file.name,
+                      'fileBase64': base64Encode(file.bytes),
+                    },
+                  )
+                  .toList(),
+            }),
+          )
+          .timeout(const Duration(seconds: 60));
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       return ApiResponse(
         success: _get(body, 'success') == true,
@@ -471,7 +544,8 @@ class TimeOffService {
     }
   }
 
-  static Future<Map<String, String>> _jsonHeaders() => TokenService.jsonHeaders();
+  static Future<Map<String, String>> _jsonHeaders() =>
+      TokenService.jsonHeaders();
 
   static Future<Map<String, String>> _multipartHeaders() =>
       TokenService.multipartHeaders();
@@ -627,6 +701,7 @@ class TimeOffService {
         'catatan': request.catatan,
         'jenisPekerjaan': request.jenisPekerjaan,
         'rabType': request.rabType,
+        'financeUserId': request.financeUserId,
         'nominalUangKantor': request.nominalUangKantor,
 
         // INI YANG DIPERBAIKI:
@@ -640,6 +715,10 @@ class TimeOffService {
       // Field tambahan supaya tetap aman kalau API baca form-data langsung
       if (request.rabType != null && request.rabType!.trim().isNotEmpty) {
         mr.fields['rabType'] = request.rabType!.trim();
+      }
+      if (request.financeUserId != null &&
+          request.financeUserId!.trim().isNotEmpty) {
+        mr.fields['financeUserId'] = request.financeUserId!.trim();
       }
 
       if (request.nominalUangKantor != null) {
@@ -733,6 +812,9 @@ class TimeOffService {
         mr.fields['jenisPekerjaan'] = request.jenisPekerjaan!;
       }
       if (request.rabType != null) mr.fields['rabType'] = request.rabType!;
+      if (request.financeUserId != null) {
+        mr.fields['financeUserId'] = request.financeUserId!;
+      }
       if (request.nominalUangKantor != null) {
         mr.fields['nominalUangKantor'] = request.nominalUangKantor.toString();
       }

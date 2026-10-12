@@ -73,11 +73,15 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
   // ── DL state ──────────────────────────────────────────────────────────────
   String? _selectedJenisPekerjaan;
   String? _selectedRabType;
+  bool _rabChoiceMade = false;
+  String? _selectedFinanceUserId;
   final List<_ReimburseRow> _reimburseRows = [];
 
   // DL organization (loaded from API)
   List<String> _organizationList = [];
   bool _isLoadingOrg = false;
+  List<DlFinanceOption> _financeUsers = [];
+  bool _isLoadingFinance = false;
 
   final List<Map<String, dynamic>> _jenisTimeOff = [
     {
@@ -148,6 +152,12 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     _initNotifications();
     _isEditMode = widget.editData != null;
     if (_isEditMode) _loadEditData();
+    if (_isEditMode && _isDinasLuar) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadOrganizationList();
+        if (_selectedRabType != null) _loadFinanceUsers();
+      });
+    }
   }
 
   void _loadEditData() {
@@ -158,6 +168,8 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     _catatanCtrl.text = d.catatan ?? '';
     _selectedJenisPekerjaan = d.jenisPekerjaan;
     _selectedRabType = d.rabType;
+    _rabChoiceMade = true;
+    _selectedFinanceUserId = d.financeUserId;
     if (d.nominalUangKantor != null)
       _nominalKantorCtrl.text = d.nominalUangKantor!.toStringAsFixed(0);
     if (d.reimbursementItems != null) {
@@ -199,6 +211,20 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     if (_isDinasLuar &&
         (_selectedJenisPekerjaan == null || _selectedJenisPekerjaan!.isEmpty)) {
       _snack('Jenis pekerjaan wajib diisi untuk Dinas Luar', err: true);
+      return;
+    }
+    if (_isDinasLuar && !_rabChoiceMade) {
+      _snack(
+        'Pilih sumber biaya: Reimbursement, Uang Kantor, atau Tidak Ada',
+        err: true,
+      );
+      return;
+    }
+    if (_isDinasLuar &&
+        _selectedRabType != null &&
+        (_selectedFinanceUserId == null ||
+            _selectedFinanceUserId!.trim().isEmpty)) {
+      _snack('Pilih Finance yang akan memeriksa biaya Dinas Luar', err: true);
       return;
     }
 
@@ -271,6 +297,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           receiptFile: firstFile,
           jenisPekerjaan: _selectedJenisPekerjaan,
           rabType: _selectedRabType,
+          financeUserId: _selectedFinanceUserId,
           nominalUangKantor: nominalKantor,
           reimbursementItems: reimburseItems,
         );
@@ -297,6 +324,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           receiptFile: firstFile,
           jenisPekerjaan: _selectedJenisPekerjaan,
           rabType: _selectedRabType,
+          financeUserId: _selectedFinanceUserId,
           nominalUangKantor: nominalKantor,
           reimbursementItems: reimburseItems,
         );
@@ -414,6 +442,25 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
     } catch (_) {
     } finally {
       if (mounted) setState(() => _isLoadingOrg = false);
+    }
+  }
+
+  Future<void> _loadFinanceUsers() async {
+    if (_isLoadingFinance) return;
+    if (mounted) setState(() => _isLoadingFinance = true);
+    try {
+      final res = await TimeOffService.getFinanceUsers(widget.userId);
+      if (!mounted) return;
+      setState(() {
+        _financeUsers = res.data ?? [];
+        if (_selectedFinanceUserId != null &&
+            !_financeUsers.any((e) => e.userId == _selectedFinanceUserId)) {
+          _selectedFinanceUserId = null;
+        }
+      });
+      if (!res.success) _snack(res.message, err: true);
+    } finally {
+      if (mounted) setState(() => _isLoadingFinance = false);
     }
   }
 
@@ -908,6 +955,7 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
               if (_selectedJenis != 'Dinas Luar') {
                 _selectedJenisPekerjaan = null;
                 _selectedRabType = null;
+                _rabChoiceMade = false;
                 _reimburseRows.clear();
                 _nominalKantorCtrl.clear();
                 _organizationList = [];
@@ -1237,6 +1285,56 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
           ),
         ],
 
+        if (_selectedRabType != null) ...[
+          const SizedBox(height: 14),
+          const Text(
+            'Finance Pemeriksa *',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: _isLoadingFinance
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedFinanceUserId,
+                      isExpanded: true,
+                      hint: const Text('Pilih karyawan Finance'),
+                      items: _financeUsers
+                          .map(
+                            (f) => DropdownMenuItem(
+                              value: f.userId,
+                              child: Text(
+                                f.jobPosition == null || f.jobPosition!.isEmpty
+                                    ? f.name
+                                    : '${f.name} - ${f.jobPosition}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) =>
+                          setState(() => _selectedFinanceUserId = v),
+                    ),
+                  ),
+          ),
+          if (!_isLoadingFinance && _financeUsers.isEmpty)
+            TextButton.icon(
+              onPressed: _loadFinanceUsers,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Muat ulang daftar Finance'),
+            ),
+        ],
+
         const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(12),
@@ -1267,52 +1365,63 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
   }
 
   Widget _buildRabChip(String? value, String label) => GestureDetector(
-    onTap: () => setState(() {
-      _selectedRabType = value;
+    onTap: () {
+      setState(() {
+        _rabChoiceMade = true;
+        _selectedRabType = value;
 
-      if (value == 'reimbursement') {
-        _nominalKantorCtrl.clear();
+        if (value == 'reimbursement') {
+          _nominalKantorCtrl.clear();
 
-        if (_reimburseRows.isEmpty) {
-          _reimburseRows.add(
-            _ReimburseRow(
-              namaCtrl: TextEditingController(),
-              nominalCtrl: TextEditingController(),
-              ketCtrl: TextEditingController(),
-            ),
-          );
+          if (_reimburseRows.isEmpty) {
+            _reimburseRows.add(
+              _ReimburseRow(
+                namaCtrl: TextEditingController(),
+                nominalCtrl: TextEditingController(),
+                ketCtrl: TextEditingController(),
+              ),
+            );
+          }
         }
-      }
 
-      if (value == 'uang_kantor') {
-        for (final r in _reimburseRows) {
-          r.namaCtrl.dispose();
-          r.nominalCtrl.dispose();
-          r.ketCtrl.dispose();
+        if (value == 'uang_kantor') {
+          for (final r in _reimburseRows) {
+            r.namaCtrl.dispose();
+            r.nominalCtrl.dispose();
+            r.ketCtrl.dispose();
+          }
+          _reimburseRows.clear();
         }
-        _reimburseRows.clear();
-      }
 
-      if (value == null) {
-        _nominalKantorCtrl.clear();
+        if (value == null) {
+          _selectedFinanceUserId = null;
+          _nominalKantorCtrl.clear();
 
-        for (final r in _reimburseRows) {
-          r.namaCtrl.dispose();
-          r.nominalCtrl.dispose();
-          r.ketCtrl.dispose();
+          for (final r in _reimburseRows) {
+            r.namaCtrl.dispose();
+            r.nominalCtrl.dispose();
+            r.ketCtrl.dispose();
+          }
+          _reimburseRows.clear();
         }
-        _reimburseRows.clear();
-      }
-    }),
+      });
+      if (value != null && _financeUsers.isEmpty) _loadFinanceUsers();
+    },
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _selectedRabType == value
+        color:
+            (value == null
+                ? _rabChoiceMade && _selectedRabType == null
+                : _selectedRabType == value)
             ? const Color(0xFF3B82F6)
             : Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: _selectedRabType == value
+          color:
+              (value == null
+                  ? _rabChoiceMade && _selectedRabType == null
+                  : _selectedRabType == value)
               ? const Color(0xFF3B82F6)
               : const Color(0xFFE5E7EB),
         ),
@@ -1322,7 +1431,10 @@ class _AddTimeOffScreenState extends State<AddTimeOffScreen> {
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: _selectedRabType == value
+          color:
+              (value == null
+                  ? _rabChoiceMade && _selectedRabType == null
+                  : _selectedRabType == value)
               ? Colors.white
               : const Color(0xFF374151),
         ),

@@ -199,8 +199,7 @@ class TimeOffModel {
         (_f(json, 'requiresDirectorApproval', 'requires_director_approval')
             as bool?) ??
         false,
-    directorUserId:
-        _f(json, 'directorUserId', 'director_user_id')?.toString(),
+    directorUserId: _f(json, 'directorUserId', 'director_user_id')?.toString(),
     // DL NEW
     headName: _f(json, 'headName', 'head_name')?.toString(),
     headJobPosition: _f(
@@ -452,6 +451,7 @@ class TimeOffRequest {
   final File? receiptFile;
   final String? jenisPekerjaan;
   final String? rabType;
+  final String? financeUserId;
   final double? nominalUangKantor;
   final List<ReimbursementItem>? reimbursementItems;
 
@@ -464,6 +464,7 @@ class TimeOffRequest {
     this.receiptFile,
     this.jenisPekerjaan,
     this.rabType,
+    this.financeUserId,
     this.nominalUangKantor,
     this.reimbursementItems,
   });
@@ -479,6 +480,7 @@ class UpdateTimeOffRequest {
   final File? receiptFile;
   final String? jenisPekerjaan;
   final String? rabType;
+  final String? financeUserId;
   final double? nominalUangKantor;
   final List<ReimbursementItem>? reimbursementItems;
 
@@ -492,6 +494,7 @@ class UpdateTimeOffRequest {
     this.receiptFile,
     this.jenisPekerjaan,
     this.rabType,
+    this.financeUserId,
     this.nominalUangKantor,
     this.reimbursementItems,
   });

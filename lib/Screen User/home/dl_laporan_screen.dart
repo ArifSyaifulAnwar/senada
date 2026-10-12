@@ -33,7 +33,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
   // ── State ─────────────────────────────────────────────────────────────────
   late TimeOffModel _currentTimeOff; // ← data terbaru dari API
 
-  _PickedFile? _anggaranFile;
+  final List<_PickedFile> _anggaranFiles = [];
   final _hasilCtrl = TextEditingController();
   final _kepadaCtrl = TextEditingController();
   final _penyelesaianCtrl = TextEditingController();
@@ -179,11 +179,33 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     final label = _isReimbursement
         ? 'bukti pembayaran (struk/nota/foto)'
         : 'bukti penggunaan uang kantor';
-    final f = await _pickAnyFile(label);
-    if (f != null) setState(() => _anggaranFile = f);
+    final selected = await _pickAnyFiles(label);
+    if (selected.isEmpty) return;
+
+    final uniqueFiles = selected.where(
+      (candidate) => !_anggaranFiles.any(
+        (existing) =>
+            existing.name == candidate.name && existing.size == candidate.size,
+      ),
+    );
+    final merged = [..._anggaranFiles, ...uniqueFiles];
+    if (merged.length > 5) {
+      _snack('Maksimal 5 lampiran dalam satu laporan', err: true);
+      return;
+    }
+    final totalSize = merged.fold<int>(0, (sum, file) => sum + file.size);
+    if (totalSize > 15 * 1024 * 1024) {
+      _snack('Total seluruh lampiran maksimal 15MB', err: true);
+      return;
+    }
+    setState(() {
+      _anggaranFiles
+        ..clear()
+        ..addAll(merged);
+    });
   }
 
-  Future<_PickedFile?> _pickAnyFile(String label) async {
+  Future<List<_PickedFile>> _pickAnyFiles(String label) async {
     final source = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -266,7 +288,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
       ),
     );
 
-    if (source == null) return null;
+    if (source == null) return const [];
 
     try {
       if (source == 'camera' && !kIsWeb) {
@@ -276,53 +298,62 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
           maxHeight: 1080,
           imageQuality: 85,
         );
-        if (img == null) return null;
+        if (img == null) return const [];
         final bytes = await img.readAsBytes();
-        if (!_validateSize(img.name, bytes.length)) return null;
-        return _PickedFile(
-          name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
-          bytes: bytes,
-          size: bytes.length,
-        );
+        if (!_validateSize(img.name, bytes.length)) return const [];
+        return [
+          _PickedFile(
+            name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
+            bytes: bytes,
+            size: bytes.length,
+          ),
+        ];
       }
 
       if (source == 'gallery') {
-        final img = await ImagePicker().pickImage(
-          source: ImageSource.gallery,
+        final images = await ImagePicker().pickMultiImage(
           maxWidth: 1920,
           maxHeight: 1080,
           imageQuality: 85,
         );
-        if (img == null) return null;
-        final bytes = await img.readAsBytes();
-        if (!_validateSize(img.name, bytes.length)) return null;
-        return _PickedFile(
-          name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
-          bytes: bytes,
-          size: bytes.length,
-        );
+        final result = <_PickedFile>[];
+        for (final img in images) {
+          final bytes = await img.readAsBytes();
+          if (!_validateSize(img.name, bytes.length)) continue;
+          result.add(
+            _PickedFile(
+              name: img.name.isNotEmpty ? img.name : img.path.split('/').last,
+              bytes: bytes,
+              size: bytes.length,
+            ),
+          );
+        }
+        return result;
       }
 
       final r = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
-        allowMultiple: false,
+        allowMultiple: true,
         withData: true,
       );
-      if (r == null || r.files.isEmpty) return null;
-      final f = r.files.first;
-      final bytes =
-          f.bytes ??
-          (f.path != null ? await File(f.path!).readAsBytes() : null);
-      if (bytes == null) {
-        _snack('Tidak dapat membaca file', err: true);
-        return null;
+      if (r == null || r.files.isEmpty) return const [];
+      final result = <_PickedFile>[];
+      for (final f in r.files) {
+        final bytes =
+            f.bytes ??
+            (f.path != null ? await File(f.path!).readAsBytes() : null);
+        if (bytes == null) {
+          _snack('${f.name}: tidak dapat membaca file', err: true);
+          continue;
+        }
+        if (!_validateSize(f.name, bytes.length)) continue;
+        result.add(_PickedFile(name: f.name, bytes: bytes, size: bytes.length));
       }
-      if (!_validateSize(f.name, bytes.length)) return null;
-      return _PickedFile(name: f.name, bytes: bytes, size: bytes.length);
+      return result;
     } catch (e) {
       _snack('Gagal memilih file: $e', err: true);
-      return null;
+      return const [];
     }
   }
 
@@ -396,6 +427,15 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
       _snack('Penyelesaian wajib diisi', err: true);
       return;
     }
+    if (_adaBiaya && _anggaranFiles.isEmpty) {
+      _snack(
+        _isReimbursement
+            ? 'Bukti pembayaran wajib dipilih'
+            : 'Bukti penggunaan uang kantor wajib dipilih',
+        err: true,
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
     try {
@@ -405,6 +445,12 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
         hasilPerjalanan: _hasilCtrl.text.trim(),
         laporanKepada: _kepadaCtrl.text.trim(),
         penyelesaian: _penyelesaianCtrl.text.trim(),
+        anggaranFiles: _anggaranFiles
+            .map(
+              (file) =>
+                  DlLaporanAttachment(name: file.name, bytes: file.bytes!),
+            )
+            .toList(),
       );
       if (res.success) {
         _snack(
@@ -670,9 +716,10 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                     : 'Bukti pengeluaran uang yang telah diberikan kantor',
                 icon: Icons.receipt_outlined,
                 color: const Color(0xFF10B981),
-                file: _anggaranFile,
+                files: _anggaranFiles,
                 onTap: _pickAnggaran,
-                onRemove: () => setState(() => _anggaranFile = null),
+                onRemove: (index) =>
+                    setState(() => _anggaranFiles.removeAt(index)),
                 isRequired: true,
               ),
             ],
@@ -945,9 +992,9 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
     required String description,
     required IconData icon,
     required Color color,
-    required _PickedFile? file,
+    required List<_PickedFile> files,
     required VoidCallback onTap,
-    required VoidCallback onRemove,
+    required ValueChanged<int> onRemove,
     bool isRequired = false,
   }) {
     return Container(
@@ -955,10 +1002,10 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: file != null
+          color: files.isNotEmpty
               ? color.withOpacity(0.5)
               : const Color(0xFFE5E7EB),
-          width: file != null ? 2 : 1,
+          width: files.isNotEmpty ? 2 : 1,
         ),
       ),
       child: Column(
@@ -1030,7 +1077,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                     ],
                   ),
                 ),
-                if (file != null)
+                if (files.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
@@ -1044,7 +1091,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
           ),
           Padding(
             padding: const EdgeInsets.all(14),
-            child: file == null
+            child: files.isEmpty
                 ? GestureDetector(
                     onTap: onTap,
                     child: Container(
@@ -1064,7 +1111,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Tap untuk pilih file',
+                            'Tap untuk pilih satu atau beberapa file',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -1072,7 +1119,7 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                             ),
                           ),
                           Text(
-                            'PDF, JPG, atau PNG (Max 10MB)',
+                            'Maks. 5 file, 10MB/file, total 15MB',
                             style: TextStyle(
                               fontSize: 11,
                               color: Colors.grey[500],
@@ -1082,7 +1129,27 @@ class _DlLaporanScreenState extends State<DlLaporanScreen> {
                       ),
                     ),
                   )
-                : _filePreview(file, color, onTap, onRemove),
+                : Column(
+                    children: [
+                      for (var i = 0; i < files.length; i++) ...[
+                        _filePreview(files[i], color, onTap, () => onRemove(i)),
+                        if (i != files.length - 1) const SizedBox(height: 8),
+                      ],
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: files.length >= 5 ? null : onTap,
+                          icon: const Icon(Icons.add_photo_alternate_outlined),
+                          label: Text(
+                            files.length >= 5
+                                ? 'Maksimal 5 lampiran'
+                                : 'Tambah foto atau file',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         ],
       ),

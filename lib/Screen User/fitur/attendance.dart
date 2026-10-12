@@ -41,13 +41,18 @@ class AbsensiScreen extends StatefulWidget {
 }
 
 class _AbsensiScreenState extends State<AbsensiScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   // Camera
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
   bool _isCameraInitialized = false;
+  String? _cameraError;
   File? _capturedImage;
   Uint8List? _capturedImageBytes;
+  int _selectedCameraIndex = 0;
+  FlashMode _flashMode = FlashMode.off;
+  Offset? _focusPoint;
+  Timer? _focusIndicatorTimer;
 
   // State
   String _locationInfo = "Memuat lokasi...";
@@ -87,6 +92,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _isCheckOut = widget.isCheckOut;
 
     _pulseController = AnimationController(
@@ -129,7 +135,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 10));
 
@@ -181,12 +191,29 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _locationTimer?.cancel();
     _positionStream?.cancel();
     _cameraController?.dispose();
     _autoRetryTimer?.cancel();
+    _focusIndicatorTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      controller.dispose();
+      _cameraController = null;
+      if (mounted) setState(() => _isCameraInitialized = false);
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera(cameraIndex: _selectedCameraIndex);
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -205,15 +232,35 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     }
   }
 
-  Future<void> _initializeCamera() async {
+  Future<void> _initializeCamera({int? cameraIndex}) async {
     try {
+      if (mounted) setState(() => _cameraError = null);
       _cameras = await availableCameras();
-      if (_cameras == null || _cameras!.isEmpty) return;
+      if (_cameras == null || _cameras!.isEmpty) {
+        if (mounted) {
+          setState(
+            () => _cameraError = 'Kamera tidak ditemukan pada perangkat.',
+          );
+        }
+        return;
+      }
 
-      CameraDescription camera = _cameras!.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => _cameras!.first,
-      );
+      if (cameraIndex == null) {
+        _selectedCameraIndex = _cameras!.indexWhere(
+          (c) => c.lensDirection == CameraLensDirection.front,
+        );
+        if (_selectedCameraIndex < 0) _selectedCameraIndex = 0;
+      } else {
+        _selectedCameraIndex = cameraIndex
+            .clamp(0, _cameras!.length - 1)
+            .toInt();
+      }
+
+      final oldController = _cameraController;
+      _cameraController = null;
+      await oldController?.dispose();
+
+      final camera = _cameras![_selectedCameraIndex];
 
       _cameraController = CameraController(
         camera,
@@ -228,14 +275,75 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
       if (_cameraController!.value.isInitialized) {
         try {
+          await _cameraController!.setFlashMode(FlashMode.off);
           await _cameraController!.setExposureMode(ExposureMode.auto);
           await _cameraController!.setFocusMode(FocusMode.auto);
         } catch (_) {}
       }
-      if (mounted) setState(() => _isCameraInitialized = true);
+      if (mounted) {
+        setState(() {
+          _flashMode = FlashMode.off;
+          _focusPoint = null;
+          _isCameraInitialized = true;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() => _isCameraInitialized = false);
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = false;
+          _cameraError = e is CameraException
+              ? 'Kamera gagal dibuka (${e.code}). Periksa izin kamera.'
+              : 'Kamera gagal dibuka. Coba tutup aplikasi kamera lain.';
+        });
+      }
     }
+  }
+
+  Future<void> _focusCamera(TapDownDetails details, Size previewSize) async {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    final point = Offset(
+      (details.localPosition.dx / previewSize.width).clamp(0.0, 1.0),
+      (details.localPosition.dy / previewSize.height).clamp(0.0, 1.0),
+    );
+
+    setState(() => _focusPoint = details.localPosition);
+    _focusIndicatorTimer?.cancel();
+    _focusIndicatorTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _focusPoint = null);
+    });
+
+    try {
+      await controller.setFocusPoint(point);
+      await controller.setExposurePoint(point);
+      await controller.setFocusMode(FocusMode.auto);
+    } catch (_) {
+      // Sebagian browser tidak mendukung focus point. Preview tetap berfungsi.
+    }
+  }
+
+  Future<void> _toggleFlash() async {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+    final next = _flashMode == FlashMode.off ? FlashMode.torch : FlashMode.off;
+    try {
+      await controller.setFlashMode(next);
+      if (mounted) setState(() => _flashMode = next);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lampu tidak didukung kamera ini.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras == null || _cameras!.length < 2 || _isProcessingFace) return;
+    if (mounted) setState(() => _isCameraInitialized = false);
+    final next = (_selectedCameraIndex + 1) % _cameras!.length;
+    await _initializeCamera(cameraIndex: next);
   }
 
   Future<void> _captureImageFromCamera({bool isAutoRetry = false}) async {
@@ -284,7 +392,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 10));
 
@@ -357,7 +469,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 10));
 
@@ -1232,30 +1348,43 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Widget _buildWebLiveCameraView() {
     if (_isCameraInitialized && _cameraController != null) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          CameraPreview(_cameraController!),
-          RealtimeFaceGuide(
-            isProcessing: _isProcessingFace,
-            showRegistrationInfo: !_isFaceRegistered,
-            isCheckOut: _isCheckOut,
-          ),
-        ],
-      );
+      return _buildInteractiveCamera();
     }
+    return _buildCameraUnavailableView();
+  }
+
+  Widget _buildCameraUnavailableView() {
     return Container(
       color: Colors.black87,
-      child: const Center(
+      child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-            SizedBox(height: 16),
+            if (_cameraError == null)
+              const CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 3,
+              )
+            else
+              const Icon(Icons.videocam_off, color: Colors.white, size: 42),
+            const SizedBox(height: 16),
             Text(
-              "Mempersiapkan kamera...",
-              style: TextStyle(color: Colors.white, fontSize: 16),
+              _cameraError ?? 'Mempersiapkan kamera...',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
+            if (_cameraError != null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () =>
+                    _initializeCamera(cameraIndex: _selectedCameraIndex),
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                label: const Text(
+                  'Coba lagi',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1686,35 +1815,124 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Widget _buildLiveCameraView() {
     if (_isCameraInitialized && _cameraController != null) {
-      return Stack(
-        children: [
-          SizedBox(
-            width: double.infinity,
-            height: double.infinity,
-            child: CameraPreview(_cameraController!),
-          ),
-          RealtimeFaceGuide(
-            isProcessing: _isProcessingFace,
-            showRegistrationInfo: !_isFaceRegistered,
-            isCheckOut: _isCheckOut,
-          ),
-        ],
-      );
+      return _buildInteractiveCamera();
     }
-    return Container(
-      color: Colors.black87,
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-            SizedBox(height: 16),
-            Text(
-              "Mempersiapkan kamera...",
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-          ],
-        ),
+    return _buildCameraUnavailableView();
+  }
+
+  Widget _buildInteractiveCamera() {
+    final controller = _cameraController!;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final previewSize = Size(constraints.maxWidth, constraints.maxHeight);
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: _isProcessingFace
+              ? null
+              : (details) => _focusCamera(details, previewSize),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Cover mempertahankan aspect ratio asli kamera. Preview tidak
+              // lagi gepeng/melebar pada rasio layar atau webcam yang berbeda.
+              ClipRect(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: controller.value.previewSize?.height ?? 720.0,
+                    height: controller.value.previewSize?.width ?? 1280.0,
+                    child: CameraPreview(controller),
+                  ),
+                ),
+              ),
+              RealtimeFaceGuide(
+                isProcessing: _isProcessingFace,
+                showRegistrationInfo: !_isFaceRegistered,
+                isCheckOut: _isCheckOut,
+              ),
+              if (_focusPoint != null)
+                Positioned(
+                  left: _focusPoint!.dx - 24,
+                  top: _focusPoint!.dy - 24,
+                  child: IgnorePointer(
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.amber, width: 2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.add, color: Colors.amber, size: 18),
+                      ),
+                    ),
+                  ),
+                ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Row(
+                  children: [
+                    _cameraControlButton(
+                      icon: _flashMode == FlashMode.off
+                          ? Icons.flash_off
+                          : Icons.flash_on,
+                      tooltip: 'Lampu kamera',
+                      onPressed: _toggleFlash,
+                    ),
+                    if ((_cameras?.length ?? 0) > 1) ...[
+                      const SizedBox(width: 8),
+                      _cameraControlButton(
+                        icon: Icons.cameraswitch,
+                        tooltip: 'Ganti kamera',
+                        onPressed: _switchCamera,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (!_isProcessingFace)
+                const Positioned(
+                  left: 12,
+                  bottom: 12,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.all(Radius.circular(8)),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        child: Text(
+                          'Ketuk wajah untuk fokus',
+                          style: TextStyle(color: Colors.white, fontSize: 11),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _cameraControlButton({
+    required IconData icon,
+    required String tooltip,
+    required Future<void> Function() onPressed,
+  }) {
+    return Material(
+      color: Colors.black54,
+      shape: const CircleBorder(),
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: _isProcessingFace ? null : onPressed,
+        icon: Icon(icon, color: Colors.white),
       ),
     );
   }
