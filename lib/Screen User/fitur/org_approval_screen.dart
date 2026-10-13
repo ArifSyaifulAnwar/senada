@@ -2131,6 +2131,22 @@ class _DetailSheetState extends State<_DetailSheet> {
   TimeOffModel? _fullTimeOff;
   bool _loadingFullData = false;
 
+  List<Map<String, dynamic>> get _laporanPaymentFiles => _fileItems
+      .where(
+        (f) =>
+            (f['fileType']?.toString().toLowerCase() ?? '') ==
+            'dl_bukti_pembayaran',
+      )
+      .toList();
+
+  List<Map<String, dynamic>> get _submissionFiles => _fileItems
+      .where(
+        (f) =>
+            (f['fileType']?.toString().toLowerCase() ?? '') !=
+            'dl_bukti_pembayaran',
+      )
+      .toList();
+
   @override
   void initState() {
     super.initState();
@@ -2142,7 +2158,8 @@ class _DetailSheetState extends State<_DetailSheet> {
   }
 
   Future<void> _loadFullData() async {
-    if (widget.item.pendingType != PendingType.headVerify &&
+    if (widget.item.pendingType != PendingType.finance &&
+        widget.item.pendingType != PendingType.headVerify &&
         widget.item.pendingType != PendingType.hrdVerify &&
         widget.item.pendingType != PendingType.transfer) {
       return;
@@ -2166,7 +2183,8 @@ class _DetailSheetState extends State<_DetailSheet> {
   }
 
   Widget _buildLaporanSection(Color c) {
-    if (widget.item.pendingType != PendingType.headVerify &&
+    if (widget.item.pendingType != PendingType.finance &&
+        widget.item.pendingType != PendingType.headVerify &&
         widget.item.pendingType != PendingType.hrdVerify &&
         widget.item.pendingType != PendingType.transfer) {
       return const SizedBox.shrink();
@@ -2180,7 +2198,9 @@ class _DetailSheetState extends State<_DetailSheet> {
             (ft.penyelesaian?.isNotEmpty == true));
     final hasFileLaporan =
         ft != null &&
-        (ft.laporanFileName != null || ft.anggaranFileName != null);
+        (ft.laporanFileName != null ||
+            ft.anggaranFileName != null ||
+            _laporanPaymentFiles.isNotEmpty);
     final laporanSubmitted = ft != null && ft.laporanSubmittedAt != null;
 
     return Column(
@@ -2232,7 +2252,18 @@ class _DetailSheetState extends State<_DetailSheet> {
                 accentColor: c,
               ),
             ],
-            if (ft.anggaranFileName != null) ...[
+            if (_loadingFiles)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            else if (_laporanPaymentFiles.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              ..._laporanPaymentFiles.map(
+                (file) => _buildSubmittedPaymentFileRow(file, c),
+              ),
+            ]
+            else if (ft.anggaranFileName != null) ...[
               const SizedBox(height: 8),
               _buildLaporanFileRow(
                 icon: Icons.receipt_outlined,
@@ -2248,6 +2279,105 @@ class _DetailSheetState extends State<_DetailSheet> {
           ],
         ]),
       ],
+    );
+  }
+
+  Widget _buildSubmittedPaymentFileRow(
+    Map<String, dynamic> file,
+    Color accentColor,
+  ) {
+    final fileId = (file['id'] as num?)?.toInt() ?? 0;
+    final fileName = file['fileName']?.toString() ?? 'Bukti pembayaran';
+    final fileSize = (file['fileSize'] as num?)?.toInt();
+    final ext = fileName.contains('.')
+        ? fileName.split('.').last.toLowerCase()
+        : '';
+    final isImage = ['jpg', 'jpeg', 'png', 'webp'].contains(ext);
+    final isPdf = ext == 'pdf';
+    final sizeLabel = fileSize == null
+        ? ''
+        : fileSize >= 1024 * 1024
+        ? '${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB'
+        : '${(fileSize / 1024).toStringAsFixed(0)} KB';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFECFDF5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFA7F3D0)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              isPdf ? Icons.picture_as_pdf_rounded : Icons.receipt_long_rounded,
+              color: const Color(0xFF059669),
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  [
+                    if (ext.isNotEmpty) ext.toUpperCase(),
+                    if (sizeLabel.isNotEmpty) sizeLabel,
+                  ].join(' • '),
+                  style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                ),
+              ],
+            ),
+          ),
+          if (isImage || isPdf)
+            IconButton(
+              icon: Icon(
+                Icons.visibility_rounded,
+                size: 20,
+                color: accentColor,
+              ),
+              onPressed: () => _previewFile(
+                fileId,
+                fileName,
+                isImg: isImage,
+                isPdf: isPdf,
+              ),
+              tooltip: 'Preview',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: Icon(
+              Icons.download_rounded,
+              size: 20,
+              color: accentColor,
+            ),
+            onPressed: () => _downloadFile(fileId, fileName),
+            tooltip: 'Download',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3340,7 +3470,7 @@ class _DetailSheetState extends State<_DetailSheet> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    else if (_fileItems.isEmpty)
+                    else if (_submissionFiles.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Text(
@@ -3352,7 +3482,7 @@ class _DetailSheetState extends State<_DetailSheet> {
                         ),
                       )
                     else
-                      ..._fileItems.map((f) {
+                      ..._submissionFiles.map((f) {
                         final fId = (f['id'] as num).toInt();
                         final fName = f['fileName']?.toString() ?? '';
                         final fSize = (f['fileSize'] as num?)?.toInt();

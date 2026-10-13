@@ -380,8 +380,10 @@ BEGIN
  SET NOCOUNT ON; SET XACT_ABORT ON;
  BEGIN TRY
   BEGIN TRANSACTION;
-  DECLARE @current NVARCHAR(30),@assigned VARCHAR(50),@owner VARCHAR(50),@companyId INT;
-  SELECT @current=status,@assigned=finance_userid,@owner=userid
+  DECLARE @current NVARCHAR(30),@assigned VARCHAR(50),@owner VARCHAR(50),@companyId INT,
+          @laporanStatus NVARCHAR(30),@laporanHrdStatus NVARCHAR(30),@nextStatus NVARCHAR(30);
+  SELECT @current=status,@assigned=finance_userid,@owner=userid,
+         @laporanStatus=laporan_status,@laporanHrdStatus=laporan_hrd_status
   FROM dbo.udt_timeoff WITH(UPDLOCK,HOLDLOCK)
   WHERE id=@id AND jenis_timeoff=N'Dinas Luar';
   IF @current IS NULL THROW 50430,'Pengajuan Dinas Luar tidak ditemukan.',1;
@@ -399,12 +401,113 @@ BEGIN
     finance_approved_at=GETDATE(),finance_rejection_reason=@rejection_reason,status=N'Revisi',
     rejection_reason=@rejection_reason,updated_at=GETDATE() WHERE id=@id;
   ELSE
+  BEGIN
+   /* Data legacy mungkin sudah menyelesaikan laporan sebelum tahap Finance tersedia. */
+   SET @nextStatus=CASE
+    WHEN @laporanStatus=N'Submitted' AND @laporanHrdStatus=N'Approved' THEN N'Menunggu Transfer'
+    ELSE N'Menunggu Laporan'
+   END;
    UPDATE dbo.udt_timeoff SET finance_approval_status=N'Approved',finance_approved_by=@finance_userid,
-    finance_approved_at=GETDATE(),finance_rejection_reason=NULL,status=N'Menunggu Laporan',updated_at=GETDATE()
+    finance_approved_at=GETDATE(),finance_rejection_reason=NULL,status=@nextStatus,updated_at=GETDATE()
    WHERE id=@id;
+  END;
   COMMIT;
-  SELECT 1 success,CASE WHEN @status='Approved' THEN N'Disetujui Finance. Laporan sekarang dapat diunggah.'
+  SELECT 1 success,CASE WHEN @status='Approved' AND @nextStatus=N'Menunggu Transfer'
+   THEN N'Disetujui Finance. Silakan upload bukti transfer pembayaran.'
+   WHEN @status='Approved' THEN N'Disetujui Finance. Laporan sekarang dapat diunggah.'
    ELSE N'Dikembalikan untuk revisi keuangan.' END message;
+ END TRY
+ BEGIN CATCH
+  IF @@TRANCOUNT>0 ROLLBACK;
+  SELECT 0 success,N'Error: '+ERROR_MESSAGE() message;
+ END CATCH;
+END;
+GO
+
+/* ========================================================================== */
+/* VERIFIKASI LAPORAN HRD: data legacy berbiaya tetap wajib melewati Finance */
+/* ========================================================================== */
+CREATE OR ALTER PROCEDURE dbo.udp_timeoff_dl_hrd_verify_laporan
+ @id INT,@hrd_userid VARCHAR(50),@status VARCHAR(20),@rejection_reason NVARCHAR(500)=NULL
+AS
+BEGIN
+ SET NOCOUNT ON; SET XACT_ABORT ON;
+ BEGIN TRY
+  BEGIN TRANSACTION;
+  DECLARE @current NVARCHAR(30),@owner VARCHAR(50),@companyId INT,@rabType NVARCHAR(100),
+          @finance VARCHAR(50),@financeStatus NVARCHAR(30),@nextStatus NVARCHAR(30);
+
+  SELECT @current=t.status,@owner=t.userid,@rabType=NULLIF(LTRIM(RTRIM(t.rab_type)),''),
+         @finance=NULLIF(LTRIM(RTRIM(t.finance_userid)),''),@financeStatus=t.finance_approval_status
+  FROM dbo.udt_timeoff t WITH(UPDLOCK,HOLDLOCK)
+  WHERE t.id=@id AND t.jenis_timeoff=N'Dinas Luar';
+
+  IF @current IS NULL THROW 50460,'Pengajuan Dinas Luar tidak ditemukan.',1;
+  IF @current<>N'Pending Laporan HRD' THROW 50461,'Laporan belum berada pada tahap verifikasi HRD.',1;
+  SELECT TOP(1) @companyId=company_id FROM dbo.udt_company_info_user WHERE userid=@owner;
+
+  IF NOT EXISTS(
+   SELECT 1 FROM dbo.udt_company_info_user ci
+   JOIN dbo.udt_users u ON u.userid=ci.userid
+   WHERE ci.userid=@hrd_userid AND ci.company_id=@companyId
+    AND u.active=1 AND ISNULL(u.deleted,0)=0
+    AND (UPPER(ISNULL(ci.organization,N'')) LIKE N'%HRD%'
+         OR UPPER(ISNULL(ci.job_position,N'')) LIKE N'%HRD%')
+    AND (UPPER(ISNULL(ci.job_position,N'')) LIKE N'%HEAD%'
+         OR UPPER(ISNULL(ci.job_level,N''))=N'HEAD'))
+   THROW 50462,'Verifikasi laporan hanya dapat dilakukan Head HRD perusahaan yang sama.',1;
+
+  IF @status NOT IN('Approved','Rejected') THROW 50463,'Status verifikasi tidak valid.',1;
+  IF @status='Rejected'
+  BEGIN
+   UPDATE dbo.udt_timeoff SET laporan_hrd_status=N'Rejected',laporan_hrd_approved_by=@hrd_userid,
+    laporan_hrd_approved_at=GETDATE(),laporan_hrd_rejection=@rejection_reason,
+    laporan_hrd_approval_status=N'Rejected',laporan_hrd_rejection_reason=@rejection_reason,
+    status=N'Laporan Ditolak',updated_at=GETDATE() WHERE id=@id;
+   COMMIT;
+   SELECT 1 success,N'Laporan ditolak oleh HRD.' message;
+   RETURN;
+  END;
+
+  IF @rabType IS NOT NULL AND ISNULL(@financeStatus,'')<>N'Approved'
+  BEGIN
+   IF @finance IS NULL
+   BEGIN
+    SELECT TOP(1) @finance=ci.userid
+    FROM dbo.udt_company_info_user ci
+    JOIN dbo.udt_users u ON u.userid=ci.userid
+    OUTER APPLY(
+     SELECT COUNT(1) direct_reports
+     FROM dbo.udt_company_info_user subordinate
+     WHERE subordinate.company_id=ci.company_id AND subordinate.manager=ci.userid
+    ) hierarchy
+    WHERE ci.company_id=@companyId AND u.active=1 AND ISNULL(u.deleted,0)=0
+     AND (UPPER(ISNULL(ci.organization,N'')) LIKE N'%FINANCE%'
+          OR UPPER(ISNULL(ci.job_position,N'')) LIKE N'%FINANCE%')
+    ORDER BY CASE WHEN UPPER(ISNULL(ci.job_position,N'')) LIKE N'%HEAD%'
+                       OR UPPER(ISNULL(ci.job_level,N''))=N'HEAD' THEN 0 ELSE 1 END,
+             hierarchy.direct_reports DESC,ci.userid;
+   END;
+   IF @finance IS NULL THROW 50464,'Head Finance perusahaan belum dikonfigurasi.',1;
+   SET @nextStatus=N'Pending Finance';
+  END
+  ELSE IF @rabType IS NOT NULL SET @nextStatus=N'Menunggu Transfer';
+  ELSE SET @nextStatus=N'Approved';
+
+  UPDATE dbo.udt_timeoff SET laporan_hrd_status=N'Approved',laporan_hrd_approved_by=@hrd_userid,
+   laporan_hrd_approved_at=GETDATE(),laporan_hrd_rejection=NULL,
+   laporan_hrd_approval_status=N'Approved',laporan_hrd_rejection_reason=NULL,
+   finance_userid=CASE WHEN @nextStatus=N'Pending Finance' THEN @finance ELSE finance_userid END,
+   finance_approval_status=CASE WHEN @nextStatus=N'Pending Finance' THEN N'Pending' ELSE finance_approval_status END,
+   status=@nextStatus,updated_at=GETDATE()
+  WHERE id=@id;
+
+  COMMIT;
+  SELECT 1 success,CASE WHEN @nextStatus=N'Pending Finance'
+   THEN N'Laporan disetujui HRD. Menunggu persetujuan Finance.'
+   WHEN @nextStatus=N'Menunggu Transfer'
+   THEN N'Laporan disetujui HRD. Menunggu Finance mengupload bukti transfer.'
+   ELSE N'Laporan disetujui HRD. Dinas Luar selesai.' END message;
  END TRY
  BEGIN CATCH
   IF @@TRANCOUNT>0 ROLLBACK;
@@ -586,6 +689,7 @@ SELECT p.name procedure_name,p.modify_date
 FROM sys.procedures p
 WHERE p.name IN('udp_timeoff_resolve_dl_first_approver','udp_timeoff_submit_with_policy',
  'udp_timeoff_org_review','udp_timeoff_hrd_review','udp_timeoff_finance_review',
- 'udp_timeoff_get_pending_finance','udp_timeoff_get_pending_hrd_verify')
+ 'udp_timeoff_dl_hrd_verify_laporan','udp_timeoff_get_pending_finance',
+ 'udp_timeoff_get_pending_hrd_verify')
 ORDER BY p.name;
 GO
