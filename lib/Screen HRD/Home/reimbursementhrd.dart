@@ -165,8 +165,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               _adminService.getAllReimbursementsAdmin(
                 currentUserId: _currentUserId!,
               ),
-              _adminService.getUsersWithReimbursements(),
-              _adminService.getAdminStatistics(),
+              _adminService.getUsersWithReimbursements(_currentUserId!),
+              _adminService.getAdminStatistics(currentUserId: _currentUserId!),
               HrdEmployeeService.getEmployeeList(
                 status: 'Aktif',
                 pageSize: 1000,
@@ -250,14 +250,16 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
     // Load users
     try {
-      users = await _adminService.getUsersWithReimbursements();
+      users = await _adminService.getUsersWithReimbursements(_currentUserId!);
     } catch (e) {
       _showErrorSnackBar('Gagal memuat data users: $e');
     }
 
     // Load statistics
     try {
-      statistics = await _adminService.getAdminStatistics();
+      statistics = await _adminService.getAdminStatistics(
+        currentUserId: _currentUserId!,
+      );
     } catch (e) {
       _showErrorSnackBar('Statistik menggunakan data default');
     }

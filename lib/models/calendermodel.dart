@@ -97,6 +97,17 @@ class CalendarEvent {
           source: 'company',
           displayDate: tanggal,
         );
+      case 'KERJA':
+        return CalendarEvent(
+          title: keterangan,
+          color: const Color(0xFFF59E0B),
+          type: 'company_kerja',
+          isHoliday: false,
+          isWfh: false,
+          isInfo: false,
+          source: 'company',
+          displayDate: tanggal,
+        );
       case 'INFO':
         return CalendarEvent(
           title: keterangan,
@@ -244,6 +255,8 @@ class CalendarEvent {
         return 'Libur Perusahaan';
       case 'company_wfh':
         return 'Work From Home';
+      case 'company_kerja':
+        return 'Tetap Masuk';
       case 'company_info':
         return 'Info / Pengumuman';
       default:
@@ -271,6 +284,8 @@ class CalendarEvent {
         return Icons.event_busy;
       case 'company_wfh':
         return Icons.home_work;
+      case 'company_kerja':
+        return Icons.work_history;
       case 'company_info':
         return Icons.info_outline;
       default:

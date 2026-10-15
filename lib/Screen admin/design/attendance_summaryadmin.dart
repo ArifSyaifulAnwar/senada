@@ -7,6 +7,7 @@ import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 const String apiUrl = '$baseURL/api/asn/file/summary/all/data';
 
@@ -61,7 +62,11 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
@@ -121,7 +126,9 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
           'Content-Type': 'application/json',
         },
       );
-      if (response.statusCode != 200) throw Exception('Gagal memuat data summary');
+      if (response.statusCode != 200) {
+        throw Exception('Gagal memuat data summary');
+      }
       final List<dynamic> raw = json.decode(response.body);
       final cards = raw.map((e) => AttendanceCardModel.fromJson(e)).toList();
       await _overrideTotalHari(cards);
@@ -133,7 +140,12 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -149,38 +161,57 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
       if (idx == -1) return;
 
       final periodsRes = await TimeOffService.getWorkPeriods();
-      if (!periodsRes.success || periodsRes.data == null || periodsRes.data!.isEmpty) return;
+      if (!periodsRes.success ||
+          periodsRes.data == null ||
+          periodsRes.data!.isEmpty) {
+        return;
+      }
 
       final today = DateTime.now();
       final todayNorm = DateTime(today.year, today.month, today.day);
 
-      final activePeriod = periodsRes.data!.cast<dynamic>().firstWhere(
-        (p) {
-          final s = DateTime(p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day);
-          final e = DateTime(p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day);
-          return !todayNorm.isBefore(s) && !todayNorm.isAfter(e);
-        },
-        orElse: () => null,
-      );
+      final activePeriod = periodsRes.data!.cast<dynamic>().firstWhere((p) {
+        final s = DateTime(
+          p.tanggalMulai.year,
+          p.tanggalMulai.month,
+          p.tanggalMulai.day,
+        );
+        final e = DateTime(
+          p.tanggalSelesai.year,
+          p.tanggalSelesai.month,
+          p.tanggalSelesai.day,
+        );
+        return !todayNorm.isBefore(s) && !todayNorm.isAfter(e);
+      }, orElse: () => null);
       if (activePeriod == null) return;
 
-      final start = DateTime(activePeriod.tanggalMulai.year, activePeriod.tanggalMulai.month, activePeriod.tanggalMulai.day);
-      final end   = DateTime(activePeriod.tanggalSelesai.year, activePeriod.tanggalSelesai.month, activePeriod.tanggalSelesai.day);
+      final start = DateTime(
+        activePeriod.tanggalMulai.year,
+        activePeriod.tanggalMulai.month,
+        activePeriod.tanggalMulai.day,
+      );
+      final end = DateTime(
+        activePeriod.tanggalSelesai.year,
+        activePeriod.tanggalSelesai.month,
+        activePeriod.tanggalSelesai.day,
+      );
       final totalDays = end.difference(start).inDays + 1;
 
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID');
+      if (userId == null || userId.isEmpty) return;
+      final events = await CompanyCalendarService.getByYear(
+        today.year,
+        userId: userId,
+      );
       int weekendDays = 0;
+      int holidayCount = 0;
       for (int i = 0; i < totalDays; i++) {
         final d = start.add(Duration(days: i));
-        if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) weekendDays++;
-      }
-
-      final events = await CompanyCalendarService.getByYear(today.year);
-      int holidayCount = 0;
-      for (final event in events) {
-        if (event.tipe != 'LIBUR') continue;
-        final d = DateTime(event.tanggal.year, event.tanggal.month, event.tanggal.day);
-        if (!d.isBefore(start) && !d.isAfter(end) &&
-            d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
+        if (!CompanyCalendarService.isHariLibur(d, events)) continue;
+        if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) {
+          weekendDays++;
+        } else {
           holidayCount++;
         }
       }
@@ -188,13 +219,13 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
       final workDays = totalDays - weekendDays - holidayCount;
 
       // Simpan untuk dialog info
-      _calcTotal    = totalDays;
+      _calcTotal = totalDays;
       _calcWeekends = weekendDays;
       _calcHolidays = holidayCount;
       _calcWorkDays = workDays;
 
       cards[idx].mainText = '$workDays';
-      cards[idx].subText  = 'Hari Kerja';
+      cards[idx].subText = 'Hari Kerja';
     } catch (_) {
       // Gagal override — biarkan nilai API tetap tampil
     }
@@ -205,7 +236,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
     if (token == null) throw Exception('Gagal mendapatkan token');
     final response = await http.post(
       Uri.parse(apiUrl),
-      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
     );
     if (response.statusCode == 200) {
       final List<dynamic> data = json.decode(response.body);
@@ -266,8 +300,6 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
       }
     }
   }
-
-
 
   void _showEditDialog(BuildContext context, AttendanceCardModel model) {
     switch (model.title.toLowerCase()) {
@@ -675,8 +707,18 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
 
   Widget _infoCol(String value, String label) => Column(
     children: [
-      Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
-      Text(label, style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
+      Text(
+        value,
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF374151),
+        ),
+      ),
+      Text(
+        label,
+        style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+      ),
     ],
   );
 
@@ -779,7 +821,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Gagal memuat data', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+            Text(
+              'Gagal memuat data',
+              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+            ),
             const SizedBox(height: 8),
             TextButton.icon(
               onPressed: _fetchData,
@@ -791,7 +836,9 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
       );
     }
 
-    if (_cards.isEmpty) return const Center(child: Text('Tidak ada data summary'));
+    if (_cards.isEmpty) {
+      return const Center(child: Text('Tidak ada data summary'));
+    }
 
     final cards = _cards;
 
@@ -799,7 +846,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
     if (isWeb) {
       final List<Widget> rows = [];
       for (int i = 0; i < cards.length; i += 4) {
-        final rowCards = cards.sublist(i, i + 4 > cards.length ? cards.length : i + 4);
+        final rowCards = cards.sublist(
+          i,
+          i + 4 > cards.length ? cards.length : i + 4,
+        );
         rows.add(
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -817,7 +867,10 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
         );
         if (i + 4 < cards.length) rows.add(const SizedBox(height: 12));
       }
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows,
+      );
     }
 
     // Mobile: layout 2 kolom
@@ -826,7 +879,9 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
       child: Column(
         children: List.generate((cards.length / 2).ceil(), (index) {
           final first = cards[index * 2];
-          final second = (index * 2 + 1 < cards.length) ? cards[index * 2 + 1] : null;
+          final second = (index * 2 + 1 < cards.length)
+              ? cards[index * 2 + 1]
+              : null;
           return Padding(
             padding: EdgeInsets.only(bottom: cardSpacing),
             child: Row(

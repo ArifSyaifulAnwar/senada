@@ -55,19 +55,24 @@ class _HalamanAjukanReimbursementState
   void initState() {
     super.initState();
     _initializeNotifications();
-    _loadCategories();
-    _loadFinanceUsers();
     if (_isEditMode) _prefillFromExistingItem();
-    _loadUserData().then((_) {
-      if (_isEditMode) _loadExistingAttachments();
-    });
+    _initializePage();
+  }
+
+  Future<void> _initializePage() async {
+    final hasUser = await _loadUserData();
+    if (!hasUser || !mounted) return;
+
+    await Future.wait([_loadCategories(), _loadFinanceUsers()]);
+    if (_isEditMode && mounted) await _loadExistingAttachments();
   }
 
   void _prefillFromExistingItem() {
     final item = widget.existingItem!;
     _judulController.text = item.title;
-    _jumlahController.text = item.amount
-        .toStringAsFixed(item.amount % 1 == 0 ? 0 : 2);
+    _jumlahController.text = item.amount.toStringAsFixed(
+      item.amount % 1 == 0 ? 0 : 2,
+    );
     _keteranganController.text = item.description ?? '';
     _selectedCategory = item.category;
     _selectedDate = item.expenseDate;
@@ -82,7 +87,7 @@ class _HalamanAjukanReimbursementState
     try {
       final attachments = await _reimbursementService.getAttachments(
         reimbursementId: widget.existingItem!.id,
-        userId: _currentUserId,
+        userId: _currentUserId!,
       );
       setState(() {
         _existingAttachments = attachments;
@@ -111,13 +116,18 @@ class _HalamanAjukanReimbursementState
   }
 
   Future<void> _loadFinanceUsers() async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
     try {
-      final users = await _reimbursementService.getFinanceUsers();
+      final users = await _reimbursementService.getFinanceUsers(userId);
+      if (!mounted) return;
       setState(() {
         _financeUsers = users;
         _isLoadingFinanceUsers = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoadingFinanceUsers = false);
       _showErrorSnackBar('Gagal memuat daftar Finance');
     }
@@ -217,7 +227,11 @@ class _HalamanAjukanReimbursementState
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
@@ -711,18 +725,25 @@ class _HalamanAjukanReimbursementState
     return formatter.format(amount).replaceAll(',', '.');
   }
 
-  Future<void> _loadUserData() async {
+  Future<bool> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     _currentUserId = prefs.getString('UserID');
     if (_currentUserId == null) {
+      if (!mounted) return false;
       _showErrorSnackBar('User ID tidak ditemukan');
       Navigator.pop(context);
+      return false;
     }
+    return true;
   }
 
   Future<void> _loadCategories() async {
+    final userId = _currentUserId;
+    if (userId == null) return;
+
     try {
-      final categories = await _reimbursementService.getCategories();
+      final categories = await _reimbursementService.getCategories(userId);
+      if (!mounted) return;
       setState(() {
         _categories = categories;
         final hasExistingCategory =
@@ -745,6 +766,7 @@ class _HalamanAjukanReimbursementState
         _isLoadingCategories = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoadingCategories = false;
       });

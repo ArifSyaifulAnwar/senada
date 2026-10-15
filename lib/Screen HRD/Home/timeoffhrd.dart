@@ -161,6 +161,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
             TimeOffAdminService.getAllTimeOffs(adminId: _currentUserId!),
             TimeOffAdminService.getUsersWithTimeOffs(adminId: _currentUserId!),
             TimeOffAdminService.getAdminStatistics(
+              adminId: _currentUserId!,
               year: _activePeriod?.tanggalMulai.year ?? DateTime.now().year,
               month: _activePeriod?.tanggalMulai.month ?? DateTime.now().month,
             ),

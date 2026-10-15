@@ -84,6 +84,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
 
     final data = await CompanyCalendarService.getWorkPeriodsByYear(
       _selectedYear,
+      userId: _hrdUserId ?? '',
       forceRefresh: true,
     );
 
@@ -99,7 +100,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     setState(() => _isLoading = true);
     final events = await CompanyCalendarService.getByYear(
       _selectedYear,
-      userId: _hrdUserId,
+      userId: _hrdUserId ?? '',
       forceRefresh: true,
     );
     if (mounted) {
@@ -138,6 +139,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return const Color(0xFFEF4444);
       case 'WFH':
         return const Color(0xFF10B981);
+      case 'KERJA':
+        return const Color(0xFFF59E0B);
       case 'INFO':
         return const Color(0xFF3B82F6);
       case 'ULTAH':
@@ -153,6 +156,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return Icons.beach_access_rounded;
       case 'WFH':
         return Icons.home_work_rounded;
+      case 'KERJA':
+        return Icons.work_history_rounded;
       case 'INFO':
         return Icons.info_outline;
       case 'ULTAH':
@@ -168,6 +173,8 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
         return 'Hari Libur';
       case 'WFH':
         return 'Work From Home';
+      case 'KERJA':
+        return 'Tetap Masuk';
       case 'INFO':
         return 'Info / Pengumuman';
       case 'ULTAH':
@@ -213,26 +220,14 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
     final totalDays = end.difference(start).inDays + 1;
 
     int weekendDays = 0;
+    int holidayCount = 0;
     for (int i = 0; i < totalDays; i++) {
       final d = start.add(Duration(days: i));
+      if (!CompanyCalendarService.isHariLibur(d, _events)) continue;
       if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) {
         weekendDays++;
-      }
-    }
-
-    // Hitung LIBUR yang jatuh di hari kerja saja (weekend sudah dikurangi)
-    int holidayCount = 0;
-    for (final event in _events) {
-      if (event.tipe != 'LIBUR') continue;
-      final d = DateTime(
-        event.tanggal.year,
-        event.tanggal.month,
-        event.tanggal.day,
-      );
-      if (!d.isBefore(start) && !d.isAfter(end)) {
-        if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
-          holidayCount++;
-        }
+      } else {
+        holidayCount++;
       }
     }
 
@@ -385,7 +380,7 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                   SizedBox(
                     width: 296,
                     child: Row(
-                      children: ['LIBUR', 'WFH', 'INFO'].map((tipe) {
+                      children: ['LIBUR', 'KERJA', 'WFH', 'INFO'].map((tipe) {
                         final sel = selectedTipe == tipe;
                         return Expanded(
                           child: GestureDetector(
@@ -1928,10 +1923,11 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
                 visualDensity: VisualDensity.compact,
               ),
               const Spacer(),
-              // Filter chips: SEMUA | LIBUR | WFH | INFO | ULTAH
+              // Filter chips per kebijakan/event perusahaan.
               ...[
                 ('SEMUA', Colors.grey),
                 ('LIBUR', const Color(0xFFEF4444)),
+                ('KERJA', const Color(0xFFF59E0B)),
                 ('WFH', const Color(0xFF10B981)),
                 ('INFO', const Color(0xFF3B82F6)),
                 ('ULTAH', const Color(0xFFEC4899)),
@@ -2234,7 +2230,10 @@ class _HrdCalendarScreenState extends State<HrdCalendarScreen>
   Future<void> _previewCalendarAttachment(CompanyCalendarEvent event) async {
     _snack('Membuka lampiran...');
 
-    final bytes = await CompanyCalendarService.downloadAttachment(event.id);
+    final bytes = await CompanyCalendarService.downloadAttachment(
+      event.id,
+      viewerUserId: _hrdUserId ?? '',
+    );
     if (bytes == null || bytes.isEmpty) {
       _snack('Gagal memuat lampiran', err: true);
       return;

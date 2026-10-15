@@ -41,6 +41,7 @@ class CompanyCalendarEvent {
       );
 
   bool get isLibur => tipe == 'LIBUR';
+  bool get isKerja => tipe == 'KERJA';
   bool get isWfh => tipe == 'WFH';
   bool get isInfo => tipe == 'INFO';
   // Entri ulang tahun dihitung live oleh backend, bukan disimpan di DB —
@@ -55,6 +56,8 @@ class CompanyCalendarEvent {
         return const Color(0xFFEF4444);
       case 'WFH':
         return const Color(0xFF10B981);
+      case 'KERJA':
+        return const Color(0xFFF59E0B);
       case 'INFO':
         return const Color(0xFF3B82F6);
       case 'ULTAH':
@@ -70,6 +73,8 @@ class CompanyCalendarEvent {
         return 'Hari Libur';
       case 'WFH':
         return 'Work From Home';
+      case 'KERJA':
+        return 'Tetap Masuk';
       case 'INFO':
         return 'Info / Pengumuman';
       case 'ULTAH':
@@ -139,7 +144,10 @@ class WorkPeriod {
 }
 
 class CompanyCalendarService {
-  static final Map<int, List<CompanyCalendarEvent>> _cache = {};
+  // Cache harus dipisahkan per user/tenant. Cache berdasarkan tahun saja dapat
+  // menampilkan kalender PT pertama kepada user PT lain pada perangkat yang
+  // sama (misalnya setelah logout lalu login akun lain).
+  static final Map<String, List<CompanyCalendarEvent>> _cache = {};
 
   static Future<String?> _getToken() async {
     return TokenService.getToken();
@@ -147,6 +155,7 @@ class CompanyCalendarService {
 
   static Future<List<WorkPeriod>> getWorkPeriodsByYear(
     int tahun, {
+    required String userId,
     bool forceRefresh = false,
   }) async {
     try {
@@ -154,7 +163,7 @@ class CompanyCalendarService {
           .post(
             Uri.parse('$baseURL/api/calendar/period/list'),
             headers: await _headers(),
-            body: json.encode({'tahun': tahun}),
+            body: json.encode({'tahun': tahun, 'userId': userId}),
           )
           .timeout(const Duration(seconds: 15));
 
@@ -232,13 +241,16 @@ class CompanyCalendarService {
     }
   }
 
-  static Future<WorkPeriod?> checkWorkPeriodByDate(String tanggal) async {
+  static Future<WorkPeriod?> checkWorkPeriodByDate(
+    String tanggal, {
+    required String userId,
+  }) async {
     try {
       final res = await http
           .post(
             Uri.parse('$baseURL/api/calendar/period/check'),
             headers: await _headers(),
-            body: json.encode({'tanggal': tanggal}),
+            body: json.encode({'tanggal': tanggal, 'userId': userId}),
           )
           .timeout(const Duration(seconds: 15));
 
@@ -269,10 +281,11 @@ class CompanyCalendarService {
   // tahun karyawan aktif di perusahaan yang sama secara live (tipe 'ULTAH').
   static Future<List<CompanyCalendarEvent>> getByYear(
     int tahun, {
-    String? userId,
+    required String userId,
     bool forceRefresh = false,
   }) async {
-    if (!forceRefresh && _cache.containsKey(tahun)) return _cache[tahun]!;
+    final cacheKey = '$userId:$tahun';
+    if (!forceRefresh && _cache.containsKey(cacheKey)) return _cache[cacheKey]!;
 
     try {
       final res = await http
@@ -281,7 +294,7 @@ class CompanyCalendarService {
             headers: await _headers(),
             body: json.encode({
               'tahun': tahun,
-              if (userId != null) 'userId': userId,
+              'userId': userId,
             }),
           )
           .timeout(const Duration(seconds: 15));
@@ -293,12 +306,12 @@ class CompanyCalendarService {
           final events = (data as List)
               .map((e) => CompanyCalendarEvent.fromJson(e))
               .toList();
-          _cache[tahun] = events;
+          _cache[cacheKey] = events;
           return events;
         }
       }
     } catch (_) {}
-    return _cache[tahun] ?? [];
+    return _cache[cacheKey] ?? [];
   }
 
   // ── Ambil event untuk tanggal tertentu ───────────────────────────
@@ -319,16 +332,12 @@ class CompanyCalendarService {
   // ── Cek apakah tanggal libur (LIBUR atau weekend) ─────────────────
   // INFO tidak dihitung sebagai hari libur
   static bool isHariLibur(DateTime date, List<CompanyCalendarEvent> allEvents) {
+    final events = getForDate(date, allEvents);
+    if (events.any((e) => e.isKerja)) return false;
     if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
       return true;
     }
-    return allEvents.any(
-      (e) =>
-          e.isLibur &&
-          e.tanggal.year == date.year &&
-          e.tanggal.month == date.month &&
-          e.tanggal.day == date.day,
-    );
+    return events.any((e) => e.isLibur);
   }
 
   // ── Cek apakah tanggal WFH ────────────────────────────────────────
@@ -370,7 +379,7 @@ class CompanyCalendarService {
     String? attachmentContentType,
     bool removeAttachment = false,
   }) async {
-    if (!['LIBUR', 'WFH', 'INFO'].contains(tipe)) {
+    if (!['LIBUR', 'KERJA', 'WFH', 'INFO'].contains(tipe)) {
       return {'success': false, 'message': 'Tipe tidak valid: $tipe'};
     }
 
@@ -395,7 +404,7 @@ class CompanyCalendarService {
 
       final body = json.decode(res.body);
       final success = body['Success'] ?? body['success'] ?? false;
-      if (success) _cache.remove(int.tryParse(tanggal.substring(0, 4)));
+      if (success) _cache.clear();
       return {
         'success': success,
         'message': body['Message'] ?? body['message'] ?? 'Terjadi kesalahan',
@@ -407,12 +416,18 @@ class CompanyCalendarService {
   }
 
   // Method baru — download bytes attachment untuk preview
-  static Future<List<int>?> downloadAttachment(int eventId) async {
+  static Future<List<int>?> downloadAttachment(
+    int eventId, {
+    required String viewerUserId,
+  }) async {
     try {
       final token = await _getToken();
       final res = await http
           .get(
-            Uri.parse('$baseURL/api/calendar/attachment/view/$eventId'),
+            Uri.parse(
+              '$baseURL/api/calendar/attachment/view/$eventId'
+              '?userId=${Uri.encodeQueryComponent(viewerUserId)}',
+            ),
             headers: {if (token != null) 'Authorization': 'Bearer $token'},
           )
           .timeout(const Duration(seconds: 30));
@@ -441,7 +456,7 @@ class CompanyCalendarService {
 
       final body = json.decode(res.body);
       final success = body['Success'] ?? body['success'] ?? false;
-      if (success) _cache.remove(tahun);
+      if (success) _cache.clear();
       return {
         'success': success,
         'message': body['Message'] ?? body['message'] ?? 'Terjadi kesalahan',

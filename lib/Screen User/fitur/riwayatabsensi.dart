@@ -58,9 +58,15 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
 
   Future<void> _loadWorkPeriods() async {
     final now = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('UserID') ?? '';
+    if (userId.isEmpty) return;
     final results = await Future.wait([
-      CompanyCalendarService.getWorkPeriodsByYear(now.year),
-      CompanyCalendarService.getWorkPeriodsByYear(now.year - 1),
+      CompanyCalendarService.getWorkPeriodsByYear(now.year, userId: userId),
+      CompanyCalendarService.getWorkPeriodsByYear(
+        now.year - 1,
+        userId: userId,
+      ),
     ]);
 
     final periodsById = <int, WorkPeriod>{};

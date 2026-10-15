@@ -15,6 +15,7 @@ import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
 import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/company_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/office_file_service.dart';
 import 'package:absensikaryawan/Services/profile.dart';
@@ -109,6 +110,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
 
   // User identity — di-cache agar tidak bolak-balik SharedPreferences
   String? _userID;
+  String? _companyName;
   bool _isOfficeFileHrdHead = false;
 
   // Pengingat Absen — dicek sekali saat cold start saja (bukan di auto-refresh
@@ -132,13 +134,9 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
 
   Future<void> _checkHariIniHrd() async {
     try {
+      final uid = _userID ?? await _loadUserId();
+      if (uid == null || uid.isEmpty) return;
       final today = DateTime.now();
-      if (today.weekday == DateTime.saturday ||
-          today.weekday == DateTime.sunday) {
-        if (mounted) setState(() => _isHariLiburHrd = true);
-        return;
-      }
-
       final token = await _getToken();
       if (token == null) return;
 
@@ -154,16 +152,15 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
             },
-            body: json.encode({'tanggal': tanggal}),
+            body: json.encode({'tanggal': tanggal, 'userId': uid}),
           )
           .timeout(const Duration(seconds: 10));
 
       if (resp.statusCode == 200 && mounted) {
         final body = json.decode(resp.body);
-        final isWeekend = body['IsWeekend'] ?? body['is_weekend'] ?? false;
         final isHariLibur =
             body['IsHariLibur'] ?? body['is_hari_libur'] ?? false;
-        setState(() => _isHariLiburHrd = isWeekend || isHariLibur);
+        setState(() => _isHariLiburHrd = isHariLibur);
       }
     } catch (_) {}
   }
@@ -202,6 +199,17 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     final prefs = await SharedPreferences.getInstance();
     _userID = prefs.getString('UserID');
     return _userID;
+  }
+
+  Future<void> _loadCompanyContext() async {
+    final uid = _userID ?? await _loadUserId();
+    if (uid == null || uid.isEmpty) return;
+    final info = await CompanyService.getInviteCode(uid);
+    if (info == null || !mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('CompanyName', info.companyName);
+    _safeSetState(() => _companyName = info.companyName);
   }
 
   /// Mendapatkan token akses dari endpoint auth.
@@ -270,7 +278,11 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         return;
       }
 
-      await Future.wait([_loadProfileData(token), _loadPendingOrgCount()]);
+      await Future.wait([
+        _loadProfileData(token),
+        _loadPendingOrgCount(),
+        _loadCompanyContext(),
+      ]);
     } catch (e) {
       _safeSetState(() {
         _errorMessage = 'Error inisialisasi: $e';
@@ -862,6 +874,19 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+              if (!_isLoading && _companyName != null) ...[
+                SizedBox(height: 2 * scale),
+                Text(
+                  _companyName!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blueGrey[600],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

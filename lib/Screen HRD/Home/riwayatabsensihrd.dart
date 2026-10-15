@@ -235,6 +235,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       final calendarFuture = CompanyCalendarService.getByYear(
         _analyticsYear,
+        userId: _currentUserId ?? '',
         forceRefresh: true,
       );
       final result = await periodsFuture;
@@ -2254,6 +2255,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     for (final year in years) {
       final yearEvents = await CompanyCalendarService.getByYear(
         year,
+        userId: _currentUserId ?? '',
         forceRefresh: true,
       );
       events.addAll(yearEvents);

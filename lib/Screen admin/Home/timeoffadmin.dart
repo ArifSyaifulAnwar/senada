@@ -91,7 +91,7 @@ class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
           await Future.wait([
             TimeOffAdminService.getAllTimeOffs(adminId: _currentUserId!),
             TimeOffAdminService.getUsersWithTimeOffs(adminId: _currentUserId!),
-            TimeOffAdminService.getAdminStatistics(),
+            TimeOffAdminService.getAdminStatistics(adminId: _currentUserId!),
           ]).timeout(
             const Duration(seconds: 30),
             onTimeout: () => throw Exception('Request timeout.'),

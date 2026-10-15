@@ -111,19 +111,49 @@ class CalendarEventService {
   static Future<Map<DateTime, List<CalendarEvent>>> mergeWithCompanyCalendar(
     Map<DateTime, List<CalendarEvent>> existing,
     int tahun,
+    {required String userId}
   ) async {
     try {
-      final companyEvents = await CompanyCalendarService.getByYear(tahun);
+      final companyEvents = await CompanyCalendarService.getByYear(
+        tahun,
+        userId: userId,
+      );
       if (companyEvents.isEmpty) return existing;
 
-      final merged = Map<DateTime, List<CalendarEvent>>.from(existing);
+      // Deep-copy list per tanggal. Map.from saja masih memakai instance List
+      // milik cache hari nasional; event PT A lalu dapat menempel ke cache dan
+      // ikut terlihat oleh PT B pada sesi/perangkat yang sama.
+      final merged = existing.map(
+        (date, events) => MapEntry(date, List<CalendarEvent>.from(events)),
+      );
+
+      // Kebijakan KERJA milik PT meng-override weekend/libur nasional/cuti
+      // bersama pada tanggal tersebut.
+      for (final ce in companyEvents.where((e) => e.isKerja)) {
+        final key = DateTime(ce.tanggal.year, ce.tanggal.month, ce.tanggal.day);
+        merged[key] = (merged[key] ?? [])
+            .where((e) => !e.isHoliday && !e.isCutiBersama)
+            .toList();
+      }
 
       for (final ce in companyEvents) {
         final key = DateTime(ce.tanggal.year, ce.tanggal.month, ce.tanggal.day);
 
         late CalendarEvent calEvent;
 
-        if (ce.isLibur) {
+        if (ce.isKerja) {
+          calEvent = CalendarEvent(
+            title: ce.keterangan,
+            color: const Color(0xFFF59E0B),
+            type: 'company_kerja',
+            isHoliday: false,
+            isCutiBersama: false,
+            isWfh: false,
+            isInfo: false,
+            source: 'company',
+            displayDate: DateFormat('yyyy-MM-dd').format(key),
+          );
+        } else if (ce.isLibur) {
           // LIBUR → tanggal merah, disable absen
           calEvent = CalendarEvent(
             title: ce.keterangan,

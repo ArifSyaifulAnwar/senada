@@ -293,7 +293,7 @@ class ReimbursementService {
   /// Ambil list metadata attachment tanpa bytes.
   Future<List<ReimbursementAttachmentMeta>> getAttachments({
     required int reimbursementId,
-    String? userId,
+    required String userId,
   }) async {
     try {
       final headers = await _getHeaders();
@@ -328,11 +328,11 @@ class ReimbursementService {
   /// Ambil bytes satu attachment untuk preview.
   Future<ReimbursementAttachment> getAttachmentBytes({
     required int attachmentId,
-    String? userId,
+    required String userId,
   }) async {
     try {
       final headers = await _getHeaders();
-      final query = userId != null ? '?userId=$userId' : '';
+      final query = '?userId=${Uri.encodeQueryComponent(userId)}';
       final uri = Uri.parse(
         '$baseURL/api/asn/reimbursement/attachments/view/$attachmentId$query',
       );
@@ -402,7 +402,11 @@ class ReimbursementService {
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
@@ -427,12 +431,15 @@ class ReimbursementService {
     return {'Authorization': 'Bearer $token'};
   }
 
-  Future<List<FinanceUserOption>> getFinanceUsers() async {
+  Future<List<FinanceUserOption>> getFinanceUsers(
+    String requesterUserId,
+  ) async {
     try {
       final headers = await _getHeaders();
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/reimbursement/finance-users'),
         headers: headers,
+        body: jsonEncode({'userId': requesterUserId}),
       );
       if (response.statusCode == 200) {
         final jsonData = json.decode(response.body);
@@ -891,13 +898,14 @@ class ReimbursementService {
   }
 
   // Get categories
-  Future<List<ReimbursementCategory>> getCategories() async {
+  Future<List<ReimbursementCategory>> getCategories(String userId) async {
     try {
       final headers = await _getHeaders();
 
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/reimbursement/categories'),
         headers: headers,
+        body: jsonEncode({'userId': userId}),
       );
 
       if (response.statusCode == 200) {
@@ -1121,9 +1129,7 @@ class ReimbursementService {
 
   /// Update reimbursement (mode edit & ajukan ulang) + upload attachment baru
   /// (kalau ada). Attachment lama yang tidak dihapus dibiarkan apa adanya.
-  Future<
-    ({bool success, String message, List<String> failedFiles})
-  >
+  Future<({bool success, String message, List<String> failedFiles})>
   updateWithAttachments({
     required int id,
     required String userId,
@@ -1173,7 +1179,11 @@ class ReimbursementService {
     }
 
     if (failedFiles.isEmpty) {
-      return (success: true, message: updateResult.message, failedFiles: <String>[]);
+      return (
+        success: true,
+        message: updateResult.message,
+        failedFiles: <String>[],
+      );
     }
 
     return (
@@ -1241,7 +1251,11 @@ class ReimbursementServicePatch {
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {

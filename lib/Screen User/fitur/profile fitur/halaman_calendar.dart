@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../Services/calendar_event_service.dart';
 import '../../../Services/company_calendar_service.dart';
 import '../../../models/calendermodel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
@@ -61,9 +62,13 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
         _focusedDate.year,
       );
       // 2. Merge dengan company calendar (HRD custom)
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID') ?? '';
+      if (userId.isEmpty) return;
       events = await CalendarEventService.mergeWithCompanyCalendar(
         events,
         _focusedDate.year,
+        userId: userId,
       );
       if (mounted) setState(() => _events = events);
     } finally {
@@ -73,7 +78,14 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
 
   Future<void> _loadEventsForYear(int year) async {
     var events = await CalendarEventService.getDayoffEvents(year);
-    events = await CalendarEventService.mergeWithCompanyCalendar(events, year);
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('UserID') ?? '';
+    if (userId.isEmpty) return;
+    events = await CalendarEventService.mergeWithCompanyCalendar(
+      events,
+      year,
+      userId: userId,
+    );
     if (mounted) setState(() => _events.addAll(events));
   }
 
@@ -95,8 +107,9 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
 
   // Merah: weekend + libur nasional + libur company
   bool _isHariMerah(DateTime date) {
-    if (_isWeekend(date)) return true;
     final events = _getEventsForDay(date);
+    if (events.any((e) => e.type == 'company_kerja')) return false;
+    if (_isWeekend(date)) return true;
     return events.any((e) => e.isHoliday || e.isCutiBersama);
   }
 
@@ -108,9 +121,11 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
 
   // Label keterangan hari
   String? _getDayLabel(DateTime date) {
+    final events = _getEventsForDay(date);
+    final kerja = events.where((e) => e.type == 'company_kerja').toList();
+    if (kerja.isNotEmpty) return kerja.first.title;
     if (_isSunday(date)) return 'Minggu';
     if (_isSaturday(date)) return 'Sabtu';
-    final events = _getEventsForDay(date);
     final libur = events.where((e) => e.isHoliday || e.isCutiBersama).toList();
     if (libur.isNotEmpty) return libur.first.title;
     final wfh = events.where((e) => e.isWfh).toList();
@@ -687,6 +702,7 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
   }
 
   Widget _buildEventCard(DateTime date, List<CalendarEvent> events) {
+    final hasKerja = events.any((e) => e.type == 'company_kerja');
     final hasCompanyLibur = events.any((e) => e.type == 'company_libur');
     final hasCuti = events.any((e) => e.isCutiBersama);
     final hasLibur = events.any((e) => e.isHoliday);
@@ -694,7 +710,9 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
     final hasInfo = events.any((e) => e.isInfo); // ← TAMBAH
 
     Widget? badge;
-    if (hasCompanyLibur) {
+    if (hasKerja) {
+      badge = _badge('Masuk', const Color(0xFFF59E0B));
+    } else if (hasCompanyLibur) {
       badge = _badge('Libur', Colors.red[700]!);
     } else if (hasCuti) {
       badge = _badge('Cuti', Colors.red);
@@ -829,6 +847,9 @@ class _HalamanCalendarState extends State<HalamanCalendar> {
   );
 
   Widget _buildEventBadge(CalendarEvent event) {
+    if (event.type == 'company_kerja') {
+      return _badge('Masuk', const Color(0xFFF59E0B));
+    }
     if (event.type == 'company_libur') return _badge('Libur', Colors.red[700]!);
     if (event.isCutiBersama) return _badge('Cuti', Colors.red);
     if (event.isHoliday) return _badge('Libur', Colors.orange);

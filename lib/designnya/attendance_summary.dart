@@ -7,6 +7,7 @@ import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 const String apiUrl = '$baseURL/api/asn/file/summary/all/data';
 
@@ -58,7 +59,11 @@ class _AttendanceSummaryState extends State<AttendanceSummary>
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
@@ -92,7 +97,9 @@ class _AttendanceSummaryState extends State<AttendanceSummary>
         },
       );
 
-      if (response.statusCode != 200) throw Exception('Gagal memuat data summary');
+      if (response.statusCode != 200) {
+        throw Exception('Gagal memuat data summary');
+      }
 
       final List<dynamic> raw = json.decode(response.body);
       final cards = raw.map((e) => AttendanceCardModel.fromJson(e)).toList();
@@ -132,24 +139,29 @@ class _AttendanceSummaryState extends State<AttendanceSummary>
 
       // Ambil periode kerja
       final periodsRes = await TimeOffService.getWorkPeriods();
-      if (!periodsRes.success || periodsRes.data == null || periodsRes.data!.isEmpty) return;
+      if (!periodsRes.success ||
+          periodsRes.data == null ||
+          periodsRes.data!.isEmpty) {
+        return;
+      }
 
       // Cari periode yang sedang aktif
       final today = DateTime.now();
       final todayNorm = DateTime(today.year, today.month, today.day);
 
-      final activePeriod = periodsRes.data!.cast<dynamic>().firstWhere(
-        (p) {
-          final start = DateTime(
-            p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day,
-          );
-          final end = DateTime(
-            p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day,
-          );
-          return !todayNorm.isBefore(start) && !todayNorm.isAfter(end);
-        },
-        orElse: () => null,
-      );
+      final activePeriod = periodsRes.data!.cast<dynamic>().firstWhere((p) {
+        final start = DateTime(
+          p.tanggalMulai.year,
+          p.tanggalMulai.month,
+          p.tanggalMulai.day,
+        );
+        final end = DateTime(
+          p.tanggalSelesai.year,
+          p.tanggalSelesai.month,
+          p.tanggalSelesai.day,
+        );
+        return !todayNorm.isBefore(start) && !todayNorm.isAfter(end);
+      }, orElse: () => null);
       if (activePeriod == null) return;
 
       // Hitung total hari dan weekend dalam periode
@@ -165,30 +177,23 @@ class _AttendanceSummaryState extends State<AttendanceSummary>
       );
       final totalDays = end.difference(start).inDays + 1;
 
-      int weekendDays = 0;
+      // Ambil kebijakan kalender perusahaan. Event KERJA dapat membuat
+      // Sabtu/Minggu atau libur nasional menjadi hari masuk perusahaan.
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID');
+      if (userId == null || userId.isEmpty) return;
+      final events = await CompanyCalendarService.getByYear(
+        today.year,
+        userId: userId,
+      );
+
+      int nonWorkDays = 0;
       for (int i = 0; i < totalDays; i++) {
         final d = start.add(Duration(days: i));
-        if (d.weekday == DateTime.saturday || d.weekday == DateTime.sunday) {
-          weekendDays++;
-        }
+        if (CompanyCalendarService.isHariLibur(d, events)) nonWorkDays++;
       }
 
-      // Ambil event LIBUR tahun ini
-      final events = await CompanyCalendarService.getByYear(today.year);
-
-      // Hitung LIBUR yang jatuh di hari kerja dalam periode
-      int holidayCount = 0;
-      for (final event in events) {
-        if (event.tipe != 'LIBUR') continue;
-        final d = DateTime(event.tanggal.year, event.tanggal.month, event.tanggal.day);
-        if (!d.isBefore(start) && !d.isAfter(end)) {
-          if (d.weekday != DateTime.saturday && d.weekday != DateTime.sunday) {
-            holidayCount++;
-          }
-        }
-      }
-
-      final workDays = totalDays - weekendDays - holidayCount;
+      final workDays = totalDays - nonWorkDays;
 
       // Update kartu
       cards[idx].mainText = '$workDays';
@@ -321,10 +326,7 @@ class _AttendanceSummaryState extends State<AttendanceSummary>
               SizedBox(height: 3 * scale),
               Text(
                 model.subText,
-                style: TextStyle(
-                  fontSize: 10 * scale,
-                  color: Colors.grey[500],
-                ),
+                style: TextStyle(fontSize: 10 * scale, color: Colors.grey[500]),
                 overflow: TextOverflow.ellipsis,
               ),
             ],

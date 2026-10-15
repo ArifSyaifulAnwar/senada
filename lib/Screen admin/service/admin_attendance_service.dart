@@ -86,9 +86,16 @@ class AdminAttendanceService {
     required int tahun,
   }) async {
     try {
+      final userId = await _getUserId();
+      if (userId == null || userId.isEmpty) {
+        return ApiResponse<List<HrdWorkPeriod>>(
+          success: false,
+          message: 'User ID tidak tersedia.',
+        );
+      }
       final response = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/calendar/period/list'),
-        body: jsonEncode({'tahun': tahun}),
+        body: jsonEncode({'tahun': tahun, 'userId': userId}),
       );
 
       if (response.statusCode == 200) {

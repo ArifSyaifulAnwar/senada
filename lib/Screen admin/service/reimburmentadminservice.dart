@@ -270,6 +270,7 @@ class AdminReimbursementService {
 
   // Get admin statistics dengan current date sebagai default
   Future<AdminReimbursementStatistics?> getAdminStatistics({
+    required String currentUserId,
     int? year,
     int? month,
   }) async {
@@ -280,7 +281,7 @@ class AdminReimbursementService {
       // final finalMonth = month ?? now.month;
 
       final headers = await _getHeaders();
-      Map requestBody = {};
+      Map<String, dynamic> requestBody = {'userId': currentUserId};
 
       // Hanya kirim parameter jika disediakan
       if (year != null) {
@@ -340,13 +341,16 @@ class AdminReimbursementService {
   }
 
   // Get users with reimbursements - TIDAK BERUBAH
-  Future<List<UserWithReimbursements>> getUsersWithReimbursements() async {
+  Future<List<UserWithReimbursements>> getUsersWithReimbursements(
+    String currentUserId,
+  ) async {
     try {
       final headers = await _getHeaders();
 
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/reimbursement/admin/users'),
         headers: headers,
+        body: json.encode({'userId': currentUserId}),
       );
 
       if (response.statusCode == 200) {

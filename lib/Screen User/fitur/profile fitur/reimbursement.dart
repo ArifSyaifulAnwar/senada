@@ -56,7 +56,11 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
@@ -72,7 +76,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     if (!mounted) return;
     setState(() => _isCheckingRole = true);
     try {
-      final financeUsers = await _reimbursementService.getFinanceUsers();
+      final financeUsers = await _reimbursementService.getFinanceUsers(userId);
       final isFinanceStaff = financeUsers.any((u) => u.userId == userId);
       if (mounted) setState(() => _isHeadFinance = isFinanceStaff);
     } catch (_) {
@@ -138,6 +142,9 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     int year, {
     bool applyFilterAfterLoad = true,
   }) async {
+    final userId = _currentUserId;
+    if (userId == null || userId.trim().isEmpty) return;
+
     if (mounted) {
       setState(() {
         _isLoadingPeriods = true;
@@ -156,7 +163,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
               if (token != null && token.trim().isNotEmpty)
                 'Authorization': 'Bearer $token',
             },
-            body: jsonEncode({'tahun': year}),
+            body: jsonEncode({'tahun': year, 'userId': userId}),
           )
           .timeout(const Duration(seconds: 15));
 
@@ -416,7 +423,7 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
       builder: (context) => DetailModalContent(
         initialItem: item,
         reimbursementService: _reimbursementService,
-        currentUserId: _currentUserId,
+        currentUserId: _currentUserId!,
         getResponsiveFontSize: (context, size) => size,
         getResponsivePadding: (context, padding) => padding,
         formatDateTime: _formatDateTime,

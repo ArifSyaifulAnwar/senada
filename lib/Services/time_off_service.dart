@@ -9,6 +9,7 @@ import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:path/path.dart' as path;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../Screen User/fitur/org_approval_screen.dart';
 
@@ -1181,9 +1182,18 @@ class TimeOffService {
 
   static Future<ApiResponse<List<WorkPeriodModel>>> getWorkPeriods() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID');
+      if (userId == null || userId.trim().isEmpty) {
+        return ApiResponse(
+          success: false,
+          message: 'Sesi pengguna tidak ditemukan. Silakan login ulang.',
+        );
+      }
       final res = await http.post(
         Uri.parse('$baseURL/api/timeoff/work-periods'),
         headers: await _jsonHeaders(),
+        body: jsonEncode({'userId': userId}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (_get(body, 'success') == true) {

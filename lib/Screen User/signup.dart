@@ -275,12 +275,16 @@ class _SignUpScreenState extends State<SignUpScreen>
                                 ],
                                 maxLength: 6,
                               ),
-                              SizedBox(height: isWeb ? 12 : screenHeight * 0.015),
+                              SizedBox(
+                                height: isWeb ? 12 : screenHeight * 0.015,
+                              ),
                               // Jalan keluar kalau OTP kadaluwarsa/salah email —
                               // tanpa ini user terjebak di layar OTP tanpa cara
                               // kembali dari dalam aplikasi.
                               TextButton(
-                                onPressed: _isLoading ? null : _resetToFormStage,
+                                onPressed: _isLoading
+                                    ? null
+                                    : _resetToFormStage,
                                 child: const Text(
                                   '← Ganti data / Kirim ulang OTP',
                                   style: TextStyle(
@@ -559,10 +563,7 @@ class _SignUpScreenState extends State<SignUpScreen>
             decoration: BoxDecoration(
               color: selected ? const Color(0xFF246BFD) : Colors.white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: const Color(0xFF246BFD),
-                width: 1.5,
-              ),
+              border: Border.all(color: const Color(0xFF246BFD), width: 1.5),
             ),
             child: Text(
               label,
@@ -682,10 +683,7 @@ class _SignUpScreenState extends State<SignUpScreen>
                           ),
                         ),
                       )
-                    : const Text(
-                        'Cek',
-                        style: TextStyle(color: Colors.white),
-                      ),
+                    : const Text('Cek', style: TextStyle(color: Colors.white)),
               ),
             ),
           ],
@@ -705,20 +703,6 @@ class _SignUpScreenState extends State<SignUpScreen>
     );
   }
 
-  Future<String?> _fetchAppToken() async {
-    try {
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-      if (tokenResponse.statusCode != 200) return null;
-      return json.decode(tokenResponse.body)['access_token'];
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _checkInviteCode() async {
     final code = _inviteCodeController.text.trim();
     if (code.isEmpty) {
@@ -732,19 +716,10 @@ class _SignUpScreenState extends State<SignUpScreen>
     });
 
     try {
-      final accessToken = await _fetchAppToken();
-      if (accessToken == null) {
-        _showErrorDialog('Gagal terhubung ke server. Silakan coba lagi.');
-        return;
-      }
-
       final response = await http.post(
         Uri.parse('$baseURL/api/asn/company/validate-invite'),
-        headers: {
-          'Authorization': 'bearer $accessToken',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({'InviteCode': code}),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'InviteCode': code.toUpperCase()}),
       );
 
       final data = json.decode(response.body);
@@ -813,98 +788,73 @@ class _SignUpScreenState extends State<SignUpScreen>
       setState(() => _isLoading = true);
 
       try {
-        final tokenResponse = await http.post(
-          Uri.parse('$baseURL/api/auth/token'),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+        final signUpResponse = await http.post(
+          Uri.parse('$baseURL/api/asn/Register'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            // ── User ID dikirim kosong, backend yang generate ──
+            'UserId': '',
+            'Name': name,
+            'Password': password,
+            'Email': email,
+            'Phone': phone,
+            'OtpCode': _showOtpField ? otpCode : '',
+            // Cuma relevan & divalidasi di tahap 1 (server membaca balik
+            // dari data sementara saat verifikasi OTP), tapi aman dikirim
+            // di kedua tahap.
+            'InviteCode': _isJoinMode
+                ? _inviteCodeController.text.trim().toUpperCase()
+                : '',
+            'NewCompanyName': _isJoinMode
+                ? ''
+                : _newCompanyNameController.text.trim(),
+          }),
         );
 
-        if (tokenResponse.statusCode == 200) {
-          final tokenData = json.decode(tokenResponse.body);
-          final accessToken = tokenData['access_token'];
+        final responseData = json.decode(signUpResponse.body);
 
-          if (accessToken != null) {
-            final signUpResponse = await http.post(
-              Uri.parse('$baseURL/api/asn/Register'),
-              headers: {
-                'Authorization': 'bearer $accessToken',
-                'Content-Type': 'application/json',
-              },
-              body: json.encode({
-                // ── User ID dikirim kosong, backend yang generate ──
-                'UserId': '',
-                'Name': name,
-                'Password': password,
-                'Email': email,
-                'Phone': phone,
-                'OtpCode': _showOtpField ? otpCode : '',
-                // Cuma relevan & divalidasi di tahap 1 (server membaca balik
-                // dari data sementara saat verifikasi OTP), tapi aman dikirim
-                // di kedua tahap.
-                'InviteCode': _isJoinMode
-                    ? _inviteCodeController.text.trim()
-                    : '',
-                'NewCompanyName': _isJoinMode
-                    ? ''
-                    : _newCompanyNameController.text.trim(),
-              }),
+        if (signUpResponse.statusCode == 200) {
+          if (responseData['requireOTP'] == true) {
+            setState(() {
+              _showOtpField = true;
+              _isLoading = false;
+            });
+            _showSuccessDialog(
+              responseData['message'] ??
+                  'Kode OTP telah dikirimkan ke email Anda.',
             );
-
-            final responseData = json.decode(signUpResponse.body);
-
-            if (signUpResponse.statusCode == 200) {
-              if (responseData['requireOTP'] == true) {
-                setState(() {
-                  _showOtpField = true;
-                  _isLoading = false;
-                });
-                _showSuccessDialog(
-                  responseData['message'] ??
-                      'Kode OTP telah dikirimkan ke email Anda.',
-                );
-              } else {
-                setState(() => _isLoading = false);
-                _showSuccessDialog(
-                  responseData['message'] ?? 'Pendaftaran berhasil!',
-                  onOkPressed: () {
-                    Navigator.of(context).pop();
-                    Future.delayed(const Duration(milliseconds: 500), () {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (context) => const SignInScreen(),
-                        ),
-                      );
-                    });
-                  },
-                );
-              }
-            } else {
-              setState(() => _isLoading = false);
-              // OTP kedaluwarsa: baris pendaftaran sementara di server tidak
-              // bisa dipakai lagi — balikkan ke form awal supaya tombol
-              // "Daftar" berikutnya benar-benar minta OTP baru, bukan
-              // ngirim ulang OTP yang sama-sama sudah mati.
-              final apiMsg = (responseData['message'] ??
-                      responseData['Message'] ??
-                      '')
-                  .toString();
-              if (_showOtpField && apiMsg.toLowerCase().contains('kedaluwarsa')) {
-                setState(() {
-                  _showOtpField = false;
-                  _otpController.clear();
-                });
-              }
-              _handleErrorResponse(signUpResponse.statusCode, responseData);
-            }
           } else {
             setState(() => _isLoading = false);
-            _showErrorDialog(
-              'Gagal mendapatkan token akses. Silakan coba lagi.',
+            _showSuccessDialog(
+              responseData['message'] ?? 'Pendaftaran berhasil!',
+              onOkPressed: () {
+                Navigator.of(context).pop();
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => const SignInScreen(),
+                    ),
+                  );
+                });
+              },
             );
           }
         } else {
           setState(() => _isLoading = false);
-          _showErrorDialog('Gagal terhubung ke server. Silakan coba lagi.');
+          // OTP kedaluwarsa: baris pendaftaran sementara di server tidak
+          // bisa dipakai lagi — balikkan ke form awal supaya tombol
+          // "Daftar" berikutnya benar-benar minta OTP baru, bukan
+          // ngirim ulang OTP yang sama-sama sudah mati.
+          final apiMsg =
+              (responseData['message'] ?? responseData['Message'] ?? '')
+                  .toString();
+          if (_showOtpField && apiMsg.toLowerCase().contains('kedaluwarsa')) {
+            setState(() {
+              _showOtpField = false;
+              _otpController.clear();
+            });
+          }
+          _handleErrorResponse(signUpResponse.statusCode, responseData);
         }
       } catch (e) {
         setState(() => _isLoading = false);

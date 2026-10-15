@@ -13,6 +13,7 @@ import 'package:absensikaryawan/Screen%20admin/Home/timeoffadmin.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/notifikasi.dart';
 import 'package:absensikaryawan/Screen%20admin/design/attendance_summaryadmin.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/company_service.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
@@ -97,6 +98,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
 
   // User identity — di-cache agar tidak bolak-balik SharedPreferences
   String? _userID;
+  String? _companyName;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -148,6 +150,17 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     return _userID;
   }
 
+  Future<void> _loadCompanyContext() async {
+    final uid = _userID ?? await _loadUserId();
+    if (uid == null || uid.isEmpty) return;
+    final info = await CompanyService.getInviteCode(uid);
+    if (info == null || !mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('CompanyName', info.companyName);
+    _safeSetState(() => _companyName = info.companyName);
+  }
+
   /// Mendapatkan token akses dari endpoint auth.
   static Future<String?> _getToken() async {
     try {
@@ -155,7 +168,11 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
 
@@ -218,7 +235,11 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
         return;
       }
 
-      await Future.wait([_loadProfileData(token), _loadUserId()]);
+      await Future.wait([
+        _loadProfileData(token),
+        _loadUserId(),
+        _loadCompanyContext(),
+      ]);
     } catch (e) {
       _safeSetState(() {
         _errorMessage = 'Error inisialisasi: $e';
@@ -799,6 +820,19 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+              if (!_isLoading && _companyName != null) ...[
+                SizedBox(height: 2 * scale),
+                Text(
+                  _companyName!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blueGrey[600],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

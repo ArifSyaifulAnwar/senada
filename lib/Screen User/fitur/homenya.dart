@@ -14,6 +14,7 @@ import '../../Screen HRD/Home/berkaskantor.dart';
 import '../../Screen HRD/Home/teguranhrd.dart';
 import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/company_service.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/office_file_service.dart';
@@ -66,6 +67,7 @@ class _HomePageState extends State<HomeScreen> {
   String? _notificationError;
   bool _debugShowTestBadge = false;
   String? userID;
+  String? _companyName;
   final NotificationService _notificationService = NotificationService();
 
   // ── Org approval count ──────────────────────────────────────────────────
@@ -208,28 +210,33 @@ class _HomePageState extends State<HomeScreen> {
     return userID;
   }
 
+  Future<void> _loadCompanyContext() async {
+    final uid = userID ?? await loadUserId();
+    if (uid == null || uid.isEmpty) return;
+
+    final info = await CompanyService.getInviteCode(uid);
+    if (info == null || !mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('CompanyName', info.companyName);
+    if (!mounted) return;
+    setState(() => _companyName = info.companyName);
+  }
+
   Future<void> _checkHariIniHome() async {
     try {
+      final uid = userID ?? await loadUserId();
+      if (uid == null || uid.isEmpty) return;
       final today = DateTime.now();
-      if (today.weekday == DateTime.saturday ||
-          today.weekday == DateTime.sunday) {
-        if (mounted) {
-          setState(() {
-            _isWeekendHome = true;
-            _isHariLiburHome = true;
-            _keteranganHariHome = today.weekday == DateTime.saturday
-                ? 'Hari Sabtu'
-                : 'Hari Minggu';
-          });
-        }
-        return;
-      }
-
       final tokenResp = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 10));
 
@@ -248,7 +255,7 @@ class _HomePageState extends State<HomeScreen> {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
             },
-            body: json.encode({'tanggal': tanggal}),
+            body: json.encode({'tanggal': tanggal, 'userId': uid}),
           )
           .timeout(const Duration(seconds: 10));
 
@@ -379,7 +386,11 @@ class _HomePageState extends State<HomeScreen> {
           .post(
             Uri.parse('$baseURL/api/auth/token'),
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
+            body: {
+              'grant_type': 'password',
+              'password':
+                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+            },
           )
           .timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
@@ -519,6 +530,7 @@ class _HomePageState extends State<HomeScreen> {
         await _loadProfileData();
         // Load org count setelah profile selesai (userId sudah tersedia)
         await loadUserId();
+        await _loadCompanyContext();
         await _loadPendingOrgCount();
         _loadIsDeptHead();
         _loadIsOfficeFileFinance();
@@ -1394,6 +1406,19 @@ class _HomePageState extends State<HomeScreen> {
                     : (_profileDisplay?.jobs ?? 'Pekerjaan tidak tersedia'),
                 style: TextStyle(fontSize: 12 * scale, color: Colors.grey[600]),
               ),
+              if (!_isLoading && _companyName != null) ...[
+                SizedBox(height: 2 * scale),
+                Text(
+                  _companyName!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11 * scale,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blueGrey[600],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

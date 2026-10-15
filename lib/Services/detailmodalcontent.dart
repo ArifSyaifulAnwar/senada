@@ -16,7 +16,7 @@ import 'package:path_provider/path_provider.dart';
 class DetailModalContent extends StatefulWidget {
   final ReimbursementData initialItem;
   final ReimbursementService reimbursementService;
-  final String? currentUserId;
+  final String currentUserId;
   final double Function(BuildContext, double) getResponsiveFontSize;
   final double Function(BuildContext, double) getResponsivePadding;
   final String Function(DateTime) formatDateTime;

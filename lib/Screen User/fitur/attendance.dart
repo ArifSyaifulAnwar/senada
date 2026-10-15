@@ -114,19 +114,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     try {
       final today = DateTime.now();
 
-      // Weekend check lokal dulu
-      if (today.weekday == DateTime.saturday ||
-          today.weekday == DateTime.sunday) {
-        if (mounted) {
-          setState(() {
-            _isWeekend = true;
-            _isHariLibur = true;
-            _keteranganHari = today.weekday == DateTime.saturday
-                ? 'Hari Sabtu'
-                : 'Hari Minggu';
-            _isLoadingCalendar = false;
-          });
-        }
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID') ?? '';
+      if (userId.isEmpty) {
+        if (mounted) setState(() => _isLoadingCalendar = false);
         return;
       }
 
@@ -160,7 +151,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
             },
-            body: json.encode({'tanggal': tanggal}),
+            body: json.encode({'tanggal': tanggal, 'userId': userId}),
           )
           .timeout(const Duration(seconds: 10));
 

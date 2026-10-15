@@ -20,13 +20,18 @@ class TimeOffAdminService {
 
   // Get admin statistics
   static Future<ApiResponse<TimeOffAdminStatistics>> getAdminStatistics({
+    required String adminId,
     int? year,
     int? month,
   }) async {
     try {
       final url = Uri.parse('$baseURL$adminEndpoint/statistics');
 
-      final requestBody = AdminStatisticsRequest(year: year, month: month);
+      final requestBody = AdminStatisticsRequest(
+        adminId: adminId,
+        year: year,
+        month: month,
+      );
 
       final response = await http.post(
         url,
