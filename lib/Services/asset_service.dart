@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
 
@@ -452,6 +453,11 @@ class AssetRequestModel {
 
 // ── SERVICE ──────────────────────────────────────────────────────────────────
 class AssetService {
+  static Future<String> _currentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('UserID') ?? '';
+  }
+
   static Future<http.Response> _post(
     String endpoint,
     Map<String, dynamic> payload,
@@ -911,10 +917,17 @@ class AssetService {
   /// Download gambar barang sebagai bytes (untuk Image.memory).
   static Future<ApiResponse<List<int>>> getItemImage({required int id}) async {
     try {
+      final userId = await _currentUserId();
+      if (userId.isEmpty) {
+        return const ApiResponse(
+          success: false,
+          message: 'Sesi pengguna tidak ditemukan.',
+        );
+      }
       final res = await http.post(
         Uri.parse('$baseURL$_base/item-image'),
         headers: await _jsonHeaders(),
-        body: jsonEncode({'id': id}),
+        body: jsonEncode({'id': id, 'userId': userId}),
       );
       if (res.statusCode == 200) {
         return ApiResponse(success: true, message: 'OK', data: res.bodyBytes);
@@ -1077,12 +1090,14 @@ class AssetService {
   // =====================================================================
 
   /// List kantor aktif (dropdown saat HRD tambah/edit barang & user pilih lokasi).
-  static Future<ApiResponse<List<AssetOfficeModel>>> getOffices() async {
+  static Future<ApiResponse<List<AssetOfficeModel>>> getOffices({
+    required String userId,
+  }) async {
     try {
       final res = await http.post(
         Uri.parse('$baseURL$_base/offices'),
         headers: await _jsonHeaders(),
-        body: jsonEncode({}),
+        body: jsonEncode({'userId': userId}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;
@@ -1108,13 +1123,14 @@ class AssetService {
 
   /// List WorkPeriod untuk dropdown laporan (opsional filter tahun).
   static Future<ApiResponse<List<AssetReportPeriodModel>>> getReportPeriods({
+    required String userId,
     int? tahun,
   }) async {
     try {
       final res = await http.post(
         Uri.parse('$baseURL$_base/report-periods'),
         headers: await _jsonHeaders(),
-        body: jsonEncode({'tahun': tahun}),
+        body: jsonEncode({'userId': userId, 'tahun': tahun}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;
@@ -1138,12 +1154,15 @@ class AssetService {
 
   /// List karyawan yang punya transaksi Approved dalam periode tertentu.
   static Future<ApiResponse<List<AssetReportEmployeeModel>>>
-  getReportEmployees({required int workPeriodId}) async {
+  getReportEmployees({
+    required String userId,
+    required int workPeriodId,
+  }) async {
     try {
       final res = await http.post(
         Uri.parse('$baseURL$_base/report-employees'),
         headers: await _jsonHeaders(),
-        body: jsonEncode({'workPeriodId': workPeriodId}),
+        body: jsonEncode({'userId': userId, 'workPeriodId': workPeriodId}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;
@@ -1204,12 +1223,17 @@ class AssetService {
   static Future<ApiResponse<AssetReportDetailResult>> getReportDetail({
     required String userId,
     required int workPeriodId,
+    required String requestedBy,
   }) async {
     try {
       final res = await http.post(
         Uri.parse('$baseURL$_base/report-detail'),
         headers: await _jsonHeaders(),
-        body: jsonEncode({'userId': userId, 'workPeriodId': workPeriodId}),
+        body: jsonEncode({
+          'userId': userId,
+          'workPeriodId': workPeriodId,
+          'requestedBy': requestedBy,
+        }),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final success = (_get(body, 'success') ?? false) == true;

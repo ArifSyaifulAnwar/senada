@@ -367,7 +367,10 @@ class _OrgApprovalScreenState extends State<OrgApprovalScreen> {
             }
           })
           .catchError((_) {}),
-      AttendanceOutsideRadiusService.getList(status: 'Pending')
+      AttendanceOutsideRadiusService.getList(
+            viewerUserId: widget.userId,
+            status: 'Pending',
+          )
           .then((r) {
             if (r['success'] == true && mounted) {
               final rawList = (r['data'] as List?) ?? [];

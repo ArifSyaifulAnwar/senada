@@ -200,7 +200,7 @@ class _AssetScreenState extends State<AssetScreen>
   }
 
   Future<void> _loadOffices() async {
-    final res = await AssetService.getOffices();
+    final res = await AssetService.getOffices(userId: widget.userId);
     if (mounted && res.success && res.data != null) {
       setState(() => _offices = res.data!);
     }
@@ -282,7 +282,7 @@ class _AssetScreenState extends State<AssetScreen>
   // ── Laporan (Head HRD only) ──────────────────────────────────────────────
   Future<void> _loadReportPeriods() async {
     setState(() => _isLoadingReportPeriods = true);
-    final res = await AssetService.getReportPeriods();
+    final res = await AssetService.getReportPeriods(userId: widget.userId);
     if (mounted) {
       setState(() {
         if (res.success && res.data != null) _reportPeriods = res.data!;
@@ -298,7 +298,10 @@ class _AssetScreenState extends State<AssetScreen>
       _reportEmployees = [];
       _isLoadingReportEmployees = true;
     });
-    final res = await AssetService.getReportEmployees(workPeriodId: period.id);
+    final res = await AssetService.getReportEmployees(
+      userId: widget.userId,
+      workPeriodId: period.id,
+    );
     if (mounted) {
       setState(() {
         if (res.success && res.data != null) _reportEmployees = res.data!;
@@ -324,6 +327,7 @@ class _AssetScreenState extends State<AssetScreen>
     final res = await AssetService.getReportDetail(
       userId: emp.userId,
       workPeriodId: period.id,
+      requestedBy: widget.userId,
     );
 
     if (!mounted) return;

@@ -379,6 +379,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Future<void> _loadOfficeLocations() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID') ?? '';
+      if (userId.isEmpty) {
+        throw Exception('User ID tidak ditemukan. Silakan login ulang.');
+      }
+
       final tokenResp = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
@@ -395,7 +401,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         final token = json.decode(tokenResp.body)['access_token'];
         final resp = await http
             .get(
-              Uri.parse('$baseURL/api/asn/office/locations'),
+              Uri.parse('$baseURL/api/asn/office/locations').replace(
+                queryParameters: {'userId': userId},
+              ),
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer $token',
@@ -628,7 +636,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         } else {
           final reason = verifyResult['message'] ?? "Verifikasi gagal";
           final lowerReason = reason.toLowerCase();
-          if (lowerReason.contains('radius')) {
+          if (lowerReason.contains('radius') ||
+              lowerReason.contains('tidak ada kantor aktif') ||
+              lowerReason.contains('lokasi kantor')) {
             _handleOutsideRadius(userId, imageBase64);
           } else {
             _scheduleAutoRetry(reason);
@@ -951,7 +961,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         });
       } else {
         setState(() {
-          _locationInfo = "Tidak ada kantor terdekat yang ditemukan";
+          _locationInfo =
+              "❌ Di luar radius kantor perusahaan — persetujuan Head HRD diperlukan";
           _isLoadingLocation = false;
           _isLocationKnown =
               true; // ← BARU: tetap izinkan absen, server yang validasi

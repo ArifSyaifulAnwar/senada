@@ -55,9 +55,11 @@ class DailyActivityService {
 
   /// Ambil daftar kategori aktivitas dari master data.
   static Future<List<DailyActivityCategory>> getCategories() async {
+    final userId = await _userId();
     try {
       final response = await _authedPost(
         '$baseURL/api/dailyactivity/categories',
+        body: json.encode({'RequestUserId': userId}),
       );
 
       if (response.statusCode == 200) {
@@ -73,9 +75,11 @@ class DailyActivityService {
 
   /// Ambil daftar lokasi kantor.
   static Future<List<OfficeLocation>> getOfficeLocations() async {
+    final userId = await _userId();
     try {
       final response = await _authedPost(
         '$baseURL/api/dailyactivity/office/locations',
+        body: json.encode({'RequestUserId': userId}),
       );
 
       if (response.statusCode == 200) {

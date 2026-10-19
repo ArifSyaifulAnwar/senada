@@ -348,8 +348,13 @@ class FaceRecognitionService {
   }
 
   // Get office locations (NEW)
-  static Future<Map<String, dynamic>> getOfficeLocations() async {
+  static Future<Map<String, dynamic>> getOfficeLocations({
+    required String userId,
+  }) async {
     try {
+      if (userId.trim().isEmpty) {
+        return {'success': false, 'message': 'User ID tidak boleh kosong'};
+      }
       final token = await _getToken();
       if (token == null) {
         return {'success': false, 'message': 'Gagal mendapatkan token akses'};
@@ -357,7 +362,9 @@ class FaceRecognitionService {
 
       final response = await http
           .get(
-            Uri.parse('$baseURL/api/asn/office/locations'),
+            Uri.parse('$baseURL/api/asn/office/locations').replace(
+              queryParameters: {'userId': userId.trim()},
+            ),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',

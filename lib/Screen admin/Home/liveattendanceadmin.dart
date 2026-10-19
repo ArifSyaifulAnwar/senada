@@ -23,6 +23,7 @@ class TodayAttendance {
   DateTime? breakEndTime;
   String? checkInLocation;
   String? checkOutLocation;
+  int? recordedWorkingMinutes;
   AttendanceStatus status;
 
   TodayAttendance({
@@ -32,11 +33,17 @@ class TodayAttendance {
     this.breakEndTime,
     this.checkInLocation,
     this.checkOutLocation,
+    this.recordedWorkingMinutes,
     this.status = AttendanceStatus.notCheckedIn,
   });
 
   Duration get workingDuration {
     if (checkInTime == null) return Duration.zero;
+    if (checkOutTime != null && recordedWorkingMinutes != null) {
+      return Duration(
+        minutes: recordedWorkingMinutes!.clamp(0, 24 * 60).toInt(),
+      );
+    }
     DateTime endTime = checkOutTime ?? DateTime.now();
     Duration total = endTime.difference(checkInTime!);
     if (breakStartTime != null) {
@@ -67,6 +74,8 @@ class LiveAttendanceScreenAdmin extends StatefulWidget {
 class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
     with TickerProviderStateMixin {
   late Timer _timer;
+  Timer? _attendanceRefreshTimer;
+  Timer? _locationRefreshTimer;
   late AnimationController _pulseController;
   late AnimationController _slideController;
   late Animation<double> _pulseAnimation;
@@ -76,7 +85,8 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
   final TodayAttendance _todayAttendance = TodayAttendance();
   bool _isLoading = false;
   String _currentLocation = 'Memuat lokasi...';
-  bool _isInOfficeArea = true;
+  bool _isInOfficeArea = false;
+  bool _isRefreshingLocation = false;
 
   // Data absensi dari API (sama seperti HomeScreenHRD)
   Map<String, dynamic>? _todayAttendanceData;
@@ -114,21 +124,33 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
     _slideController.forward();
 
     _checkTodayAttendanceStatus();
-    _loadOfficeLocations().then((_) => _getCurrentLocation());
+    _loadOfficeLocations().then((_) {
+      _getCurrentLocation();
+      _locationRefreshTimer = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => _getCurrentLocation(silent: true),
+      );
+    });
+    _attendanceRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _checkTodayAttendanceStatus(silent: true),
+    );
   }
 
   @override
   void dispose() {
     _timer.cancel();
+    _attendanceRefreshTimer?.cancel();
+    _locationRefreshTimer?.cancel();
     _pulseController.dispose();
     _slideController.dispose();
     super.dispose();
   }
 
   // Load status absensi hari ini dari API — sama dengan HomeScreenHRD
-  Future<void> _checkTodayAttendanceStatus() async {
+  Future<void> _checkTodayAttendanceStatus({bool silent = false}) async {
     if (!mounted) return;
-    setState(() => _isLoadingAttendance = true);
+    if (!silent) setState(() => _isLoadingAttendance = true);
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID') ?? '';
@@ -162,12 +184,15 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
                 _todayAttendance.checkOutTime = _parseTime(
                   data['CheckOutTime'],
                 );
+                _todayAttendance.recordedWorkingMinutes =
+                    (data['WorkingHoursMinutes'] as num?)?.toInt();
                 _attendanceStatusMessage = 'Anda sudah check out hari ini';
               } else if (hasCheckedIn) {
                 // Sudah check in, belum check out
                 _todayAttendance.status = AttendanceStatus.checkedIn;
                 _todayAttendance.checkInTime = _parseTime(data['CheckInTime']);
                 _todayAttendance.checkOutTime = null;
+                _todayAttendance.recordedWorkingMinutes = null;
                 _attendanceStatusMessage = 'Siap untuk check out';
               } else {
                 _todayAttendance.status = AttendanceStatus.notCheckedIn;
@@ -258,6 +283,12 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
   // ─── Load office locations dari API (sama seperti AbsensiScreen) ─────────
   Future<void> _loadOfficeLocations() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('UserID') ?? '';
+      if (userId.isEmpty) {
+        throw Exception('User ID tidak ditemukan. Silakan login ulang.');
+      }
+
       final tokenResp = await http
           .post(
             Uri.parse('$baseURL/api/auth/token'),
@@ -270,7 +301,9 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
         final token = json.decode(tokenResp.body)['access_token'];
         final resp = await http
             .get(
-              Uri.parse('$baseURL/api/asn/office/locations'),
+              Uri.parse('$baseURL/api/asn/office/locations').replace(
+                queryParameters: {'userId': userId},
+              ),
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer $token',
@@ -304,8 +337,15 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
           }
         }
       }
-    } catch (_) {
-      // Gagal load office → tetap lanjut, radius check akan skip
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _officeLocations = [];
+          _nearestOfficeLocation = null;
+          _isInOfficeArea = false;
+          _currentLocation = 'Gagal memuat lokasi kantor perusahaan: $e';
+        });
+      }
     }
   }
 
@@ -336,11 +376,14 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
   }
 
   // ─── Get current location dengan GPS real (sama persis AbsensiScreen) ───
-  Future<void> _getCurrentLocation() async {
-    if (!mounted) return;
-    setState(() {
-      _currentLocation = 'Memuat lokasi...';
-    });
+  Future<void> _getCurrentLocation({bool silent = false}) async {
+    if (!mounted || _isRefreshingLocation) return;
+    _isRefreshingLocation = true;
+    if (!silent) {
+      setState(() {
+        _currentLocation = 'Memuat lokasi...';
+      });
+    }
 
     try {
       // Check lokasi service aktif
@@ -404,9 +447,9 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
         });
       } else {
         setState(() {
-          // Tidak ada data kantor → tetap izinkan check in
-          _isInOfficeArea = true;
-          _currentLocation = 'Lokasi didapat (kantor tidak terkonfigurasi)';
+          _isInOfficeArea = false;
+          _currentLocation =
+              '❌ Di luar radius kantor perusahaan — absensi memerlukan persetujuan Head HRD.';
         });
       }
     } on TimeoutException {
@@ -423,6 +466,8 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
           _isInOfficeArea = false;
         });
       }
+    } finally {
+      _isRefreshingLocation = false;
     }
   }
 
@@ -457,6 +502,7 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
         });
       }
     }
+    await _getCurrentLocation(silent: true);
   }
 
   Future<void> _performBreakStart() async {

@@ -440,12 +440,21 @@ class OvertimeService {
     int pageSize = 10,
   }) async {
     try {
-      String url = '$_baseUrl/all?page=$page&pageSize=$pageSize';
+      final viewerUserId = await _getUserId();
+      if (viewerUserId == null || viewerUserId.trim().isEmpty) {
+        return ApiResponse<OvertimeListResponse>(
+          success: false,
+          message: 'User ID tidak ditemukan. Silakan login ulang.',
+        );
+      }
+
+      String url =
+          '$_baseUrl/all?page=$page&pageSize=$pageSize&viewerUserId=${Uri.encodeQueryComponent(viewerUserId)}';
       if (status != null) {
         url += '&status=$status';
       }
 
-      final response = await http.get(
+      final response = await http.post(
         Uri.parse(url),
         headers: await _getHeaders(),
       );

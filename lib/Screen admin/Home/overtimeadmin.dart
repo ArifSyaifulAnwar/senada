@@ -89,7 +89,9 @@ class _OvertimeAdminScreenState extends State<OvertimeAdminScreen>
             OvertimeAdminService.getUsersWithOvertimes(
               adminId: _currentUserId!,
             ),
-            OvertimeAdminService.getAdminStatistics(),
+            OvertimeAdminService.getAdminStatistics(
+              adminId: _currentUserId!,
+            ),
           ]).timeout(
             const Duration(seconds: 30),
             onTimeout: () {

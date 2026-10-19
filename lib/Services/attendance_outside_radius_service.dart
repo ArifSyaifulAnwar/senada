@@ -90,6 +90,7 @@ class AttendanceOutsideRadiusService {
 
   /// List antrian approval (untuk Head HRD, atau riwayat pengajuan karyawan)
   static Future<Map<String, dynamic>> getList({
+    required String viewerUserId,
     String? status,
     String? userId,
   }) async {
@@ -110,7 +111,11 @@ class AttendanceOutsideRadiusService {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
             },
-            body: json.encode({'Status': status, 'UserId': userId}),
+            body: json.encode({
+              'ViewerUserId': viewerUserId.trim(),
+              'Status': status,
+              'UserId': userId,
+            }),
           )
           .timeout(const Duration(seconds: 20));
 

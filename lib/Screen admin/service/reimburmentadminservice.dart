@@ -541,13 +541,9 @@ class AdminReimbursementService {
         headers: await _getHeaders(),
         body: jsonEncode({
           'reimbursementId': reimbursementId,
-          // Sengaja TIDAK kirim viewerUserId (HRD/admin) sebagai 'userId' di
-          // sini — backend memakai field ini untuk validasi KEPEMILIKAN
-          // (harus sama dengan user_id pemilik reimbursement), jadi kalau
-          // dikirim ID HRD sendiri, query selalu balik kosong untuk
-          // reimbursement milik orang lain. null = lewati validasi
-          // kepemilikan (layar ini sudah di balik autentikasi HRD/admin).
-          'userId': null,
+          // Backend memvalidasi peran dan company_id viewer. HRD/admin hanya
+          // dapat membaca lampiran reimbursement dari perusahaan yang sama.
+          'userId': viewerUserId,
         }),
       );
       if (response.statusCode == 200) {
@@ -574,13 +570,9 @@ class AdminReimbursementService {
     required int attachmentId,
     required String viewerUserId,
   }) async {
-    // Sengaja TIDAK kirim viewerUserId sebagai query param 'userId' — sama
-    // seperti getAdminAttachments, backend memakainya untuk validasi
-    // kepemilikan yang akan selalu gagal untuk HRD/admin melihat file orang
-    // lain. Layar ini sudah di balik autentikasi HRD/admin sendiri.
     final uri = Uri.parse(
       '$baseURL/api/asn/reimbursement/attachments/view/$attachmentId',
-    );
+    ).replace(queryParameters: {'userId': viewerUserId});
 
     final response = await http
         .get(uri, headers: await _getHeaders())
