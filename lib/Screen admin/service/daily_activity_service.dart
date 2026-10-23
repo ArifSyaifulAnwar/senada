@@ -134,6 +134,60 @@ class DailyActivityService {
     }
   }
 
+  /// Mengubah detail aktivitas milik user yang sedang login. Lampiran lama
+  /// sengaja tidak diubah pada alur ini agar bukti yang sudah tersimpan aman.
+  static Future<bool> updateActivity({
+    required int activityId,
+    required DateTime activityDate,
+    required int categoryId,
+    required String description,
+    int? officeLocationId,
+    String? locationText,
+    TimeOfDayValue? startTime,
+    TimeOfDayValue? endTime,
+  }) async {
+    final userId = await _userId();
+    try {
+      final response = await _authedPost(
+        '$baseURL/api/dailyactivity/update',
+        body: json.encode({
+          'ActivityId': activityId,
+          'UserId': userId,
+          'ActivityDate': _apiDate(activityDate),
+          'CategoryId': categoryId,
+          'Description': description,
+          'OfficeLocationId': officeLocationId,
+          'LocationText': locationText,
+          'StartTime': startTime?.formatted,
+          'EndTime': endTime?.formatted,
+        }),
+      );
+      if (response.statusCode != 200) return false;
+      final decoded = json.decode(response.body);
+      return decoded is Map<String, dynamic> &&
+          (decoded['Success'] == true || decoded['success'] == true);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Menghapus aktivitas milik user yang sedang login beserta lampirannya.
+  static Future<bool> deleteActivity(int activityId) async {
+    final userId = await _userId();
+    try {
+      final response = await _authedPost(
+        '$baseURL/api/dailyactivity/delete',
+        body: json.encode({'ActivityId': activityId, 'UserId': userId}),
+      );
+      if (response.statusCode != 200) return false;
+      final decoded = json.decode(response.body);
+      return decoded is Map<String, dynamic> &&
+          (decoded['Success'] == true || decoded['success'] == true);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Ambil semua aktivitas user yang sedang login.
   static Future<List<DailyActivityItem>> getMyActivities({
     DateTime? startDate,

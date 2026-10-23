@@ -141,6 +141,89 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
     }
   }
 
+  Future<void> _openEditActivity(DailyActivityItem item) async {
+    if (item.id == null || item.id! <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ID aktivitas tidak valid. Muat ulang data lalu coba lagi.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    final updated = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => AddDailyActivityScreen(activity: item)),
+    );
+    if (updated == true) {
+      await _loadActivities();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aktivitas harian berhasil diperbarui'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteActivity(DailyActivityItem item) async {
+    final activityId = item.id;
+    if (activityId == null || activityId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ID aktivitas tidak valid. Muat ulang data lalu coba lagi.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Hapus aktivitas?'),
+        content: const Text(
+          'Aktivitas beserta seluruh lampirannya akan dihapus permanen.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isLoading = true);
+    final deleted = await DailyActivityService.deleteActivity(activityId);
+    if (!mounted) return;
+    if (deleted) {
+      await _loadActivities();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aktivitas harian berhasil dihapus'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aktivitas tidak dapat dihapus. Coba lagi.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   List<DailyActivityItem> get _filteredActivities {
     return _activities.where((activity) {
       final date = _dateOnly(activity.activityDate);
@@ -722,6 +805,35 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
                           ),
                         ],
                       ),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Aksi aktivitas',
+                      icon: Icon(Icons.more_horiz_rounded, color: Colors.grey[600]),
+                      onSelected: (action) {
+                        if (action == 'edit') {
+                          _openEditActivity(item);
+                        } else if (action == 'delete') {
+                          _confirmDeleteActivity(item);
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: ListTile(
+                            leading: Icon(Icons.edit_outlined),
+                            title: Text('Edit aktivitas'),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: ListTile(
+                            leading: Icon(Icons.delete_outline, color: Colors.red),
+                            title: Text('Hapus aktivitas', style: TextStyle(color: Colors.red)),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -14,7 +14,9 @@ bool _isWideScreen(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
 class AddDailyActivityScreen extends StatefulWidget {
-  const AddDailyActivityScreen({super.key});
+  final DailyActivityItem? activity;
+
+  const AddDailyActivityScreen({super.key, this.activity});
 
   @override
   State<AddDailyActivityScreen> createState() => _AddDailyActivityScreenState();
@@ -41,10 +43,25 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   static const int _maxAttachmentBytes = 5 * 1024 * 1024;
   static const int _maxTotalAttachmentBytes = 15 * 1024 * 1024;
 
+  bool get _isEditing => widget.activity != null;
+
   @override
   void initState() {
     super.initState();
+    final activity = widget.activity;
+    if (activity != null) {
+      _selectedDate = activity.activityDate;
+      _descCtrl.text = activity.description;
+      _locationCtrl.text = activity.locationText ?? '';
+      _startTime = _timeOfDayFromValue(activity.startTime);
+      _endTime = _timeOfDayFromValue(activity.endTime);
+    }
     _loadMasterData();
+  }
+
+  TimeOfDay? _timeOfDayFromValue(TimeOfDayValue? value) {
+    if (value == null) return null;
+    return TimeOfDay(hour: value.hour, minute: value.minute);
   }
 
   @override
@@ -77,7 +94,19 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
             !locations.any((l) => l.id == _selectedOfficeLocation!.id)) {
           _selectedOfficeLocation = null;
         }
-        if (categories.isNotEmpty) _selectedCategory = categories.first;
+        final activity = widget.activity;
+        if (activity != null) {
+          _selectedCategory = categories.cast<DailyActivityCategory?>().firstWhere(
+                (category) => category?.id == activity.categoryId,
+                orElse: () => categories.isNotEmpty ? categories.first : null,
+              );
+          _selectedOfficeLocation = locations.cast<OfficeLocation?>().firstWhere(
+                (location) => location?.id == activity.officeLocationId,
+                orElse: () => null,
+              );
+        } else if (_selectedCategory == null && categories.isNotEmpty) {
+          _selectedCategory = categories.first;
+        }
       });
     } catch (_) {
     } finally {
@@ -167,6 +196,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   // ── Attachments ────────────────────────────────────────────────────────
 
   Future<void> _pickFromCamera() async {
+    if (_isEditing) return;
     if (_attachments.length >= _maxAttachments) return _showLimitWarning();
     final photo = await ImagePicker().pickImage(
       source: ImageSource.camera,
@@ -187,6 +217,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   }
 
   Future<void> _pickFromGallery() async {
+    if (_isEditing) return;
     final remainingSlot = _maxAttachments - _attachments.length;
     if (remainingSlot <= 0) return _showLimitWarning();
     final images = await ImagePicker().pickMultiImage(imageQuality: 85);
@@ -216,6 +247,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   }
 
   Future<void> _pickFiles() async {
+    if (_isEditing) return;
     final remainingSlot = _maxAttachments - _attachments.length;
     if (remainingSlot <= 0) return _showLimitWarning();
     final result = await FilePicker.platform.pickFiles(
@@ -319,22 +351,39 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
           )
           .toList();
 
-      final success = await DailyActivityService.createActivity(
-        activityDate: _selectedDate,
-        categoryId: _selectedCategory!.id,
-        description: _descCtrl.text.trim(),
-        officeLocationId: _selectedOfficeLocation?.id,
-        locationText: _locationCtrl.text.trim().isEmpty
-            ? null
-            : _locationCtrl.text.trim(),
-        startTime: _startTime == null
-            ? null
-            : TimeOfDayValue(_startTime!.hour, _startTime!.minute),
-        endTime: _endTime == null
-            ? null
-            : TimeOfDayValue(_endTime!.hour, _endTime!.minute),
-        attachments: attachmentsPayload,
-      );
+      final startTime = _startTime == null
+          ? null
+          : TimeOfDayValue(_startTime!.hour, _startTime!.minute);
+      final endTime = _endTime == null
+          ? null
+          : TimeOfDayValue(_endTime!.hour, _endTime!.minute);
+      final locationText = _locationCtrl.text.trim().isEmpty
+          ? null
+          : _locationCtrl.text.trim();
+      final success = _isEditing
+          ? await DailyActivityService.updateActivity(
+              // Mode edit hanya dapat dibuka dari item yang sudah tersimpan.
+              // Tetap beri fallback aman agar nullability model lama tidak
+              // membuat aplikasi gagal dikompilasi.
+              activityId: widget.activity!.id ?? 0,
+              activityDate: _selectedDate,
+              categoryId: _selectedCategory!.id,
+              description: _descCtrl.text.trim(),
+              officeLocationId: _selectedOfficeLocation?.id,
+              locationText: locationText,
+              startTime: startTime,
+              endTime: endTime,
+            )
+          : await DailyActivityService.createActivity(
+              activityDate: _selectedDate,
+              categoryId: _selectedCategory!.id,
+              description: _descCtrl.text.trim(),
+              officeLocationId: _selectedOfficeLocation?.id,
+              locationText: locationText,
+              startTime: startTime,
+              endTime: endTime,
+              attachments: attachmentsPayload,
+            );
 
       if (!mounted) return;
       setState(() => _isSubmitting = false);
@@ -342,7 +391,10 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
       if (success) {
         Navigator.pop(context, true);
       } else {
-        _showSnack('Gagal menyimpan aktivitas. Coba lagi.', Colors.red);
+        _showSnack(
+          _isEditing ? 'Gagal memperbarui aktivitas. Coba lagi.' : 'Gagal menyimpan aktivitas. Coba lagi.',
+          Colors.red,
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -360,8 +412,8 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
-        title: const Text(
-          'Tambah Aktivitas Harian',
+        title: Text(
+          _isEditing ? 'Edit Aktivitas Harian' : 'Tambah Aktivitas Harian',
           style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
         ),
         backgroundColor: Colors.white,
@@ -510,9 +562,11 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
         _sectionCard(
           title: 'Lampiran',
           icon: Icons.attach_file_rounded,
-          subtitle: 'Tambahkan foto atau berkas pendukung bila tersedia.',
+          subtitle: _isEditing
+              ? 'Lampiran yang sudah ada dipertahankan saat detail diperbarui.'
+              : 'Tambahkan foto atau berkas pendukung bila tersedia.',
           trailing: Text(
-            '${_attachments.length}/$_maxAttachments',
+            '${_isEditing ? widget.activity!.attachments.length : _attachments.length}/$_maxAttachments',
             style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
           ),
           child: Column(
@@ -524,7 +578,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
                     child: _buildUploadButton(
                       icon: Icons.camera_alt_rounded,
                       label: 'Kamera',
-                      onTap: _pickFromCamera,
+                      onTap: _isEditing ? null : _pickFromCamera,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -532,7 +586,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
                     child: _buildUploadButton(
                       icon: Icons.photo_library_rounded,
                       label: 'Galeri',
-                      onTap: _pickFromGallery,
+                      onTap: _isEditing ? null : _pickFromGallery,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -540,12 +594,20 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
                     child: _buildUploadButton(
                       icon: Icons.attach_file_rounded,
                       label: 'File',
-                      onTap: _pickFiles,
+                      onTap: _isEditing ? null : _pickFiles,
                     ),
                   ),
                 ],
               ),
-              if (_attachments.isEmpty) ...[
+              if (_isEditing) ...[
+                const SizedBox(height: 12),
+                Text(
+                  widget.activity!.attachments.isEmpty
+                      ? 'Tidak ada lampiran pada aktivitas ini.'
+                      : '${widget.activity!.attachments.length} lampiran tersimpan dan tetap aman.',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
+                ),
+              ] else if (_attachments.isEmpty) ...[
                 const SizedBox(height: 12),
                 Container(
                   width: double.infinity,
@@ -1006,7 +1068,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   Widget _buildUploadButton({
     required IconData icon,
     required String label,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
   }) {
     return InkWell(
       onTap: onTap,
@@ -1014,21 +1076,23 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 13),
         decoration: BoxDecoration(
-          color: const Color(0xFF007AFF).withOpacity(0.07),
+          color: (onTap == null ? Colors.grey : const Color(0xFF007AFF)).withOpacity(0.07),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF007AFF).withOpacity(0.18)),
+          border: Border.all(
+            color: (onTap == null ? Colors.grey : const Color(0xFF007AFF)).withOpacity(0.18),
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: const Color(0xFF007AFF), size: 20),
+            Icon(icon, color: onTap == null ? Colors.grey : const Color(0xFF007AFF), size: 20),
             const SizedBox(height: 5),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF007AFF),
+                color: onTap == null ? Colors.grey : const Color(0xFF007AFF),
               ),
             ),
           ],
