@@ -378,7 +378,13 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   Widget _buildMobileLayout() {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      child: _buildFormContent(),
+      child: Column(
+        children: [
+          _buildFormHero(),
+          const SizedBox(height: 16),
+          _buildFormContent(),
+        ],
+      ),
     );
   }
 
@@ -393,6 +399,8 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _buildFormHero(),
+                const SizedBox(height: 18),
                 _buildFormContent(),
                 const SizedBox(height: 24),
                 SizedBox(height: 48, child: _buildSubmitButton()),
@@ -413,6 +421,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
         _sectionCard(
           title: 'Detail Waktu',
           icon: Icons.event_note_rounded,
+          subtitle: 'Pilih tanggal dan waktu pengerjaan bila diperlukan.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -436,6 +445,7 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
         _sectionCard(
           title: 'Kategori & Lokasi',
           icon: Icons.category_rounded,
+          subtitle: 'Bantu tim memahami konteks pekerjaan Anda.',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -457,38 +467,50 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
         _sectionCard(
           title: 'Deskripsi',
           icon: Icons.notes_rounded,
-          child: TextField(
-            controller: _descCtrl,
-            maxLines: 5,
-            style: const TextStyle(fontSize: 13.5),
-            decoration: InputDecoration(
-              hintText: 'Ceritakan aktivitas/pekerjaan yang Anda lakukan...',
-              hintStyle: TextStyle(fontSize: 13, color: Colors.grey[400]),
-              filled: true,
-              fillColor: const Color(0xFFF9FAFB),
-              contentPadding: const EdgeInsets.all(14),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(
-                  color: Color(0xFF007AFF),
-                  width: 1.5,
+          subtitle: 'Tuliskan hasil kerja, progres, atau kendala yang ditemui.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _descCtrl,
+                maxLines: 5,
+                style: const TextStyle(fontSize: 13.5),
+                decoration: InputDecoration(
+                  hintText: 'Contoh: Menyelesaikan rekap data absensi dan mengirimkannya ke atasan.',
+                  hintStyle: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                  filled: true,
+                  fillColor: const Color(0xFFF9FAFB),
+                  contentPadding: const EdgeInsets.all(14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF007AFF),
+                      width: 1.5,
+                    ),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(height: 9),
+              Text(
+                'Deskripsi yang jelas memudahkan HRD meninjau aktivitas Anda.',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 14),
         _sectionCard(
           title: 'Lampiran',
           icon: Icons.attach_file_rounded,
+          subtitle: 'Tambahkan foto atau berkas pendukung bila tersedia.',
           trailing: Text(
             '${_attachments.length}/$_maxAttachments',
             style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
@@ -523,6 +545,36 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
                   ),
                 ],
               ),
+              if (_attachments.isEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(13),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFF007AFF).withOpacity(0.13),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded,
+                          color: Color(0xFF5B8DEF), size: 17),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          'Maksimal $_maxAttachments lampiran, masing-masing hingga 5 MB.',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF5B6474),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (_attachments.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 ...List.generate(_attachments.length, _buildAttachmentTile),
@@ -534,12 +586,130 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
     );
   }
 
+  Widget _buildFormHero() {
+    final dateText =
+        '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1769E0), Color(0xFF5B8DEF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1769E0).withOpacity(0.22),
+            blurRadius: 16,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(Icons.edit_note_rounded,
+                    size: 23, color: Colors.white),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(dateText,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    )),
+              ),
+            ],
+          ),
+          const SizedBox(height: 15),
+          const Text('Catat progres kerja Anda',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+              )),
+          const SizedBox(height: 5),
+          Text(
+            'Lengkapi detail aktivitas dan bukti pendukung agar mudah ditinjau.',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.86),
+              fontSize: 12.5,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 15),
+          Row(
+            children: [
+              _heroStep('1', 'Detail'),
+              _heroConnector(),
+              _heroStep('2', 'Aktivitas'),
+              _heroConnector(),
+              _heroStep('3', 'Simpan'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroStep(String number, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+              color: Colors.white, shape: BoxShape.circle),
+          child: Text(number,
+              style: const TextStyle(
+                  color: Color(0xFF1769E0),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800)),
+        ),
+        const SizedBox(width: 5),
+        Text(label,
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.93),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+
+  Widget _heroConnector() => Expanded(
+        child: Container(
+          height: 1,
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          color: Colors.white.withOpacity(0.35),
+        ),
+      );
+
   // ── Reusable pieces ────────────────────────────────────────────────────
 
   Widget _sectionCard({
     required String title,
     required IconData icon,
     required Widget child,
+    String? subtitle,
     Widget? trailing,
   }) {
     return Container(
@@ -560,22 +730,37 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: const Color(0xFF007AFF)),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1F2937),
-                ),
+          Row(children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: const Color(0xFF007AFF).withOpacity(0.10),
+                borderRadius: BorderRadius.circular(9),
               ),
-              const Spacer(),
-              if (trailing != null) trailing,
-            ],
-          ),
+              child: Icon(icon, size: 16, color: const Color(0xFF007AFF)),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2937),
+                      )),
+                  if (subtitle != null)
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 10.5, color: Colors.grey[500])),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing,
+          ]),
           const SizedBox(height: 14),
           child,
         ],
@@ -916,15 +1101,16 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
   }
 
   Widget _buildSubmitButton() {
-    return ElevatedButton(
+    return ElevatedButton.icon(
       onPressed: _isSubmitting ? null : _submit,
       style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF007AFF),
+        backgroundColor: const Color(0xFF1769E0),
         foregroundColor: Colors.white,
         elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      child: _isSubmitting
+      icon: _isSubmitting
           ? const SizedBox(
               width: 20,
               height: 20,
@@ -933,6 +1119,9 @@ class _AddDailyActivityScreenState extends State<AddDailyActivityScreen> {
                 valueColor: AlwaysStoppedAnimation(Colors.white),
               ),
             )
+          : const Icon(Icons.check_circle_outline_rounded, size: 19),
+      label: _isSubmitting
+          ? const SizedBox.shrink()
           : const Text(
               'Simpan Aktivitas',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),

@@ -24,7 +24,12 @@ bool _isWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
 class OvertimeHRDScreen extends StatefulWidget {
-  const OvertimeHRDScreen({super.key});
+  final String presentationRole;
+
+  const OvertimeHRDScreen({
+    super.key,
+    this.presentationRole = 'HRD',
+  });
 
   @override
   _OvertimeHRDScreenState createState() => _OvertimeHRDScreenState();
@@ -32,6 +37,9 @@ class OvertimeHRDScreen extends StatefulWidget {
 
 class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     with SingleTickerProviderStateMixin {
+  bool get _isDirectorView =>
+      widget.presentationRole.trim().toLowerCase() == 'direktur';
+  String get _roleLabel => _isDirectorView ? 'Direktur' : 'HRD';
   List<AdminOvertimeData> _allOvertimes = [];
   List<AdminOvertimeData> _filteredOvertimes = [];
   List<UserWithOvertimes> _users = [];
@@ -564,7 +572,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: _buildAppBar(isWeb),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -575,7 +583,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                   ),
                   SizedBox(height: 16),
                   Text(
-                    'Memuat data HRD...',
+                    'Memuat data $_roleLabel...',
                     style: TextStyle(fontSize: 16, color: Color(0xFF6B7280)),
                   ),
                 ],
@@ -595,7 +603,9 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   PreferredSizeWidget _buildAppBar(bool isWeb) {
     return AppBar(
       title: Text(
-        _isSelectionMode ? '${_selectedItems.length} dipilih' : 'HRD Overtime',
+        _isSelectionMode
+            ? '${_selectedItems.length} dipilih'
+            : '$_roleLabel Overtime',
         style: TextStyle(
           fontSize: _getResponsiveFontSize(context, 20),
           fontWeight: FontWeight.w700,
@@ -1048,7 +1058,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Selamat Datang, HRD',
+                          'Selamat Datang, $_roleLabel',
                           style: TextStyle(
                             fontSize: _getResponsiveFontSize(context, 17),
                             fontWeight: FontWeight.w700,
@@ -1058,7 +1068,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _currentUserName ?? 'HRD Manager',
+                          _currentUserName ?? '$_roleLabel Perusahaan',
                           style: TextStyle(
                             fontSize: _getResponsiveFontSize(context, 13),
                             color: Colors.white70,
@@ -1491,7 +1501,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'Statistik Overtime HRD',
+              'Statistik Overtime $_roleLabel',
               style: TextStyle(
                 fontSize: _getResponsiveFontSize(context, 17),
                 fontWeight: FontWeight.w700,
@@ -1703,7 +1713,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
               const Icon(Icons.insights, color: Color(0xFF6366F1), size: 18),
               const SizedBox(width: 8),
               Text(
-                'HRD Insights',
+                'Insight $_roleLabel',
                 style: TextStyle(
                   fontSize: _getResponsiveFontSize(context, 15),
                   fontWeight: FontWeight.w700,
@@ -1857,7 +1867,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Aksi Cepat HRD',
+          'Aksi Cepat $_roleLabel',
           style: TextStyle(
             fontSize: _getResponsiveFontSize(context, 15),
             fontWeight: FontWeight.w700,
@@ -2904,7 +2914,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     }
 
     final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final fileName = 'Laporan_Overtime_HRD_$timestamp.xlsx';
+  final fileName = 'Laporan_Overtime_${_roleLabel}_$timestamp.xlsx';
 
     try {
       if (kIsWeb) {

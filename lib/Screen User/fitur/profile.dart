@@ -15,6 +15,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warninglette
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/profile.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -186,26 +187,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String _l(String key) => _localizedStrings[_selectedLanguage]?[key] ?? key;
 
-  static Future<String?> _getToken() async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (r.statusCode == 200) {
-        final d = json.decode(r.body);
-        if (d.containsKey('access_token') && d['access_token'] != null) {
-          return d['access_token'];
-        }
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
+  static Future<String?> _getToken() => TokenService.getToken();
 
   Future<void> _initializeUserInfo() async {
     _accessToken = await _getToken();
@@ -215,12 +197,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadProfileData() async {
     setState(() => _isLoadingDisplay = true);
     final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('Email');
-    if (email == null) {
+    final userId = prefs.getString('UserID');
+    if (userId == null || userId.isEmpty) {
       setState(() => _isLoadingDisplay = false);
       return;
     }
-    setState(() => _email = email);
+    setState(() => _email = prefs.getString('Email') ?? '');
     try {
       final r = await http.post(
         Uri.parse('$baseURL/api/asn/getDataUser'),
@@ -229,7 +211,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email}),
+        body: json.encode({'UserId': userId}),
       );
       if (r.statusCode == 200) {
         setState(() {
@@ -353,22 +335,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final base64Image = base64Encode(bytes);
       final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('Email') ?? '';
-      if (email.isEmpty) {
-        _showErrorSnackBar('Email tidak ditemukan');
+      final userId = prefs.getString('UserID') ?? '';
+      if (userId.isEmpty) {
+        _showErrorSnackBar('User tidak ditemukan');
         return;
       }
 
-      final tokenResp = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-      if (tokenResp.statusCode != 200) {
+      final token = await TokenService.getToken();
+      if (token == null || token.isEmpty) {
         _showErrorSnackBar('Gagal mendapatkan token');
         return;
       }
-      final token = json.decode(tokenResp.body)['access_token'];
 
       final r = await http.post(
         Uri.parse('$baseURL/api/asn/user/profile/photo/upload-base64'),
@@ -377,7 +354,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email, 'FotoProfilBase64': base64Image}),
+        body: json.encode({
+          'UserId': userId,
+          'RequestUserId': userId,
+          'FotoProfilBase64': base64Image,
+        }),
       );
       if (!mounted) return;
       if (r.statusCode == 200) {
@@ -602,9 +583,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   );
                                   return;
                                 }
+                                final password = passwordCtrl.text;
                                 Navigator.pop(context);
                                 passwordCtrl.dispose();
-                                _performDeleteAccount();
+                                _performDeleteAccount(password);
                               },
                         child: _isDeletingAccount
                             ? const SizedBox(
@@ -636,7 +618,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _performDeleteAccount() async {
+  Future<void> _performDeleteAccount(String password) async {
     if (_profileDisplay == null) {
       _showErrorSnackBar('Data profil tidak ditemukan');
       return;
@@ -644,18 +626,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _isDeletingAccount = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('Email') ?? '';
+      final userId = prefs.getString('UserID') ?? '';
+      if (userId.isEmpty || password.isEmpty) {
+        _showErrorSnackBar('User atau password tidak ditemukan');
+        return;
+      }
       final r = await http
           .post(
-            Uri.parse('$baseURL/api/asn/user/deleteAccount'),
+            Uri.parse('$baseURL/api/asn/deleteAccount'),
             headers: {
               'Authorization': 'Bearer $_accessToken',
               'Content-Type': 'application/json',
               'Accept': 'application/json',
             },
             body: json.encode({
-              'UserId': _profileDisplay!.id.toString(),
-              'UpdatedBy': email,
+              'UserId': userId,
+              'Password': password,
             }),
           )
           .timeout(const Duration(seconds: 30));
@@ -663,7 +649,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (r.statusCode == 200) {
         final rb = json.decode(r.body);
         final msg = rb['Message'] ?? rb['message'] ?? '';
-        if (msg.toLowerCase().contains('successfully')) {
+        if (rb['success'] == true || msg.toLowerCase().contains('berhasil')) {
           _showSuccessSnackBar(_l('successDeleteAccount'));
           await Future.delayed(const Duration(seconds: 2));
           await prefs.clear();

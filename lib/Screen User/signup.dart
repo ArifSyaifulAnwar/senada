@@ -188,12 +188,25 @@ class _SignUpScreenState extends State<SignUpScreen>
                               if (_isJoinMode)
                                 _buildInviteCodeField(isWeb)
                               else
-                                _buildTextField(
-                                  label: 'Nama Perusahaan',
-                                  icon: Icons.business,
-                                  isPassword: false,
-                                  controller: _newCompanyNameController,
-                                  maxLength: 200,
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildTextField(
+                                      label: 'Nama Legal Perusahaan',
+                                      icon: Icons.business,
+                                      isPassword: false,
+                                      controller: _newCompanyNameController,
+                                      maxLength: 200,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'Pendaftaran perusahaan akan diverifikasi terlebih dahulu. Akun Anda belum dapat masuk sebelum disetujui.',
+                                      style: TextStyle(
+                                        color: Colors.orange,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               SizedBox(
                                 height: isWeb ? 16 : screenHeight * 0.02,
@@ -589,7 +602,7 @@ class _SignUpScreenState extends State<SignUpScreen>
           });
         }),
         const SizedBox(width: 10),
-        chip('Daftarkan Perusahaan Baru', !_isJoinMode, () {
+        chip('Daftarkan Perusahaan Anda', !_isJoinMode, () {
           if (!_isJoinMode) return;
           setState(() {
             _isJoinMode = false;

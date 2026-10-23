@@ -23,7 +23,12 @@ bool _isWebLayout(BuildContext context) =>
     MediaQuery.of(context).size.width >= 768;
 
 class TimeOffHRDScreen extends StatefulWidget {
-  const TimeOffHRDScreen({super.key});
+  final String presentationRole;
+
+  const TimeOffHRDScreen({
+    super.key,
+    this.presentationRole = 'HRD',
+  });
 
   @override
   _TimeOffHRDScreenState createState() => _TimeOffHRDScreenState();
@@ -31,6 +36,11 @@ class TimeOffHRDScreen extends StatefulWidget {
 
 class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     with SingleTickerProviderStateMixin {
+  bool get _isDirectorView =>
+      widget.presentationRole.trim().toLowerCase() == 'direktur';
+  String get _roleLabel => _isDirectorView ? 'Direktur' : 'HRD';
+  String get _departmentLabel =>
+      _isDirectorView ? 'Manajemen Perusahaan' : 'Human Resource Department';
   List<WorkPeriodModel> _workPeriods = [];
   WorkPeriodModel? _selectedWorkPeriod; // null = semua periode
   List<AdminTimeOffData> _allTimeOffs = [];
@@ -593,7 +603,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Memuat data HRD...',
+                    'Memuat data $_roleLabel...',
                     style: TextStyle(
                       fontSize: _fs(16),
                       color: const Color(0xFF6B7280),
@@ -989,12 +999,12 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Human Resource Department',
+                    _departmentLabel,
                     style: TextStyle(fontSize: _fs(11), color: Colors.white70),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _currentUserName ?? 'HRD Manager',
+                    _currentUserName ?? '$_roleLabel Perusahaan',
                     style: TextStyle(
                       fontSize: _fs(17),
                       fontWeight: FontWeight.w700,
@@ -1521,7 +1531,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Text(
-        'Aksi Cepat HRD',
+        'Aksi Cepat $_roleLabel',
         style: TextStyle(
           fontSize: _fs(15),
           fontWeight: FontWeight.w700,
@@ -2181,7 +2191,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
               const Icon(Icons.assessment, color: Colors.white, size: 28),
               const SizedBox(height: 10),
               Text(
-                'Laporan HRD',
+                'Laporan $_roleLabel',
                 style: TextStyle(
                   fontSize: _fs(19),
                   fontWeight: FontWeight.w700,
@@ -2735,7 +2745,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       // ── Tambah sheet Ringkasan di semua report ─────────────────────────────
       final summarySheet = excel['Ringkasan'];
       summarySheet.cell(xl.CellIndex.indexByString('A1')).value =
-          xl.TextCellValue('Laporan HRD — $sheetName');
+          xl.TextCellValue('Laporan $_roleLabel — $sheetName');
       summarySheet.cell(xl.CellIndex.indexByString('A1')).cellStyle = boldStyle;
 
       summarySheet.cell(xl.CellIndex.indexByString('A3')).value =
@@ -3798,7 +3808,7 @@ class _HRDTimeOffDetailModalState extends State<HRDTimeOffDetailModal> {
   }
 
   // Reuse TokenService (dedupe + cache sesuai expires_in dari server) — dulu
-  // fetch token baru dari /api/auth/token setiap kali dipanggil tanpa cache
+  // Menggunakan token sesi akun yang sedang login.
   // sama sekali, jadi lebih boros dan lebih gampang kena gagal fetch token
   // (network hiccup dll) yang berujung ke error 401 dari server.
   Future<String?> _getToken() => TokenService.getToken();

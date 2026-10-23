@@ -11,7 +11,9 @@ import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'package:absensikaryawan/Screen%20admin/service/web_preview.dart';
+import 'package:absensikaryawan/Services/company_calendar_service.dart';
 import 'package:absensikaryawan/Services/web_download.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../Screen admin/all_employee_activities_screen.dart';
 import '../../Screen admin/service/daily_activity_service.dart';
 import '../../models/dailyactivitymodels.dart';
@@ -33,6 +35,15 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   String _filterCategory = 'Semua';
   List<DailyActivityItem> _activities = [];
   bool _hasHRDAccess = false;
+
+  // Null berarti seluruh riwayat aktivitas milik user yang sedang login.
+  // Filter tetap diterapkan di client karena endpoint getByUser juga sudah
+  // mengunci data ke pemilik aktivitas dan perusahaan user tersebut.
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String _selectedTimeRange = 'Periode Kerja';
+  List<WorkPeriod> _workPeriods = [];
+  WorkPeriod? _selectedWorkPeriod;
   Future<void> _checkHRDAccess() async {
     final result = await DailyActivityService.getAllActivitiesHRD();
     if (mounted) {
@@ -43,7 +54,10 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   Future<void> _loadActivities() async {
     setState(() => _isLoading = true);
     try {
-      final data = await DailyActivityService.getMyActivities();
+      final data = await DailyActivityService.getMyActivities(
+        startDate: _startDate,
+        endDate: _endDate,
+      );
       if (mounted) setState(() => _activities = data);
     } catch (_) {
     } finally {
@@ -54,8 +68,58 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   @override
   void initState() {
     super.initState();
-    _loadActivities();
+    _initializePeriodFilter();
     _checkHRDAccess();
+  }
+
+  Future<void> _initializePeriodFilter() async {
+    await _loadWorkPeriods();
+    await _loadActivities();
+  }
+
+  Future<void> _loadWorkPeriods() async {
+    final now = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('UserID') ?? '';
+    if (userId.isEmpty) return;
+    try {
+      final results = await Future.wait([
+        CompanyCalendarService.getWorkPeriodsByYear(now.year, userId: userId),
+        CompanyCalendarService.getWorkPeriodsByYear(now.year - 1, userId: userId),
+      ]);
+      final byId = <int, WorkPeriod>{};
+      for (final periods in results) {
+        for (final period in periods) {
+          byId[period.id] = period;
+        }
+      }
+      final periods = byId.values.toList()
+        ..sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
+      final today = _dateOnly(now);
+      WorkPeriod? active;
+      for (final period in periods) {
+        if (!today.isBefore(_dateOnly(period.tanggalMulai)) &&
+            !today.isAfter(_dateOnly(period.tanggalSelesai))) {
+          active = period;
+          break;
+        }
+      }
+      active ??= periods.isNotEmpty ? periods.first : null;
+      if (!mounted) return;
+      setState(() {
+        _workPeriods = periods;
+        _selectedWorkPeriod = active;
+        if (active != null) {
+          _selectedTimeRange = 'Periode Kerja';
+          _startDate = _dateOnly(active.tanggalMulai);
+          _endDate = _dateOnly(active.tanggalSelesai);
+        } else {
+          _applyRelativeRange('30 Hari Terakhir');
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _applyRelativeRange('30 Hari Terakhir'));
+    }
   }
 
   Future<void> _openAddActivity() async {
@@ -78,10 +142,90 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   }
 
   List<DailyActivityItem> get _filteredActivities {
-    if (_filterCategory == 'Semua') return _activities;
-    return _activities
-        .where((a) => a.categoryLabel == _filterCategory)
-        .toList();
+    return _activities.where((activity) {
+      final date = _dateOnly(activity.activityDate);
+      final matchesCategory =
+          _filterCategory == 'Semua' || activity.categoryLabel == _filterCategory;
+      final matchesStart =
+          _startDate == null || !date.isBefore(_dateOnly(_startDate!));
+      final matchesEnd =
+          _endDate == null || !date.isAfter(_dateOnly(_endDate!));
+      return matchesCategory && matchesStart && matchesEnd;
+    }).toList();
+  }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  String get _dateFilterLabel {
+    if (_selectedWorkPeriod != null) return _workPeriodLabel(_selectedWorkPeriod!);
+    if (_selectedTimeRange != 'Pilih Periode') return _selectedTimeRange;
+    if (_startDate == null || _endDate == null) return 'Pilih Periode';
+    if (DateUtils.isSameDay(_startDate, _endDate)) {
+      return DateFormat('dd MMM yyyy', 'id_ID').format(_startDate!);
+    }
+    return '${DateFormat('dd MMM', 'id_ID').format(_startDate!)} - '
+        '${DateFormat('dd MMM yyyy', 'id_ID').format(_endDate!)}';
+  }
+
+  String _workPeriodLabel(WorkPeriod period) {
+    final label = period.keterangan.trim();
+    return label.isNotEmpty
+        ? label
+        : 'Periode ${DateFormat('MMMM yyyy', 'id_ID').format(DateTime(period.tahun, period.bulan))}';
+  }
+
+  void _applyRelativeRange(String range) {
+    final today = _dateOnly(DateTime.now());
+    final days = switch (range) {
+      '1 Hari' => 0,
+      '7 Hari Terakhir' => 6,
+      '30 Hari Terakhir' => 29,
+      _ => 364,
+    };
+    _selectedTimeRange = range;
+    _selectedWorkPeriod = null;
+    _startDate = today.subtract(Duration(days: days));
+    _endDate = today;
+  }
+
+  Future<void> _selectRelativeRange(String range) async {
+    setState(() => _applyRelativeRange(range));
+    await _loadActivities();
+  }
+
+  Future<void> _selectWorkPeriod(WorkPeriod period) async {
+    setState(() {
+      _selectedTimeRange = 'Periode Kerja';
+      _selectedWorkPeriod = period;
+      _startDate = _dateOnly(period.tanggalMulai);
+      _endDate = _dateOnly(period.tanggalSelesai);
+    });
+    await _loadActivities();
+  }
+
+  Future<void> _pickDateRange() async {
+    final now = _dateOnly(DateTime.now());
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: now,
+      initialDateRange: _startDate != null && _endDate != null
+          ? DateTimeRange(start: _startDate!, end: _endDate!)
+          : null,
+      helpText: 'Pilih periode aktivitas',
+      confirmText: 'Terapkan',
+      cancelText: 'Batal',
+    );
+
+    if (picked == null || !mounted) return;
+    setState(() {
+      _startDate = _dateOnly(picked.start);
+      _endDate = _dateOnly(picked.end);
+      _selectedTimeRange = 'Pilih Periode';
+      _selectedWorkPeriod = null;
+    });
+    await _loadActivities();
   }
 
   List<String> get _categoryFilters {
@@ -91,6 +235,64 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
     }
     return set.toList();
   }
+
+  int get _todayCount {
+    final now = DateTime.now();
+    return _activities.where((item) =>
+        item.activityDate.year == now.year &&
+        item.activityDate.month == now.month &&
+        item.activityDate.day == now.day).length;
+  }
+
+  int get _attachmentCount =>
+      _activities.fold<int>(0, (total, item) => total + item.attachments.length);
+
+  Widget _buildOverview({bool compact = false}) {
+    final today = DateFormat('EEEE, d MMMM', 'id_ID').format(DateTime.now());
+    return Container(
+      margin: EdgeInsets.fromLTRB(compact ? 16 : 0, 0, compact ? 16 : 0, 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF155EEF), Color(0xFF4F46E5)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: const Color(0xFF155EEF).withOpacity(.22), blurRadius: 22, offset: const Offset(0, 10))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Ruang kerja harian', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 19)),
+            const SizedBox(height: 4),
+            Text(today, style: TextStyle(color: Colors.white.withOpacity(.78), fontSize: 12)),
+          ])),
+          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.white.withOpacity(.16), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.auto_awesome_rounded, color: Colors.white)),
+        ]),
+        const SizedBox(height: 18),
+        Row(children: [
+          _overviewMetric('Hari ini', '$_todayCount', Icons.today_rounded),
+          const SizedBox(width: 10),
+          _overviewMetric('Ditampilkan', '${_filteredActivities.length}', Icons.checklist_rounded),
+          const SizedBox(width: 10),
+          _overviewMetric('Lampiran', '$_attachmentCount', Icons.attach_file_rounded),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _overviewMetric(String label, String value, IconData icon) => Expanded(
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(.14), borderRadius: BorderRadius.circular(14)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, color: Colors.white.withOpacity(.82), size: 16), const SizedBox(height: 7),
+        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white.withOpacity(.76), fontSize: 10)),
+      ]),
+    ),
+  );
 
   String _formatDate(DateTime d) =>
       DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(d);
@@ -177,7 +379,7 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
-        SliverToBoxAdapter(child: _buildFilterChips()),
+        SliverToBoxAdapter(child: Column(children: [_buildOverview(compact: true), _buildFilterChips()])),
         if (_isLoading)
           const SliverFillRemaining(
             child: Center(child: CircularProgressIndicator()),
@@ -208,7 +410,7 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
               constraints: const BoxConstraints(maxWidth: 900),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                child: _buildFilterChips(),
+                child: Column(children: [_buildOverview(), _buildFilterChips()]),
               ),
             ),
           ),
@@ -240,38 +442,167 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   }
 
   Widget _buildFilterChips() {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-        scrollDirection: Axis.horizontal,
-        itemCount: _categoryFilters.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final c = _categoryFilters[i];
-          final sel = c == _filterCategory;
-          return ChoiceChip(
-            label: Text(c),
-            selected: sel,
-            onSelected: (_) => setState(() => _filterCategory = c),
-            selectedColor: const Color(0xFF007AFF),
-            backgroundColor: Colors.white,
-            side: BorderSide(
-              color: sel ? const Color(0xFF007AFF) : Colors.grey.shade300,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+          child: OutlinedButton.icon(
+            onPressed: _showPeriodSelector,
+            icon: const Icon(Icons.calendar_month_rounded, size: 18),
+            label: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(_dateFilterLabel, overflow: TextOverflow.ellipsis),
             ),
-            labelStyle: TextStyle(
-              color: sel ? Colors.white : const Color(0xFF374151),
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF155EEF),
+              minimumSize: const Size.fromHeight(46),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              side: const BorderSide(color: Color(0xFFBFDBFE)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-          );
-        },
+          ),
+        ),
+        SizedBox(
+          height: 48,
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            scrollDirection: Axis.horizontal,
+            itemCount: _categoryFilters.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final c = _categoryFilters[i];
+              final sel = c == _filterCategory;
+              return ChoiceChip(
+                label: Text(c),
+                selected: sel,
+                onSelected: (_) => setState(() => _filterCategory = c),
+                selectedColor: const Color(0xFF007AFF),
+                backgroundColor: Colors.white,
+                side: BorderSide(
+                  color: sel ? const Color(0xFF007AFF) : Colors.grey.shade300,
+                ),
+                labelStyle: TextStyle(
+                  color: sel ? Colors.white : const Color(0xFF374151),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showPeriodSelector() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4)))),
+              const SizedBox(height: 18),
+              const Text('Periode aktivitas', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 12),
+              _periodTile(
+                title: _selectedWorkPeriod == null ? 'Periode kerja HRD' : _workPeriodLabel(_selectedWorkPeriod!),
+                subtitle: _selectedWorkPeriod == null
+                    ? 'Periode kerja belum tersedia'
+                    : '${_formatDate(_selectedWorkPeriod!.tanggalMulai)} - ${_formatDate(_selectedWorkPeriod!.tanggalSelesai)}',
+                selected: _selectedWorkPeriod != null,
+                onTap: _workPeriods.isEmpty ? null : () async {
+                  Navigator.pop(sheetContext);
+                  await _showWorkPeriodPicker();
+                },
+              ),
+              for (final range in const ['1 Hari', '7 Hari Terakhir', '30 Hari Terakhir', '1 Tahun Terakhir'])
+                _periodTile(
+                  title: range,
+                  selected: _selectedWorkPeriod == null && _selectedTimeRange == range,
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    await _selectRelativeRange(range);
+                  },
+                ),
+              _periodTile(
+                title: 'Pilih Periode',
+                subtitle: _selectedTimeRange == 'Pilih Periode' && _startDate != null
+                    ? '${_formatDate(_startDate!)} - ${_formatDate(_endDate!)}'
+                    : null,
+                selected: _selectedWorkPeriod == null && _selectedTimeRange == 'Pilih Periode',
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await _pickDateRange();
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
+
+  Future<void> _showWorkPeriodPicker() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            const Text('Pilih periode kerja HRD', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            ..._workPeriods.map((period) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(period.id == _selectedWorkPeriod?.id ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded, color: const Color(0xFF007AFF)),
+              title: Text(_workPeriodLabel(period)),
+              subtitle: Text('${_formatDate(period.tanggalMulai)} - ${_formatDate(period.tanggalSelesai)}'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                await _selectWorkPeriod(period);
+              },
+            )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _periodTile({
+    required String title,
+    String? subtitle,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(color: selected ? const Color(0xFF007AFF).withOpacity(.08) : Colors.transparent, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        Icon(selected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded, size: 18, color: selected ? const Color(0xFF007AFF) : Colors.grey[400]),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: TextStyle(fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: selected ? const Color(0xFF007AFF) : const Color(0xFF1F2937))),
+          if (subtitle != null) Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        ])),
+      ]),
+    ),
+  );
 
   Widget _buildEmptyState() {
     return LayoutBuilder(

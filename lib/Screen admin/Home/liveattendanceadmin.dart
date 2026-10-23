@@ -13,6 +13,7 @@ import '../../Screen User/fitur/attendance.dart'; // HalamanRiwayatAbsensi
 import '../../Screen User/fitur/riwayatabsensi.dart';
 import '../../Services/config.dart';
 import '../../Services/face_recognition_service.dart';
+import '../../Services/token_service.dart';
 
 enum AttendanceStatus { notCheckedIn, checkedIn, onBreak, checkedOut }
 
@@ -289,16 +290,8 @@ class _LiveAttendanceScreenAdminState extends State<LiveAttendanceScreenAdmin>
         throw Exception('User ID tidak ditemukan. Silakan login ulang.');
       }
 
-      final tokenResp = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (tokenResp.statusCode == 200) {
-        final token = json.decode(tokenResp.body)['access_token'];
+      final token = await TokenService.getToken();
+      if (token != null) {
         final resp = await http
             .get(
               Uri.parse('$baseURL/api/asn/office/locations').replace(

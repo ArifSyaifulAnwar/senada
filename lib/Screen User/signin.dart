@@ -8,9 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SignInScreen extends StatefulWidget {
@@ -75,30 +77,49 @@ class _SignInScreenState extends State<SignInScreen>
       setState(() => _isLoading = true);
 
       try {
-        final tokenResponse = await http.post(
-          Uri.parse('$baseURL/api/auth/token'),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-        );
+        final tokenResponse = await http
+            .post(
+              Uri.parse('$baseURL/api/auth/token'),
+              headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+              body: {
+                'grant_type': 'password',
+                'password':
+                    'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
+              },
+            )
+            .timeout(const Duration(seconds: 20));
 
         if (tokenResponse.statusCode == 200) {
           final tokenData = json.decode(tokenResponse.body);
           final accessToken = tokenData['access_token'];
           if (accessToken != null) {
-            final loginResponse = await http.post(
-              Uri.parse('$baseURL/api/asn/login'),
-              headers: {
-                'Authorization': 'bearer $accessToken',
-                'Content-Type': 'application/json',
-              },
-              body: json.encode({
-                'Email': emailOrUserId,
-                'Password': password,
-                'OtpCode': otpCode,
-              }),
-            );
+            final loginResponse = await http
+                .post(
+                  Uri.parse('$baseURL/api/asn/login'),
+                  headers: {
+                    'Authorization': 'Bearer $accessToken',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                  },
+                  body: json.encode({
+                    'Email': emailOrUserId,
+                    'Password': password,
+                    'OtpCode': otpCode,
+                  }),
+                )
+                .timeout(const Duration(seconds: 30));
 
-            final responseData = json.decode(loginResponse.body);
+            // Jangan biarkan body kosong/non-JSON dari IIS berubah menjadi
+            // FormatException yang membingungkan pengguna saat login.
+            Map<String, dynamic> responseData = <String, dynamic>{};
+            if (loginResponse.body.trim().isNotEmpty) {
+              try {
+                final decoded = json.decode(loginResponse.body);
+                if (decoded is Map<String, dynamic>) responseData = decoded;
+              } catch (_) {
+                responseData = <String, dynamic>{};
+              }
+            }
 
             if (loginResponse.statusCode == 200) {
               if (responseData['requireOTP'] == true) {
@@ -124,6 +145,19 @@ class _SignInScreenState extends State<SignInScreen>
                   responseData['FotoProfil'] ?? '',
                 );
                 await prefs.setString('Role', role);
+                final sessionToken = responseData['AccessToken']?.toString();
+                final expiresIn = responseData['ExpiresIn'];
+                if (sessionToken == null || sessionToken.isEmpty) {
+                  // Jangan pernah meneruskan sesi sebelumnya: token tersebut
+                  // dapat milik akun/PT lain dan akan ditolak endpoint scoped.
+                  TokenService.invalidate();
+                  _showDialog('Sesi login tidak valid. Silakan login kembali.');
+                  return;
+                }
+                await TokenService.setSessionToken(
+                  sessionToken,
+                  expiresIn is int ? expiresIn : int.tryParse('$expiresIn') ?? 28800,
+                );
 
                 // Upload FCM token ke backend setelah login berhasil
                 FcmService.uploadToken();
@@ -162,8 +196,10 @@ class _SignInScreenState extends State<SignInScreen>
         } else {
           _showDialog('Gagal mendapatkan token.');
         }
-      } catch (e) {
-        _showDialog('Terjadi kesalahan: $e');
+      } on TimeoutException {
+        _showDialog('Server login tidak merespons. Periksa koneksi lalu coba lagi.');
+      } catch (_) {
+        _showDialog('Login tidak dapat diproses. Silakan coba lagi beberapa saat.');
       } finally {
         setState(() => _isLoading = false);
       }

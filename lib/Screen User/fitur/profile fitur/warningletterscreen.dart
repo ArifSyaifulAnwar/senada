@@ -57,7 +57,10 @@ class _WarningLetterScreenState extends State<WarningLetterScreen> {
     final id = letter.id;
     setState(() => _downloadingIds.add(id));
     try {
-      final bytes = await TeguranService.downloadTeguranPdf(id);
+      final bytes = await TeguranService.downloadTeguranPdf(
+        id,
+        requestUserId: widget.userId,
+      );
       final fileName = TeguranService.buildSuratFileName(
         userName: null,
         userId: widget.userId,

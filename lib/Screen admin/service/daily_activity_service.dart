@@ -135,13 +135,19 @@ class DailyActivityService {
   }
 
   /// Ambil semua aktivitas user yang sedang login.
-  static Future<List<DailyActivityItem>> getMyActivities() async {
+  static Future<List<DailyActivityItem>> getMyActivities({
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final userId = await _userId();
+    final requestBody = <String, dynamic>{'RequestUserId': userId};
+    if (startDate != null) requestBody['StartDate'] = _apiDate(startDate);
+    if (endDate != null) requestBody['EndDate'] = _apiDate(endDate);
 
     try {
       final response = await _authedPost(
         '$baseURL/api/dailyactivity/getByUser',
-        body: json.encode({'RequestUserId': userId}),
+        body: json.encode(requestBody),
       );
 
       if (response.statusCode == 200) {

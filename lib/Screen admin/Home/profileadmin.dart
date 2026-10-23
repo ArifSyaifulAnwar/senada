@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'package:device_info_plus/device_info_plus.dart';
 import '../../Screen User/fitur/profile fitur/bantuandandukungan.dart';
 import '../../Screen User/fitur/profile fitur/hubungikami.dart';
@@ -24,6 +23,7 @@ import '../../Screen User/home.dart';
 import '../../Screen User/splash_screen.dart';
 import '../../Services/config.dart';
 import '../../Services/profile.dart';
+import '../../Services/token_service.dart';
 import '../../Screen HRD/Home/company_invite_screen.dart';
 import '../../Screen HRD/homehrd.dart';
 import '../homeadmin.dart';
@@ -157,26 +157,10 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     _initializeUserInfo();
   }
 
-  static Future<String?> _getToken() async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (r.statusCode == 200) {
-        final d = json.decode(r.body);
-        if (d.containsKey('access_token') && d['access_token'] != null) {
-          return d['access_token'];
-        }
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
+  /// Semua endpoint profil harus memakai token sesi akun yang sedang login.
+  /// Token aplikasi bersama tidak mengandung identitas user sehingga ditolak
+  /// oleh endpoint yang memvalidasi peminta, misalnya getDataUser.
+  static Future<String?> _getToken() => TokenService.getToken();
 
   Future<void> _loadLanguagePreference() async {
     final prefs = await SharedPreferences.getInstance();
@@ -198,32 +182,27 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     _isDirectorCrossLogin =
         prefs.getBool('IsDirectorCrossLogin') == true &&
         prefs.getString('CrossLoginSourceUserID')?.isNotEmpty == true;
-    final token = await _getToken();
-    if (token == null) {
+    if (await _getToken() == null) {
       setState(() => _isLoadingDisplay = false);
       return;
     }
-    await _loadProfileData(token);
+    await _loadProfileData();
   }
 
-  Future<void> _loadProfileData(String token) async {
+  Future<void> _loadProfileData() async {
     setState(() => _isLoadingDisplay = true);
     final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('Email');
-    if (email == null) {
+    final userId = prefs.getString('UserID');
+    if (userId == null || userId.isEmpty) {
       setState(() => _isLoadingDisplay = false);
       return;
     }
-    setState(() => _email = email);
+    setState(() => _email = prefs.getString('Email') ?? '');
     try {
-      final r = await http.post(
+      final r = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/asn/getDataUser'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: json.encode({'Email': email}),
+        body: json.encode({'UserId': userId}),
+        timeout: const Duration(seconds: 30),
       );
       if (!mounted) return;
       if (r.statusCode == 200) {
@@ -231,13 +210,6 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
           _profileDisplay = ProfileDisplay.fromJson(json.decode(r.body));
           _isLoadingDisplay = false;
         });
-      } else if (r.statusCode == 401) {
-        final newToken = await _getToken();
-        if (newToken != null) {
-          await _loadProfileData(newToken);
-        } else {
-          setState(() => _isLoadingDisplay = false);
-        }
       } else {
         setState(() => _isLoadingDisplay = false);
       }
@@ -363,33 +335,26 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
         _showErrorSnackBar('Gagal mendapatkan token');
         return;
       }
-      final r = await http.post(
+      final r = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/asn/user/profile/photo/upload-base64'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
         body: json.encode({'Email': email, 'FotoProfilBase64': b64}),
+        timeout: const Duration(seconds: 45),
       );
       if (!mounted) return;
       if (r.statusCode == 200) {
         final body = json.decode(r.body);
         if (body['success'] == true) {
           _showSuccessSnackBar(body['message'] ?? 'Foto berhasil diperbarui');
-          await _loadProfileData(token);
+          await _loadProfileData();
         } else {
           _showErrorSnackBar(body['message'] ?? 'Gagal memperbarui foto');
         }
-      } else if (r.statusCode == 401) {
-        final newToken = await _getToken();
-        if (newToken != null) {
-          await _uploadProfilePhotoBytes(bytes);
-        } else {
-          _showErrorSnackBar('Authentication gagal');
-        }
       } else {
-        _showErrorSnackBar('Gagal memperbarui foto');
+        _showErrorSnackBar(
+          r.statusCode == 401
+              ? 'Sesi Anda telah berakhir. Silakan masuk kembali.'
+              : 'Gagal memperbarui foto',
+        );
       }
     } catch (e) {
       if (mounted) _showErrorSnackBar('Error: $e');
@@ -1238,17 +1203,11 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
         return;
       }
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/cross-login/director'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: json.encode({'HrdUserId': hrdUserId}),
-          )
-          .timeout(const Duration(seconds: 20));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/cross-login/director'),
+        body: json.encode({'HrdUserId': hrdUserId}),
+        timeout: const Duration(seconds: 20),
+      );
 
       final data = json.decode(response.body) as Map<String, dynamic>;
       if (response.statusCode != 200 || data['success'] != true) {
@@ -1261,12 +1220,26 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
 
       final directorUserId = data['UserId']?.toString() ?? '';
       final directorEmail = data['Email']?.toString() ?? '';
-      if (directorUserId.isEmpty || directorEmail.isEmpty) {
+      final directorSessionToken = data['AccessToken']?.toString() ?? '';
+      final directorExpiresIn = int.tryParse('${data['ExpiresIn'] ?? ''}') ?? 0;
+      if (directorUserId.isEmpty ||
+          directorEmail.isEmpty ||
+          directorSessionToken.isEmpty ||
+          directorExpiresIn <= 0) {
         _showErrorSnackBar('Data akun Direktur belum lengkap.');
         return;
       }
 
-      // Simpan identitas HRD asal untuk audit/kebutuhan pengembalian sesi.
+      // Simpan identitas DAN sesi HRD asal. Saat profil mengganti UserID ke
+      // Direktur, token juga wajib diganti agar seluruh endpoint scoped tidak
+      // melihat kombinasi UserID Direktur + JWT HRD (yang menghasilkan 401).
+      final sourceSessionToken = prefs.getString('SessionAccessToken') ?? '';
+      final sourceSessionExpiry = prefs.getInt('SessionAccessTokenExpiry');
+      if (sourceSessionToken.isEmpty || sourceSessionExpiry == null) {
+        _showErrorSnackBar('Sesi HRD tidak valid. Silakan login kembali.');
+        return;
+      }
+
       await prefs.setString('CrossLoginSourceUserID', hrdUserId);
       await prefs.setString(
         'CrossLoginSourceName',
@@ -1285,6 +1258,8 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
         'CrossLoginSourceViewMode',
         prefs.getString('ViewMode') ?? '',
       );
+      await prefs.setString('CrossLoginSourceAccessToken', sourceSessionToken);
+      await prefs.setInt('CrossLoginSourceAccessTokenExpiry', sourceSessionExpiry);
       await prefs.setBool('IsDirectorCrossLogin', true);
 
       await prefs.setString('Name', data['Name']?.toString() ?? '');
@@ -1293,6 +1268,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       await prefs.setString('FotoProfil', data['FotoProfil']?.toString() ?? '');
       await prefs.setString('Role', data['Role']?.toString() ?? 'User');
       await prefs.setString('ViewMode', 'director');
+      await TokenService.setSessionToken(directorSessionToken, directorExpiresIn);
 
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
@@ -1377,13 +1353,30 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     final sourceUserId = prefs.getString('CrossLoginSourceUserID') ?? '';
     final sourceEmail = prefs.getString('CrossLoginSourceEmail') ?? '';
     final sourceRole = prefs.getString('CrossLoginSourceRole') ?? '';
+    final sourceSessionToken =
+        prefs.getString('CrossLoginSourceAccessToken') ?? '';
+    final sourceSessionExpiry = prefs.getInt('CrossLoginSourceAccessTokenExpiry');
 
     if (prefs.getBool('IsDirectorCrossLogin') != true ||
         sourceUserId.isEmpty ||
         sourceEmail.isEmpty ||
-        sourceRole.toLowerCase() != 'hrd') {
+        sourceRole.toLowerCase() != 'hrd' ||
+        sourceSessionToken.isEmpty ||
+        sourceSessionExpiry == null ||
+        DateTime.now().millisecondsSinceEpoch >= sourceSessionExpiry) {
       _showErrorSnackBar(
         'Sesi asal HRD tidak ditemukan. Silakan keluar lalu login kembali.',
+      );
+      return;
+    }
+
+    final remainingSeconds =
+        DateTime.fromMillisecondsSinceEpoch(sourceSessionExpiry)
+            .difference(DateTime.now())
+            .inSeconds;
+    if (remainingSeconds <= 0) {
+      _showErrorSnackBar(
+        'Sesi HRD telah berakhir. Silakan keluar lalu login kembali.',
       );
       return;
     }
@@ -1414,7 +1407,10 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     await prefs.remove('CrossLoginSourceRole');
     await prefs.remove('CrossLoginSourceFotoProfil');
     await prefs.remove('CrossLoginSourceViewMode');
+    await prefs.remove('CrossLoginSourceAccessToken');
+    await prefs.remove('CrossLoginSourceAccessTokenExpiry');
     await prefs.remove('IsDirectorCrossLogin');
+    await TokenService.setSessionToken(sourceSessionToken, remainingSeconds);
 
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -1587,20 +1583,14 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
         setState(() => _isDeletingAccount = false);
         return;
       }
-      final r = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/user/deleteAccount'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: json.encode({
-              'UserId': _profileDisplay!.id.toString(),
-              'UpdatedBy': email,
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
+      final r = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/user/deleteAccount'),
+        body: json.encode({
+          'UserId': _profileDisplay!.id.toString(),
+          'UpdatedBy': email,
+        }),
+        timeout: const Duration(seconds: 30),
+      );
       if (!mounted) return;
       if (r.statusCode == 200) {
         final body = json.decode(r.body);

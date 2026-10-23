@@ -510,8 +510,16 @@ class HrdEmployeeService {
 
   static Future<Map<String, List<int>>> getAllWorkDays() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final hrdUserId = prefs.getString('UserID');
+      if (hrdUserId == null || hrdUserId.isEmpty) return {};
+
       final r = await http
-          .post(Uri.parse('$_base/workdays/all'), headers: await _headers())
+          .post(
+            Uri.parse('$_base/workdays/all'),
+            headers: await _headers(),
+            body: jsonEncode({'HrdUserId': hrdUserId}),
+          )
           .timeout(const Duration(seconds: 20));
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body);
@@ -541,11 +549,13 @@ class HrdEmployeeService {
 
   static Future<List<int>?> getWorkDays(String userId) async {
     try {
+      final hrdUserId = await _userId();
+      if (hrdUserId == null || hrdUserId.isEmpty) return null;
       final r = await http
           .post(
             Uri.parse('$_base/workdays/get'),
             headers: await _headers(),
-            body: jsonEncode({'UserId': userId}),
+            body: jsonEncode({'HrdUserId': hrdUserId, 'UserId': userId}),
           )
           .timeout(const Duration(seconds: 15));
       if (r.statusCode == 200) {

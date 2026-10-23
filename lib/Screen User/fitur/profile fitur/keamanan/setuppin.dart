@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -310,18 +311,8 @@ class _PinSetupScreenState extends State<PinSetupScreen>
     });
 
     try {
-      // Get access token
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-
-      if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final accessToken = tokenData['access_token'];
-
-        if (accessToken != null) {
+      final accessToken = await TokenService.getToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
           // Setup PIN
           final setupResponse = await http.post(
             Uri.parse('$baseURL/api/pin/setup'),
@@ -339,11 +330,8 @@ class _PinSetupScreenState extends State<PinSetupScreen>
           } else {
             _showErrorMessage(setupData['Message'] ?? 'Gagal menyimpan PIN');
           }
-        } else {
-          _showErrorMessage('Gagal mendapatkan akses');
-        }
       } else {
-        _showErrorMessage('Gagal terkoneksi ke server');
+        _showErrorMessage('Sesi login berakhir. Silakan masuk kembali.');
       }
     } catch (e) {
       _showErrorMessage('Terjadi kesalahan sistem');

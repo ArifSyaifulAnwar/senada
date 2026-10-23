@@ -7,7 +7,6 @@ import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/infoprofile.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/liveattendanceadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/notifikasiadminnya.dart';
-import 'package:absensikaryawan/Screen%20admin/Home/overtimeadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/reimbursementadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/timeoffadmin.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/notifikasi.dart';
@@ -19,6 +18,7 @@ import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/nama.dart';
 import 'package:absensikaryawan/Services/notification_service.dart';
 import 'package:absensikaryawan/Services/profile.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -26,6 +26,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
 import '../../Screen User/fitur/daily_activity_screen.dart';
+import '../../Screen User/Screen HRD/hrd_calendar_screen.dart';
+import '../../Screen HRD/Home/overtimehrd.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Model
@@ -161,28 +163,9 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     _safeSetState(() => _companyName = info.companyName);
   }
 
-  /// Mendapatkan token akses dari endpoint auth.
+  /// Token selalu milik akun admin yang sedang login.
   static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        final token = data['access_token'];
-        if (token is String && token.isNotEmpty) return token;
-      }
-    } catch (_) {}
-    return null;
+    return TokenService.getToken();
   }
 
   // ── Refresh Orchestration ──────────────────────────────────────────────────
@@ -251,11 +234,11 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
   Future<void> _loadProfileData(String accessToken) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('Email');
+      final userId = prefs.getString('UserID');
 
-      if (email == null || email.isEmpty) {
+      if (userId == null || userId.isEmpty) {
         _safeSetState(() {
-          _errorMessage = 'Email tidak ditemukan di perangkat';
+          _errorMessage = 'User tidak ditemukan di perangkat';
           _isLoading = false;
         });
         return;
@@ -268,7 +251,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email}),
+        body: json.encode({'UserId': userId}),
       );
 
       if (!mounted) return;
@@ -1159,7 +1142,13 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
       icon: Icons.calendar_today,
       label: 'Kalender',
       color: const Color(0xFF007AFF),
-      onTap: _showComingSoonDialog,
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HrdCalendarScreen()),
+        );
+        _refreshAll(showLoading: false);
+      },
     ),
     ServiceIconData(
       icon: Icons.schedule,
@@ -1192,7 +1181,11 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
       onTap: () async {
         await Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => OvertimeAdminScreen()),
+          MaterialPageRoute(
+            builder: (_) => const OvertimeHRDScreen(
+              presentationRole: 'Direktur',
+            ),
+          ),
         );
         _refreshAll(showLoading: false);
       },

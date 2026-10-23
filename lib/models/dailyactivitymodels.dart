@@ -200,6 +200,7 @@ class DailyActivityItem {
 // Services/dailyactivitymodels.dart — tambahkan class baru di file yang sama
 
 class DailyActivityHRDItem extends DailyActivityItem {
+  final String employeeUserId;
   final String employeeName;
   final String jobPosition;
   final String organization;
@@ -220,6 +221,7 @@ class DailyActivityHRDItem extends DailyActivityItem {
     super.attachments,
     super.status,
     super.reviewNotes,
+    required this.employeeUserId,
     required this.employeeName,
     required this.jobPosition,
     required this.organization,
@@ -246,6 +248,7 @@ class DailyActivityHRDItem extends DailyActivityItem {
           .toList(),
       status: json['Status'],
       reviewNotes: json['ReviewNotes'],
+      employeeUserId: json['UserId']?.toString() ?? '',
       employeeName: json['EmployeeName'] ?? '-',
       jobPosition: json['JobPosition'] ?? '-',
       organization: json['Organization'] ?? '-',

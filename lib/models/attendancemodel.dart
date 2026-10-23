@@ -1,5 +1,6 @@
 class AttendanceHistoryRequest {
   final String userId;
+  final String requestUserId;
   final String? timeRange;
   final DateTime? startDate;
   final DateTime? endDate;
@@ -9,6 +10,7 @@ class AttendanceHistoryRequest {
 
   AttendanceHistoryRequest({
     required this.userId,
+    required this.requestUserId,
     this.timeRange,
     this.startDate,
     this.endDate,
@@ -20,6 +22,7 @@ class AttendanceHistoryRequest {
   Map<String, dynamic> toJson() {
     return {
       'userId': userId,
+      'requestUserId': requestUserId,
       'timeRange': timeRange,
       'startDate': startDate?.toIso8601String(),
       'endDate': endDate?.toIso8601String(),
@@ -33,11 +36,16 @@ class AttendanceHistoryRequest {
 class AttendanceDetailRequest {
   final int id;
   final String userId;
+  final String requestUserId;
 
-  AttendanceDetailRequest({required this.id, required this.userId});
+  AttendanceDetailRequest({
+    required this.id,
+    required this.userId,
+    required this.requestUserId,
+  });
 
   Map<String, dynamic> toJson() {
-    return {'id': id, 'userId': userId};
+    return {'id': id, 'userId': userId, 'requestUserId': requestUserId};
   }
 }
 

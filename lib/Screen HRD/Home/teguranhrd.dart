@@ -207,6 +207,7 @@ class _TeguranHrdScreenState extends State<TeguranHrdScreen>
                     itemCount: _filteredTeguran.length,
                     itemBuilder: (context, i) => _TeguranListCard(
                       data: _filteredTeguran[i],
+                      currentUserId: _hrdUserId ?? '',
                       onUpdated: _loadTeguranList,
                     ),
                   ),
@@ -603,9 +604,14 @@ class _CreateTeguranTabState extends State<_CreateTeguranTab> {
 
 class _TeguranListCard extends StatefulWidget {
   final TeguranData data;
+  final String currentUserId;
   final VoidCallback onUpdated;
 
-  const _TeguranListCard({required this.data, required this.onUpdated});
+  const _TeguranListCard({
+    required this.data,
+    required this.currentUserId,
+    required this.onUpdated,
+  });
 
   @override
   State<_TeguranListCard> createState() => _TeguranListCardState();
@@ -623,7 +629,10 @@ class _TeguranListCardState extends State<_TeguranListCard> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _EditTeguranSheet(data: data),
+      builder: (context) => _EditTeguranSheet(
+        data: data,
+        currentUserId: widget.currentUserId,
+      ),
     );
     if (updated == true) widget.onUpdated();
   }
@@ -631,7 +640,10 @@ class _TeguranListCardState extends State<_TeguranListCard> {
   Future<void> _downloadAndOpenSurat() async {
     setState(() => _downloading = true);
     try {
-      final bytes = await TeguranService.downloadTeguranPdf(data.id);
+      final bytes = await TeguranService.downloadTeguranPdf(
+        data.id,
+        requestUserId: widget.currentUserId,
+      );
       final fileName = TeguranService.buildSuratFileName(
         userName: data.userName,
         userId: data.userId,
@@ -817,8 +829,12 @@ class _TeguranListCardState extends State<_TeguranListCard> {
 
 class _EditTeguranSheet extends StatefulWidget {
   final TeguranData data;
+  final String currentUserId;
 
-  const _EditTeguranSheet({required this.data});
+  const _EditTeguranSheet({
+    required this.data,
+    required this.currentUserId,
+  });
 
   @override
   State<_EditTeguranSheet> createState() => _EditTeguranSheetState();
@@ -880,6 +896,7 @@ class _EditTeguranSheetState extends State<_EditTeguranSheet> {
 
     final result = await TeguranService.updateTeguran(
       id: widget.data.id,
+      updatedBy: widget.currentUserId,
       level: _level,
       judul: _judulController.text.trim(),
       deskripsi: _deskripsiController.text.trim(),

@@ -75,7 +75,9 @@ class CreateOfficeLocationRequest {
       'latitude': latitude,
       'longitude': longitude,
       'radiusMeters': radiusMeters,
-      'adminId': adminId,
+      // API menggunakan UserId untuk menurunkan company_id; AdminId lama
+      // dipertahankan sebagai nilai sumber agar pemanggil lama tetap kompatibel.
+      'userId': adminId,
     };
   }
 }
@@ -107,7 +109,7 @@ class UpdateOfficeLocationRequest {
       'longitude': longitude,
       'radiusMeters': radiusMeters,
       'isActive': isActive,
-      'adminId': adminId,
+      'userId': adminId,
     };
   }
 }

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:absensikaryawan/Services/company_calendar_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/designnya/attendancecardmodel.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -57,28 +58,12 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
   }
 
   static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
+    return TokenService.getToken();
+  }
+
+  Future<String> _currentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('UserID') ?? '';
   }
 
   Future<bool> _updateSummaryCard(AttendanceCardModel model) async {
@@ -94,6 +79,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
           'Accept': 'application/json',
         },
         body: json.encode({
+          'userId': await _currentUserId(),
           'id': model.id,
           'mainText': model.mainText,
           'subText': model.subText,
@@ -125,6 +111,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
+        body: json.encode({'userId': await _currentUserId()}),
       );
       if (response.statusCode != 200) {
         throw Exception('Gagal memuat data summary');
@@ -240,6 +227,7 @@ class _AttendanceSummaryAdminState extends State<AttendanceSummaryAdmin>
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
+      body: json.encode({'userId': await _currentUserId()}),
     );
     if (response.statusCode == 200) {
       final List<dynamic> data = json.decode(response.body);

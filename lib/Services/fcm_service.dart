@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 
 // Top-level function — hanya dipakai di Android/iOS
 @pragma('vm:entry-point')
@@ -83,12 +84,10 @@ class FcmService {
       final userId = prefs.getString('UserID');
       if (userId == null || userId.isEmpty) return;
 
-      final role = (prefs.getString('Role') ?? '').toLowerCase();
-      if (role == 'hrd') {
-        await FirebaseMessaging.instance.subscribeToTopic('hrd_notifications');
-      } else if (role == 'admin') {
-        await FirebaseMessaging.instance.subscribeToTopic('admin_notifications');
-      }
+      // Hapus subscription topic global versi lama. Notifikasi HRD/Admin
+      // sekarang dikirim ke topic personal user agar tidak bocor antar PT.
+      await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
+      await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
 
       // Notifikasi personal (mis. Finance yang di-assign ke reimbursement
       // tertentu) lewat topic per-user ini — tidak perlu lagi cek role
@@ -106,15 +105,7 @@ class FcmService {
 
   static Future<void> _postToken(String userId, String token) async {
     try {
-      final tokenRes = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 10));
-      if (tokenRes.statusCode != 200) return;
-      final accessToken = json.decode(tokenRes.body)['access_token'] as String?;
+      final accessToken = await TokenService.getToken();
       if (accessToken == null) return;
 
       await http.post(
@@ -137,31 +128,19 @@ class FcmService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID');
-      final role = (prefs.getString('Role') ?? '').toLowerCase();
-
-      if (role == 'hrd') {
-        await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
-      } else if (role == 'admin') {
-        await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
-      }
+      await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
+      await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
       if (userId != null && userId.isNotEmpty) {
         await FirebaseMessaging.instance.unsubscribeFromTopic('user_$userId');
       }
 
       if (userId != null && userId.isNotEmpty) {
-        final tokenRes = await http.post(
-          Uri.parse('$baseURL/api/auth/token'),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-        );
-        if (tokenRes.statusCode == 200) {
-          final accessToken = json.decode(tokenRes.body)['access_token'] as String?;
-          if (accessToken != null) {
-            await http.delete(
-              Uri.parse('$baseURL/api/fcm/token/$userId'),
-              headers: {'Authorization': 'Bearer $accessToken'},
-            );
-          }
+        final accessToken = await TokenService.getToken();
+        if (accessToken != null) {
+          await http.delete(
+            Uri.parse('$baseURL/api/fcm/token/$userId'),
+            headers: {'Authorization': 'Bearer $accessToken'},
+          );
         }
       }
       await FirebaseMessaging.instance.deleteToken();

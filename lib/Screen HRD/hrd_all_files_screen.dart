@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 
 import '../Services/fileuserresponse.dart';
 
@@ -42,19 +43,7 @@ class _HRDAllFilesScreenState extends State<HRDAllFilesScreen> {
   }
 
   Future<void> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _accessToken = data['access_token'];
-      }
-    } catch (_) {}
+    _accessToken = await TokenService.getToken();
   }
 
   Future<void> _loadAllFiles() async {
@@ -74,6 +63,10 @@ class _HRDAllFilesScreenState extends State<HRDAllFilesScreen> {
       if (requestUserId.isEmpty) {
         setState(() => _isLoading = false);
         return;
+      }
+
+      if (_accessToken == null) {
+        throw Exception('Sesi login berakhir. Silakan masuk kembali.');
       }
 
       final response = await http.post(

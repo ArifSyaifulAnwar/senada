@@ -1,7 +1,5 @@
-import 'dart:convert';
-import 'dart:math' as math;
 import 'package:http/http.dart' as http;
-import 'config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class TokenUnavailableException implements Exception {
   final String message;
@@ -13,80 +11,48 @@ class TokenUnavailableException implements Exception {
 }
 
 class TokenService {
-  static String? _cachedToken;
-  static DateTime? _tokenExpiry;
+  static String? _sessionToken;
+  static DateTime? _sessionExpiry;
+  static bool _sessionLoaded = false;
 
-  // Supaya saat banyak request bersamaan, token hanya diambil sekali.
-  static Future<String?>? _pendingFetch;
+  static bool get _isSessionStillValid =>
+      _sessionToken != null &&
+      _sessionExpiry != null &&
+      DateTime.now().isBefore(_sessionExpiry!);
 
-  static bool get _isTokenStillValid {
-    return _cachedToken != null &&
-        _tokenExpiry != null &&
-        DateTime.now().isBefore(_tokenExpiry!);
+  static Future<void> _loadSessionToken() async {
+    if (_sessionLoaded) return;
+    _sessionLoaded = true;
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('SessionAccessToken');
+    final expiryMs = prefs.getInt('SessionAccessTokenExpiry');
+    if (token != null && expiryMs != null) {
+      final expiry = DateTime.fromMillisecondsSinceEpoch(expiryMs);
+      if (DateTime.now().isBefore(expiry)) {
+        _sessionToken = token;
+        _sessionExpiry = expiry;
+      }
+    }
   }
 
-  /// Ambil token dari cache jika masih valid.
+  static Future<void> setSessionToken(String token, int expiresInSeconds) async {
+    final expiry = DateTime.now().add(Duration(seconds: expiresInSeconds));
+    _sessionToken = token;
+    _sessionExpiry = expiry;
+    _sessionLoaded = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('SessionAccessToken', token);
+    await prefs.setInt('SessionAccessTokenExpiry', expiry.millisecondsSinceEpoch);
+  }
+
+  /// Token untuk seluruh request yang membutuhkan user login.
+  /// Tidak boleh fallback ke token aplikasi bersama, karena token tersebut
+  /// tidak membawa identitas user dan dapat membuka data perusahaan lain.
   static Future<String?> getToken({bool forceRefresh = false}) async {
-    if (!forceRefresh && _isTokenStillValid) {
-      return _cachedToken;
-    }
-
-    // Kalau sudah ada proses ambil token, request lain cukup menunggu.
-    if (_pendingFetch != null) {
-      return _pendingFetch;
-    }
-
-    _pendingFetch = _fetchToken();
-
-    try {
-      return await _pendingFetch;
-    } finally {
-      _pendingFetch = null;
-    }
-  }
-
-  static Future<String?> _fetchToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: const {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Accept': 'application/json',
-            },
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (res.statusCode != 200) {
-        return null;
-      }
-
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      final token = data['access_token']?.toString();
-
-      if (token == null || token.isEmpty) {
-        return null;
-      }
-
-      // Gunakan expires_in dari API bila tersedia.
-      // Fallback 1 jam bila API tidak mengirim expires_in.
-      final expiresIn = int.tryParse('${data['expires_in'] ?? 3600}') ?? 3600;
-
-      // Refresh token 60 detik sebelum benar-benar expired.
-      final cacheSeconds = math.max(30, expiresIn - 60);
-
-      _cachedToken = token;
-      _tokenExpiry = DateTime.now().add(Duration(seconds: cacheSeconds));
-
-      return _cachedToken;
-    } catch (_) {
-      return null;
-    }
+    await _loadSessionToken();
+    if (!forceRefresh && _isSessionStillValid) return _sessionToken;
+    if (forceRefresh && _isSessionStillValid) return _sessionToken;
+    return null;
   }
 
   static Future<String> _requireToken() async {
@@ -110,17 +76,8 @@ class TokenService {
   }
 
   static Future<String?> _refreshAfter401(String failedToken) async {
-    // Jika request lain sudah lebih dulu refresh token,
-    // pakai token baru tersebut tanpa request token lagi.
-    if (_isTokenStillValid &&
-        _cachedToken != null &&
-        _cachedToken != failedToken) {
-      return _cachedToken;
-    }
-
     invalidate();
-
-    return getToken(forceRefresh: true);
+    return null;
   }
 
   /// Semua POST JSON wajib lewat method ini.
@@ -246,7 +203,14 @@ class TokenService {
   }
 
   static void invalidate() {
-    _cachedToken = null;
-    _tokenExpiry = null;
+    _sessionToken = null;
+    _sessionExpiry = null;
+    _sessionLoaded = true;
+    // Hapus sesi persisten tanpa menunggu UI; sesi yang sudah ditolak server
+    // tidak boleh hidup kembali setelah aplikasi dibuka ulang.
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.remove('SessionAccessToken');
+      prefs.remove('SessionAccessTokenExpiry');
+    });
   }
 }

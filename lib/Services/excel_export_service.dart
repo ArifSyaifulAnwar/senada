@@ -7,8 +7,170 @@ import 'package:intl/intl.dart';
 
 import '../../Screen admin/model/admin_attendance_model.dart';
 import '../../Screen admin/model/overtimemodeladmin.dart';
+import '../models/dailyactivitymodels.dart';
 
 class ExcelExportService {
+  /// Laporan aktivitas harian HRD. Lampiran sengaja tidak dimasukkan sebagai
+  /// file/binary; kolom jumlah lampiran cukup sebagai informasi audit laporan.
+  static Uint8List? buildDailyActivityExcel(
+    List<DailyActivityHRDItem> data, {
+    required String periodLabel,
+    String employeeLabel = 'Semua karyawan',
+    String categoryLabel = 'Semua kategori',
+  }) {
+    final excel = ex.Excel.createExcel();
+    const sheetName = 'Aktivitas Harian';
+    final sheet = excel[sheetName];
+    excel.delete('Sheet1');
+    excel.setDefaultSheet(sheetName);
+
+    const navy = '#1E3A5F';
+    const blue = '#2E86C1';
+    const paleBlue = '#EBF5FB';
+    const white = '#FFFFFF';
+    const borderHex = '#AED6F1';
+
+    ex.CellStyle style({
+      String background = white,
+      String foreground = '#172B4D',
+      bool bold = false,
+      int fontSize = 10,
+      ex.HorizontalAlign align = ex.HorizontalAlign.Left,
+      bool border = true,
+    }) {
+      final line = border
+          ? ex.Border(
+              borderStyle: ex.BorderStyle.Thin,
+              borderColorHex: ex.ExcelColor.fromHexString(borderHex),
+            )
+          : ex.Border(borderStyle: ex.BorderStyle.None);
+      return ex.CellStyle(
+        backgroundColorHex: ex.ExcelColor.fromHexString(background),
+        fontColorHex: ex.ExcelColor.fromHexString(foreground),
+        bold: bold,
+        fontSize: fontSize,
+        horizontalAlign: align,
+        verticalAlign: ex.VerticalAlign.Center,
+        leftBorder: line,
+        rightBorder: line,
+        topBorder: line,
+        bottomBorder: line,
+      );
+    }
+
+    void text(int col, int row, String value, ex.CellStyle cellStyle) {
+      final cell = sheet.cell(
+        ex.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row),
+      );
+      cell.value = ex.TextCellValue(value);
+      cell.cellStyle = cellStyle;
+    }
+
+    final titleStyle = style(
+      background: navy,
+      foreground: '#FFFFFF',
+      bold: true,
+      fontSize: 14,
+      align: ex.HorizontalAlign.Center,
+      border: false,
+    );
+    final infoStyle = style(
+      background: blue,
+      foreground: '#FFFFFF',
+      fontSize: 9,
+      align: ex.HorizontalAlign.Center,
+      border: false,
+    );
+    final headerStyle = style(
+      background: blue,
+      foreground: '#FFFFFF',
+      bold: true,
+      align: ex.HorizontalAlign.Center,
+    );
+
+    text(0, 0, 'LAPORAN AKTIVITAS HARIAN KARYAWAN', titleStyle);
+    sheet.merge(ex.CellIndex.indexByString('A1'), ex.CellIndex.indexByString('J1'));
+    text(0, 1, 'Periode: $periodLabel', infoStyle);
+    sheet.merge(ex.CellIndex.indexByString('A2'), ex.CellIndex.indexByString('E2'));
+    text(
+      5,
+      1,
+      'Dicetak: ${DateFormat('dd MMM yyyy HH:mm', 'id_ID').format(DateTime.now())}',
+      infoStyle,
+    );
+    sheet.merge(ex.CellIndex.indexByString('F2'), ex.CellIndex.indexByString('J2'));
+    text(0, 2, 'Karyawan: $employeeLabel', style(background: paleBlue, bold: true));
+    sheet.merge(ex.CellIndex.indexByString('A3'), ex.CellIndex.indexByString('E3'));
+    text(5, 2, 'Kategori: $categoryLabel', style(background: paleBlue, bold: true));
+    sheet.merge(ex.CellIndex.indexByString('F3'), ex.CellIndex.indexByString('J3'));
+
+    const headers = <String>[
+      'No',
+      'Tanggal',
+      'Nama Karyawan',
+      'Jabatan / Departemen',
+      'Kategori',
+      'Deskripsi Aktivitas',
+      'Lokasi',
+      'Jam Mulai',
+      'Jam Selesai',
+      'Jumlah Lampiran',
+    ];
+    for (var col = 0; col < headers.length; col++) {
+      text(col, 4, headers[col], headerStyle);
+    }
+
+    final sorted = [...data]
+      ..sort((a, b) {
+        final date = b.activityDate.compareTo(a.activityDate);
+        return date != 0 ? date : a.employeeName.compareTo(b.employeeName);
+      });
+    for (var index = 0; index < sorted.length; index++) {
+      final item = sorted[index];
+      final row = index + 5;
+      final rowStyle = style(background: index.isEven ? white : paleBlue);
+      final centerStyle = style(
+        background: index.isEven ? white : paleBlue,
+        align: ex.HorizontalAlign.Center,
+      );
+      final role = [item.jobPosition, item.organization]
+          .where((value) => value.trim().isNotEmpty && value.trim() != '-')
+          .join(' / ');
+      final location = [item.officeName, item.locationText]
+          .where((value) => value != null && value.trim().isNotEmpty)
+          .join(' - ');
+      text(0, row, '${index + 1}', centerStyle);
+      text(1, row, DateFormat('dd MMM yyyy', 'id_ID').format(item.activityDate), centerStyle);
+      text(2, row, item.employeeName, rowStyle);
+      text(3, row, role.isEmpty ? '-' : role, rowStyle);
+      text(4, row, item.categoryLabel, rowStyle);
+      text(5, row, item.description, rowStyle);
+      text(6, row, location.isEmpty ? '-' : location, rowStyle);
+      text(7, row, item.startTime?.formatted ?? '-', centerStyle);
+      text(8, row, item.endTime?.formatted ?? '-', centerStyle);
+      text(9, row, '${item.attachments.length}', centerStyle);
+      sheet.setRowHeight(row, 34);
+    }
+
+    final summaryRow = sorted.length + 5;
+    text(0, summaryRow, 'TOTAL AKTIVITAS', style(background: navy, foreground: '#FFFFFF', bold: true, align: ex.HorizontalAlign.Center));
+    sheet.merge(
+      ex.CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: summaryRow),
+      ex.CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: summaryRow),
+    );
+    text(9, summaryRow, '${sorted.length}', style(background: navy, foreground: '#FFFFFF', bold: true, align: ex.HorizontalAlign.Center));
+    sheet.setRowHeight(0, 28);
+    sheet.setRowHeight(1, 19);
+    sheet.setRowHeight(2, 20);
+    sheet.setRowHeight(4, 24);
+    const widths = [6.0, 15.0, 28.0, 28.0, 20.0, 50.0, 32.0, 13.0, 13.0, 16.0];
+    for (var column = 0; column < widths.length; column++) {
+      sheet.setColumnWidth(column, widths[column]);
+    }
+    final encoded = excel.encode();
+    return encoded == null ? null : Uint8List.fromList(encoded);
+  }
+
   static Uint8List? buildAbsensiExcel(
     List<AdminAttendanceData> data, {
     String? periodLabel,

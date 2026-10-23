@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:absensikaryawan/models/attendancemodel.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -14,26 +15,7 @@ class AttendanceService {
     return prefs.getString('UserID');
   }
 
-  static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+  static Future<String?> _getToken() => TokenService.getToken();
 
   Future<Map<String, String>> _getHeaders() async {
     final token = await _getToken();
@@ -143,6 +125,7 @@ class AttendanceService {
 
       final request = AttendanceHistoryRequest(
         userId: userId,
+        requestUserId: userId,
         timeRange: _mapTimeRangeToEnglish(timeRange),
         startDate: requestStartDate,
         endDate: requestEndDate,
@@ -212,6 +195,7 @@ class AttendanceService {
     try {
       final fallbackRequest = {
         'userId': userId,
+        'requestUserId': userId,
         'page': page,
         'pageSize': pageSize,
       };
@@ -265,7 +249,11 @@ class AttendanceService {
         );
       }
 
-      final request = AttendanceDetailRequest(id: attendanceId, userId: userId);
+      final request = AttendanceDetailRequest(
+        id: attendanceId,
+        userId: userId,
+        requestUserId: userId,
+      );
       final response = await http
           .post(
             Uri.parse('$baseURL/api/attendance/detail'),
@@ -339,6 +327,7 @@ class AttendanceService {
 
       final request = AttendanceHistoryRequest(
         userId: userId,
+        requestUserId: userId,
         timeRange: _mapTimeRangeToEnglish(timeRange) ?? '1_year',
         startDate: requestStartDate,
         endDate: requestEndDate,
@@ -394,7 +383,12 @@ class AttendanceService {
     String userId,
   ) async {
     try {
-      final fallbackRequest = {'userId': userId, 'page': 1, 'pageSize': 1000};
+      final fallbackRequest = {
+        'userId': userId,
+        'requestUserId': userId,
+        'page': 1,
+        'pageSize': 1000,
+      };
       final requestBody = jsonEncode(fallbackRequest);
       final response = await http
           .post(

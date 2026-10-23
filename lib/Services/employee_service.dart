@@ -197,6 +197,14 @@ class EmployeeService {
       }
 
       final requestBody = <String, dynamic>{};
+      final requestUserId = await _getCurrentUserId();
+      if (requestUserId == null || requestUserId.trim().isEmpty) {
+        return ApiResponse<EmployeeApiData>(
+          success: false,
+          message: 'UserId tidak ditemukan. Silakan login ulang.',
+        );
+      }
+      requestBody['RequestUserId'] = requestUserId.trim();
 
       // Sesuaikan case dengan API specification
       if (userId != null && userId.isNotEmpty) {

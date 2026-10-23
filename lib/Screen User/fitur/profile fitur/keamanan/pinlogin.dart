@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -717,18 +718,8 @@ class _PinLoginScreenState extends State<PinLoginScreen>
       });
 
       try {
-        // Get access token
-        final tokenResponse = await http.post(
-          Uri.parse('$baseURL/api/auth/token'),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-        );
-
-        if (tokenResponse.statusCode == 200) {
-          final tokenData = json.decode(tokenResponse.body);
-          final accessToken = tokenData['access_token'];
-
-          if (accessToken != null) {
+        final accessToken = await TokenService.getToken();
+        if (accessToken != null && accessToken.isNotEmpty) {
             // Prepare request payload sesuai dengan API PIN
             final pinLoginData = {"pin": pin};
 
@@ -814,15 +805,6 @@ class _PinLoginScreenState extends State<PinLoginScreen>
                 );
               }
             }
-          } else {
-            setState(() {
-              isLoading = false;
-              currentPin = ""; // Reset PIN
-            });
-            if (mounted) {
-              _showErrorDialog(context, 'Gagal mendapatkan token otorisasi.');
-            }
-          }
         } else {
           setState(() {
             isLoading = false;
@@ -831,7 +813,7 @@ class _PinLoginScreenState extends State<PinLoginScreen>
           if (mounted) {
             _showErrorDialog(
               context,
-              'Gagal mendapatkan token. Kode: ${tokenResponse.statusCode}',
+              'Sesi login berakhir. Silakan login ulang.',
             );
           }
         }
@@ -867,21 +849,8 @@ class _PinLoginScreenState extends State<PinLoginScreen>
     Map<String, dynamic> receiptData,
   ) async {
     try {
-      // Get access token
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/Token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {
-          'grant_type': 'password',
-          'password': '1bBsNgVCMDm6oR3y+GLN090i8japjlxzIhSUGPO1REE=',
-        },
-      );
-
-      if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final accessToken = tokenData['access_token'];
-
-        if (accessToken != null) {
+      final accessToken = await TokenService.getToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
           // Prepare notification data dengan Type
           final notificationData = {
             "Title": "PIN Login Berhasil!",
@@ -906,7 +875,6 @@ class _PinLoginScreenState extends State<PinLoginScreen>
           } else {
             // Gagal menambahkan notifikasi
           }
-        }
       }
     } catch (e) {
       if (mounted) {

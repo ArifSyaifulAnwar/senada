@@ -9,6 +9,7 @@ import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/filecategory.dart';
 import 'package:absensikaryawan/Services/fileuserresponse.dart';
 import 'package:absensikaryawan/Services/profile.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/Screen%20User/Screen%20HRD/hrd_employee_service.dart';
 import 'package:absensikaryawan/Screen%20admin/service/web_preview.dart';
 import 'package:absensikaryawan/models/employee_models.dart';
@@ -817,25 +818,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
   }
 
   Future<void> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _accessToken = data.containsKey('access_token')
-            ? data['access_token']
-            : null;
-      } else {
-        _accessToken = null;
-      }
-    } catch (_) {
-      _accessToken = null;
-    }
+    _accessToken = await TokenService.getToken();
   }
 
   Future<void> _refreshTokenAndRetry() async {
@@ -929,8 +912,8 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
   Future<void> _loadProfileData() async {
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('Email');
-    if (email == null) {
+    final userId = prefs.getString('UserID');
+    if (userId == null || userId.isEmpty) {
       _safeSetState(() => _isLoading = false);
       return;
     }
@@ -941,7 +924,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email}),
+        body: json.encode({'UserId': userId}),
       );
       if (!mounted) return;
       if (response.statusCode == 200) {
@@ -956,9 +939,8 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
   Future<void> _loadProfileProfessional() async {
     if (!mounted) return;
     final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('Email');
     final userId = prefs.getString('UserID');
-    if (email == null || userId == null) return;
+    if (userId == null || userId.isEmpty) return;
     try {
       final response = await _makeAuthenticatedRequest(
         url: '$baseURL/api/asn/getCompanyInfo',
@@ -966,7 +948,7 @@ class _InfoProfileScreenState extends State<InfoProfileScreen>
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Mail': email, 'UserId': userId}),
+        body: json.encode({'UserId': userId}),
       );
       if (!mounted) return;
       if (response.statusCode == 200) {

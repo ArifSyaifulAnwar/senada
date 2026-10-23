@@ -629,8 +629,8 @@ class TimeOffAdminService {
   }
 
   // Get file image URL for preview
-  static String getFileImageUrl(int timeOffId) {
-    return '$baseURL$adminEndpoint/file-image/$timeOffId';
+  static String getFileImageUrl(int timeOffId, String adminId) {
+    return '$baseURL$adminEndpoint/file-image/$timeOffId?adminId=${Uri.encodeQueryComponent(adminId)}';
   }
 
   // Get headers for network images

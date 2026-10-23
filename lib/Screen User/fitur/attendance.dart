@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
@@ -121,25 +122,12 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         return;
       }
 
-      // Cek via API
-      final tokenResp = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (tokenResp.statusCode != 200) {
+      // Kalender selalu memakai token sesi user yang sedang login.
+      final token = await TokenService.getToken();
+      if (token == null || token.isEmpty) {
         if (mounted) setState(() => _isLoadingCalendar = false);
         return;
       }
-
-      final token = json.decode(tokenResp.body)['access_token'];
       final tanggal =
           '${today.year}-${today.month.toString().padLeft(2, '0')}'
           '-${today.day.toString().padLeft(2, '0')}';
@@ -385,20 +373,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         throw Exception('User ID tidak ditemukan. Silakan login ulang.');
       }
 
-      final tokenResp = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (tokenResp.statusCode == 200) {
-        final token = json.decode(tokenResp.body)['access_token'];
+      final token = await TokenService.getToken();
+      if (token != null && token.isNotEmpty) {
         final resp = await http
             .get(
               Uri.parse('$baseURL/api/asn/office/locations').replace(
@@ -464,20 +440,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
   Future<bool> isCompanyUser(String userId, String email) async {
     try {
-      final tokenResp = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (tokenResp.statusCode != 200) return false;
-      final token = json.decode(tokenResp.body)['access_token'];
+      final token = await TokenService.getToken();
       if (token == null || token.isEmpty) return false;
 
       final resp = await http

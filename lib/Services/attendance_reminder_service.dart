@@ -18,17 +18,21 @@ import 'package:absensikaryawan/Screen%20User/Screen%20HRD/hrd_employee_service.
 class AttendanceReminderService {
   static const int _notificationId = 900001;
   static const int _reminderHour = 10;
-  static const String prefsKey = 'attendance_reminder_enabled';
+  static const String _prefsKeyPrefix = 'attendance_reminder_enabled_';
   static bool _tzReady = false;
 
-  static Future<bool> isEnabled() async {
+  static String _prefsKey(String userId) => '$_prefsKeyPrefix$userId';
+
+  static Future<bool> isEnabled(String userId) async {
+    if (userId.trim().isEmpty) return true;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(prefsKey) ?? true;
+    return prefs.getBool(_prefsKey(userId)) ?? true;
   }
 
-  static Future<void> setEnabled(bool enabled) async {
+  static Future<void> setEnabled(String userId, bool enabled) async {
+    if (userId.trim().isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(prefsKey, enabled);
+    await prefs.setBool(_prefsKey(userId), enabled);
     if (!enabled) await cancel();
   }
 
@@ -53,7 +57,7 @@ class AttendanceReminderService {
       return;
     }
 
-    if (!await isEnabled()) {
+    if (!await isEnabled(userId)) {
       await cancel();
       return;
     }

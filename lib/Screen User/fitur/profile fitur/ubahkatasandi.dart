@@ -1,6 +1,7 @@
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use
 
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -92,31 +93,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         return;
       }
 
-      // 1. Ambil token terlebih dahulu
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-
-      if (tokenResponse.statusCode != 200) {
+      // Endpoint password memvalidasi identitas akun login, bukan token aplikasi.
+      final accessToken = await TokenService.getToken();
+      if (accessToken == null || accessToken.isEmpty) {
         setState(() {
           _isLoading = false;
         });
-        _showSnackBar('Gagal mendapatkan token akses', Colors.red);
+        _showSnackBar('Sesi login berakhir. Silakan masuk kembali.', Colors.red);
         return;
       }
-
-      final tokenData = jsonDecode(tokenResponse.body);
-      if (tokenData['access_token'] == null) {
-        setState(() {
-          _isLoading = false;
-        });
-        _showSnackBar('Token akses tidak valid', Colors.red);
-        return;
-      }
-
-      final String accessToken = tokenData['access_token'];
 
       // 2. Panggil API ubah password dengan token di header Authorization
       final response = await http.post(

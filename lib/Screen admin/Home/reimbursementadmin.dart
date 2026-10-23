@@ -3,6 +3,7 @@
 
 import 'package:absensikaryawan/Screen%20admin/model/reimbursementadminmodel.dart';
 import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Services/reimbursementservice.dart'
     show ReimbursementAttachmentMeta;
 import 'package:flutter/material.dart';
@@ -15,17 +16,36 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 
-class HalamanAdminReimbursement extends StatefulWidget {
+/// Reimbursement Admin menggunakan shell responsif yang sama dengan HRD.
+/// Hak akses dan data tidak dibagi di UI: API tetap mengunci actor dari JWT
+/// dan company_id akun yang sedang login.
+class HalamanAdminReimbursement extends StatelessWidget {
   final int? initialDetailId;
 
   const HalamanAdminReimbursement({super.key, this.initialDetailId});
+
+  @override
+  Widget build(BuildContext context) =>
+      HalamanHRDReimbursement(
+        initialDetailId: initialDetailId,
+        presentationRole: 'Direktur',
+      );
+}
+
+// Implementasi lama dipertahankan agar detail modal lama tetap kompatibel
+// dengan halaman HRD yang menggunakannya.
+class _LegacyHalamanAdminReimbursement extends StatefulWidget {
+  final int? initialDetailId;
+
+  const _LegacyHalamanAdminReimbursement() : initialDetailId = null;
 
   @override
   _HalamanAdminReimbursementState createState() =>
       _HalamanAdminReimbursementState();
 }
 
-class _HalamanAdminReimbursementState extends State<HalamanAdminReimbursement>
+class _HalamanAdminReimbursementState
+    extends State<_LegacyHalamanAdminReimbursement>
     with SingleTickerProviderStateMixin {
   final AdminReimbursementService _adminService = AdminReimbursementService();
 

@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../Screen admin/service/web_preview.dart';
 import '../../Services/config.dart';
+import '../../Services/token_service.dart';
 import '../../Services/filecategory.dart';
 import '../../Services/fileuserresponse.dart';
 import '../../utils/web_file_download.dart';
@@ -1795,21 +1796,7 @@ class _EmployeeFilesTabState extends State<_EmployeeFilesTab> {
   }
 
   Future<void> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _accessToken = data['access_token'];
-      }
-    } catch (_) {
-      _accessToken = null;
-    }
+    _accessToken = await TokenService.getToken();
   }
 
   Future<http.Response> _makeAuthenticatedRequest({

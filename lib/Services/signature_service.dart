@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'config.dart';
+import 'token_service.dart';
 
 class SignatureInfo {
   final String userId;
@@ -44,21 +45,7 @@ class SignatureService {
   static const String _base = '/api/signature';
 
   static Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) {
-        return jsonDecode(res.body)['access_token'];
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
+    return TokenService.getToken();
   }
 
   // ── Check apakah TTD sudah ada ────────────────────────────────────────

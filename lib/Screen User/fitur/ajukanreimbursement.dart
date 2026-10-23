@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/reimbursementmodel.dart';
 import 'package:absensikaryawan/Services/reimbursementservice.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -221,30 +222,7 @@ class _HalamanAjukanReimbursementState
     );
   }
 
-  static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+  static Future<String?> _getToken() => TokenService.getToken();
 
   // =============================================
   // NOTIFICATION INITIALIZATION

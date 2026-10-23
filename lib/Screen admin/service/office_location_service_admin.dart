@@ -2,9 +2,16 @@ import 'dart:convert';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LocationService {
   static const String _baseUrl = '$baseURL/api';
+
+  static Future<String?> _currentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('UserID')?.trim();
+    return userId == null || userId.isEmpty ? null : userId;
+  }
 
   // Get user's current location
   static Future<Position?> getCurrentLocation() async {
@@ -46,13 +53,19 @@ class LocationService {
     String token,
   ) async {
     try {
+      final userId = await _currentUserId();
+      if (userId == null) return null;
       final response = await http.post(
         Uri.parse('$_baseUrl/office-locations/check-location'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
+        body: jsonEncode({
+          'userId': userId,
+          'latitude': latitude,
+          'longitude': longitude,
+        }),
       );
 
       if (response.statusCode == 200) {
@@ -72,9 +85,15 @@ class LocationService {
     String token,
   ) async {
     try {
+      final userId = await _currentUserId();
+      if (userId == null) return [];
       final response = await http.post(
         Uri.parse('$_baseUrl/office-locations/active'),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'userId': userId}),
       );
 
       if (response.statusCode == 200) {

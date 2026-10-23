@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:absensikaryawan/models/employee_models.dart';
+import 'package:absensikaryawan/widget/employee_profile_photo.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -868,7 +869,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
           child: Row(
             children: [
               // Avatar
-              _buildAvatar(emp.foto, isWeb ? 42 : 52),
+              _buildAvatar(emp.id, emp.foto, isWeb ? 42 : 52),
               SizedBox(width: isWeb ? 10 : 12),
               // Info
               Expanded(
@@ -996,7 +997,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildAvatar(emp.foto, 72),
+              _buildAvatar(emp.id, emp.foto, 72),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -1362,7 +1363,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
               // Header
               Row(
                 children: [
-                  _buildAvatar(emp.foto, 64),
+                  _buildAvatar(emp.id, emp.foto, 64),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -1755,7 +1756,7 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
 
   // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
-  Widget _buildAvatar(String? b64, double size) {
+  Widget _buildAvatar(int employeeId, String? b64, double size) {
     Widget inner;
     if (b64 != null && b64.isNotEmpty) {
       try {
@@ -1776,7 +1777,11 @@ class _HrdListKaryawanPageState extends State<HrdListKaryawanPage> {
         inner = _defaultAvatar(size);
       }
     } else {
-      inner = _defaultAvatar(size);
+      inner = EmployeeProfilePhoto(
+        employeeId: employeeId,
+        size: size,
+        fallback: _defaultAvatar(size),
+      );
     }
 
     return ClipRRect(

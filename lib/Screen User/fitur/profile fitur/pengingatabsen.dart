@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:absensikaryawan/Services/attendance_reminder_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PengingatAbsenScreen extends StatefulWidget {
   const PengingatAbsenScreen({super.key});
@@ -14,6 +15,7 @@ class _PengingatAbsenScreenState extends State<PengingatAbsenScreen> {
   bool _enabled = true;
   bool _isLoadingInitial = true;
   bool _isSaving = false;
+  String _userId = '';
 
   @override
   void initState() {
@@ -22,17 +24,21 @@ class _PengingatAbsenScreenState extends State<PengingatAbsenScreen> {
   }
 
   Future<void> _load() async {
-    final enabled = await AttendanceReminderService.isEnabled();
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('UserID') ?? '';
+    final enabled = await AttendanceReminderService.isEnabled(userId);
     if (!mounted) return;
     setState(() {
+      _userId = userId;
       _enabled = enabled;
       _isLoadingInitial = false;
     });
   }
 
   Future<void> _onToggle(bool value) async {
+    if (_userId.isEmpty) return;
     setState(() => _isSaving = true);
-    await AttendanceReminderService.setEnabled(value);
+    await AttendanceReminderService.setEnabled(_userId, value);
     if (!mounted) return;
     setState(() {
       _enabled = value;

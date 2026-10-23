@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import '../../Services/config.dart';
+import '../../Services/token_service.dart';
 
 class BroadcastNotifScreen extends StatefulWidget {
   const BroadcastNotifScreen({super.key});
@@ -59,7 +60,9 @@ class _BroadcastNotifScreenState extends State<BroadcastNotifScreen> {
       final token = await _getToken();
       final res = await http
           .get(
-            Uri.parse('$baseURL/api/admin/notifications/users'),
+            Uri.parse(
+              '$baseURL/api/admin/notifications/users?requestUserId=${Uri.encodeQueryComponent(_hrdUserId ?? '')}',
+            ),
             headers: {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
@@ -79,17 +82,7 @@ class _BroadcastNotifScreenState extends State<BroadcastNotifScreen> {
   }
 
   static Future<String?> _getToken() async {
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200) return json.decode(res.body)['access_token'];
-    } catch (_) {}
-    return null;
+    return TokenService.getToken();
   }
 
   Future<void> _send() async {
@@ -186,6 +179,8 @@ class _BroadcastNotifScreenState extends State<BroadcastNotifScreen> {
               'IsImportant': _isImportant,
               'SendToAll': true,
               'UserId': null,
+              'CreatedBy': _hrdUserId,
+              'RequesterRole': 'HRD',
             }),
           )
           .timeout(const Duration(seconds: 30));

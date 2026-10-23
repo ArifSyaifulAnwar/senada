@@ -10,14 +10,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../Screen HRD/Home/timeoffhrd.dart';
 
-class TimeOffAdminScreen extends StatefulWidget {
+/// Admin dan HRD memakai dashboard izin yang sama. Sumber data tetap dibatasi
+/// oleh token/actor login di API; yang dibagi hanya komponen tampilannya agar
+/// desktop Admin tidak tertinggal dari tampilan HRD.
+class TimeOffAdminScreen extends StatelessWidget {
   const TimeOffAdminScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) =>
+      const TimeOffHRDScreen(presentationRole: 'Direktur');
+}
+
+// Implementasi lama dipertahankan sementara untuk kompatibilitas internal,
+// tetapi entry point Admin sekarang memakai tampilan HRD yang responsif.
+class _LegacyTimeOffAdminScreen extends StatefulWidget {
+  const _LegacyTimeOffAdminScreen();
 
   @override
   _TimeOffAdminScreenState createState() => _TimeOffAdminScreenState();
 }
 
-class _TimeOffAdminScreenState extends State<TimeOffAdminScreen>
+class _TimeOffAdminScreenState extends State<_LegacyTimeOffAdminScreen>
     with SingleTickerProviderStateMixin {
   List<AdminTimeOffData> _allTimeOffs = [];
   List<AdminTimeOffData> _filteredTimeOffs = [];

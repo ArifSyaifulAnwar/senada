@@ -22,6 +22,7 @@ import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/face_recognition_service.dart';
 import 'package:absensikaryawan/Services/teguran_service.dart';
 import 'package:absensikaryawan/Services/time_off_service.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/designnya/attendance_summary.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
 import 'package:flutter/material.dart';
@@ -228,20 +229,8 @@ class _HomePageState extends State<HomeScreen> {
       final uid = userID ?? await loadUserId();
       if (uid == null || uid.isEmpty) return;
       final today = DateTime.now();
-      final tokenResp = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (tokenResp.statusCode != 200) return;
-      final token = json.decode(tokenResp.body)['access_token'];
+      final token = await TokenService.getToken();
+      if (token == null || token.isEmpty) return;
 
       final tanggal =
           '${today.year}-'
@@ -380,30 +369,7 @@ class _HomePageState extends State<HomeScreen> {
     super.dispose();
   }
 
-  static Future<String?> _getToken() async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {
-              'grant_type': 'password',
-              'password':
-                  'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data.containsKey('access_token') && data['access_token'] != null) {
-          return data['access_token'];
-        }
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
+  static Future<String?> _getToken() => TokenService.getToken();
 
   Future<void> _loadUnreadNotificationCount() async {
     if (!mounted) return;
@@ -551,10 +517,10 @@ class _HomePageState extends State<HomeScreen> {
   Future<void> _loadProfileData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('Email');
-      if (email == null) {
+      final userId = prefs.getString('UserID');
+      if (userId == null || userId.isEmpty) {
         _safeSetState(() {
-          _errorMessage = 'Email tidak ditemukan';
+          _errorMessage = 'User tidak ditemukan';
           _isLoading = false;
         });
         return;
@@ -574,7 +540,7 @@ class _HomePageState extends State<HomeScreen> {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email}),
+        body: json.encode({'UserId': userId}),
       );
       if (!mounted) return;
       if (response.statusCode == 200) {

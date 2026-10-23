@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:absensikaryawan/Services/employee_service.dart';
 import 'package:absensikaryawan/models/employee_models.dart';
+import 'package:absensikaryawan/widget/employee_profile_photo.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -766,7 +767,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(36),
-                  child: _buildProfileImage(emp.foto, 72),
+                  child: _buildProfileImage(emp.id, emp.foto, 72),
                 ),
               ),
               const SizedBox(width: 16),
@@ -1326,7 +1327,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(isWeb ? 20 : 26),
-                child: _buildProfileImage(emp.foto, isWeb ? 40 : 52),
+                child: _buildProfileImage(emp.id, emp.foto, isWeb ? 40 : 52),
               ),
             ),
             SizedBox(width: isWeb ? 10 : 12),
@@ -1456,7 +1457,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(36),
-                      child: _buildProfileImage(emp.foto, 72),
+                      child: _buildProfileImage(emp.id, emp.foto, 72),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -1814,7 +1815,7 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
     ),
   );
 
-  Widget _buildProfileImage(String? b64, double size) {
+  Widget _buildProfileImage(int employeeId, String? b64, double size) {
     if (b64 != null && b64.isNotEmpty) {
       try {
         final bytes = _avatarBytesCache.putIfAbsent(
@@ -1832,7 +1833,11 @@ class _HalamanListEmployeeState extends State<HalamanListEmployee> {
         );
       } catch (_) {}
     }
-    return _buildDefaultAvatar(size);
+    return EmployeeProfilePhoto(
+      employeeId: employeeId,
+      size: size,
+      fallback: _buildDefaultAvatar(size),
+    );
   }
 
   Widget _buildDefaultAvatar(double size) => Container(

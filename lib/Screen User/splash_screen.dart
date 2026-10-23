@@ -4,6 +4,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/keamanan/pin
 import 'package:absensikaryawan/Screen%20User/splashscreen/intro1.dart';
 import 'package:absensikaryawan/Screen%20User/home.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; // Untuk kIsWeb
 import 'package:shared_preferences/shared_preferences.dart';
@@ -51,6 +52,15 @@ class _SplashScreenState extends State<SplashScreen>
           email.isNotEmpty &&
           userId != null &&
           userId.isNotEmpty) {
+        // Preferensi profil bisa tersisa setelah token kedaluwarsa. Jangan
+        // masuk ke home dengan sesi kosong karena seluruh request data akan
+        // berakhir 401 dan terlihat sebagai "gagal memuat data".
+        final sessionToken = await TokenService.getToken();
+        if (sessionToken == null || sessionToken.isEmpty) {
+          _navigateToSignIn();
+          return;
+        }
+
         // Status PIN yang sudah pernah diverifikasi digunakan langsung agar
         // pengguna lama tidak menunggu dua request API setiap membuka app.
         if (prefs.containsKey('PinEnabled') && prefs.containsKey('HasPin')) {
@@ -85,20 +95,11 @@ class _SplashScreenState extends State<SplashScreen>
     bool navigateAfterCheck = true,
   }) async {
     try {
-      // Get access token
-      final tokenResponse = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 4));
-
-      if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final accessToken = tokenData['access_token'];
-
-        if (accessToken != null) {
+      // Status PIN bersifat per user, sehingga harus memakai token sesi user
+      // yang disimpan saat login. Token aplikasi umum tidak punya identitas
+      // user dan selalu ditolak endpoint /api/pin/* dengan 401.
+      final accessToken = await TokenService.getToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
           // Check PIN status
           final pinResponse = await http
               .post(
@@ -143,9 +144,6 @@ class _SplashScreenState extends State<SplashScreen>
             // Error response, navigasi berdasarkan role
             if (navigateAfterCheck) _navigateByRole(role);
           }
-        } else {
-          if (navigateAfterCheck) _navigateByRole(role);
-        }
       } else {
         if (navigateAfterCheck) _navigateByRole(role);
       }

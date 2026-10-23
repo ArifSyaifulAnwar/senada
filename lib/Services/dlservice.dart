@@ -1,21 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 
 class DinasLuarService {
-  static Future<String?> _token() async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse('$baseURL/api/auth/token'),
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-          )
-          .timeout(const Duration(seconds: 15));
-      if (r.statusCode == 200) return json.decode(r.body)['access_token'];
-    } catch (_) {}
-    return null;
-  }
+  // Endpoint dinas memverifikasi UserId terhadap klaim JWT. Token aplikasi
+  // umum hanya memiliki klaim sistem sehingga selalu berujung 401.
+  static Future<String?> _token() => TokenService.getToken();
 
   // Karyawan submit absen dinas luar (hanya wajah + lokasi, belum butuh bukti)
   static Future<Map<String, dynamic>> submit({

@@ -25,8 +25,13 @@ bool _isReimbursementWebLayout(BuildContext context) =>
 
 class HalamanHRDReimbursement extends StatefulWidget {
   final int? initialDetailId;
+  final String presentationRole;
 
-  const HalamanHRDReimbursement({super.key, this.initialDetailId});
+  const HalamanHRDReimbursement({
+    super.key,
+    this.initialDetailId,
+    this.presentationRole = 'HRD',
+  });
 
   @override
   _HalamanHRDReimbursementState createState() =>
@@ -35,6 +40,11 @@ class HalamanHRDReimbursement extends StatefulWidget {
 
 class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     with SingleTickerProviderStateMixin {
+  bool get _isDirectorView =>
+      widget.presentationRole.trim().toLowerCase() == 'direktur';
+  String get _roleLabel => _isDirectorView ? 'Direktur' : 'HRD';
+  String get _departmentLabel =>
+      _isDirectorView ? 'Manajemen Perusahaan' : 'Human Resource Department';
   final AdminReimbursementService _adminService = AdminReimbursementService();
 
   List<AdminReimbursementData> _allReimbursements = [];
@@ -931,7 +941,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Human Resource Department',
+                      _departmentLabel,
                       style: TextStyle(
                         fontSize: _getResponsiveFontSize(context, 11),
                         color: Colors.white70,
@@ -939,7 +949,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _currentUserName ?? 'HRD Manager',
+                      _currentUserName ?? '$_roleLabel Perusahaan',
                       style: TextStyle(
                         fontSize: _getResponsiveFontSize(context, 17),
                         fontWeight: FontWeight.w700,
@@ -1491,7 +1501,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
-              'Statistik Reimbursement HRD',
+              'Statistik Reimbursement $_roleLabel',
               style: TextStyle(
                 fontSize: _getResponsiveFontSize(context, 18),
                 fontWeight: FontWeight.w700,
@@ -1600,7 +1610,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'HRD Financial Insights',
+                  'Insight Keuangan $_roleLabel',
                   style: TextStyle(
                     fontSize: _getResponsiveFontSize(context, 16),
                     fontWeight: FontWeight.w700,
@@ -1988,7 +1998,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Aksi Cepat HRD',
+          'Aksi Cepat $_roleLabel',
           style: TextStyle(
             fontSize: _getResponsiveFontSize(context, 16),
             fontWeight: FontWeight.w700,
@@ -3060,6 +3070,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
           currentUserId: _currentUserId ?? '',
           currentUserName: _currentUserName ?? '',
           workPeriods: _workPeriods,
+          presentationRole: _roleLabel,
         );
       },
     );
@@ -3093,6 +3104,7 @@ class ReimbursementReportModal extends StatefulWidget {
   final String currentUserId;
   final String currentUserName;
   final List<WorkPeriodModel> workPeriods;
+  final String presentationRole;
 
   const ReimbursementReportModal({
     super.key,
@@ -3102,6 +3114,7 @@ class ReimbursementReportModal extends StatefulWidget {
     required this.currentUserId,
     required this.currentUserName,
     this.workPeriods = const [],
+    this.presentationRole = 'HRD',
   });
 
   @override
@@ -3433,7 +3446,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildReportHeader('Ringkasan Laporan HRD'),
+        _buildReportHeader('Ringkasan Laporan ${widget.presentationRole}'),
         const SizedBox(height: 20),
 
         // Executive Summary

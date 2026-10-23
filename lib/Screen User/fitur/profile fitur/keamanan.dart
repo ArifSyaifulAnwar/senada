@@ -3,6 +3,7 @@
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/keamanan/setuppin.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/ubahkatasandi.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -63,17 +64,8 @@ class _HalamanPengaturanKeamananState extends State<HalamanPengaturanKeamanan> {
     }
 
     try {
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-
-      if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final accessToken = tokenData['access_token'];
-
-        if (accessToken != null) {
+      final accessToken = await TokenService.getToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
           final response = await http.post(
             Uri.parse('$baseURL/api/asn/getUserSettings'),
             headers: {
@@ -94,7 +86,6 @@ class _HalamanPengaturanKeamananState extends State<HalamanPengaturanKeamanan> {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setBool('RequireOtp', currentOtpSetting);
           }
-        }
       }
     } catch (e) {
       _showSnackBar('Gagal memuat pengaturan OTP', Colors.red);
@@ -111,17 +102,8 @@ class _HalamanPengaturanKeamananState extends State<HalamanPengaturanKeamanan> {
     }
 
     try {
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-
-      if (tokenResponse.statusCode == 200) {
-        final tokenData = json.decode(tokenResponse.body);
-        final accessToken = tokenData['access_token'];
-
-        if (accessToken != null) {
+      final accessToken = await TokenService.getToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
           final response = await http.post(
             Uri.parse('$baseURL/api/pin/status'),
             headers: {
@@ -150,7 +132,6 @@ class _HalamanPengaturanKeamananState extends State<HalamanPengaturanKeamanan> {
               await prefs.setBool('HasPin', hasPin);
             }
           }
-        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -172,20 +153,9 @@ class _HalamanPengaturanKeamananState extends State<HalamanPengaturanKeamanan> {
     });
 
     try {
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-      if (tokenResponse.statusCode != 200) {
-        throw Exception('Gagal mendapatkan token akses');
-      }
-
-      final tokenData = json.decode(tokenResponse.body);
-      final accessToken = tokenData['access_token'];
-
-      if (accessToken == null) {
-        throw Exception('Token tidak valid');
+      final accessToken = await TokenService.getToken();
+      if (accessToken == null || accessToken.isEmpty) {
+        throw Exception('Sesi login berakhir. Silakan masuk kembali.');
       }
 
       Map<String, dynamic> requestBody = {
@@ -254,23 +224,9 @@ class _HalamanPengaturanKeamananState extends State<HalamanPengaturanKeamanan> {
     });
 
     try {
-      // Ambil token
-      final tokenResponse = await http.post(
-        Uri.parse('$baseURL/api/auth/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {'grant_type': 'password', 'password': 'EE34B6C791EB149C2461F7E3D17B71FCC885855D04394776B4870C3D19D05A10108ABA8BB1E6BC3948E981AD8EF04FC1ABDE600BBB01AE57CA0287C7A04989F0'},
-      );
-
-      if (tokenResponse.statusCode != 200) {
-        throw Exception(
-          'Gagal mendapatkan token akses. Status: ${tokenResponse.statusCode}',
-        );
-      }
-
-      final tokenData = json.decode(tokenResponse.body);
-      final accessToken = tokenData['access_token'];
-      if (accessToken == null) {
-        throw Exception('Token tidak valid dari server.');
+      final accessToken = await TokenService.getToken();
+      if (accessToken == null || accessToken.isEmpty) {
+        throw Exception('Sesi login berakhir. Silakan masuk kembali.');
       }
 
       // Kirim request toggle PIN

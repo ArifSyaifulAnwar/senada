@@ -294,11 +294,11 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
   Future<void> _loadProfileData(String accessToken) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('Email');
+      final userId = prefs.getString('UserID');
 
-      if (email == null || email.isEmpty) {
+      if (userId == null || userId.isEmpty) {
         _safeSetState(() {
-          _errorMessage = 'Email tidak ditemukan di perangkat';
+          _errorMessage = 'User tidak ditemukan di perangkat';
           _isLoading = false;
         });
         return;
@@ -311,7 +311,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode({'Email': email}),
+        body: json.encode({'UserId': userId}),
       );
 
       if (!mounted) return;
