@@ -397,6 +397,7 @@ class _PinInputScreenState extends State<PinInputScreen>
   }
 
   Future<void> _logout() async {
+    await TokenService.logout();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
 

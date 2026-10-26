@@ -123,8 +123,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       }
 
       // Kalender selalu memakai token sesi user yang sedang login.
-      final token = await TokenService.getToken();
-      if (token == null || token.isEmpty) {
+      if (await TokenService.getToken() == null) {
         if (mounted) setState(() => _isLoadingCalendar = false);
         return;
       }
@@ -132,16 +131,11 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           '${today.year}-${today.month.toString().padLeft(2, '0')}'
           '-${today.day.toString().padLeft(2, '0')}';
 
-      final resp = await http
-          .post(
-            Uri.parse('$baseURL/api/calendar/check'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode({'tanggal': tanggal, 'userId': userId}),
-          )
-          .timeout(const Duration(seconds: 10));
+      final resp = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/calendar/check'),
+        body: json.encode({'tanggal': tanggal, 'userId': userId}),
+        timeout: const Duration(seconds: 10),
+      );
 
       if (resp.statusCode == 200 && mounted) {
         final body = json.decode(resp.body);
@@ -603,14 +597,35 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               lowerReason.contains('tidak ada kantor aktif') ||
               lowerReason.contains('lokasi kantor')) {
             _handleOutsideRadius(userId, imageBase64);
-          } else {
+          } else if (_isRetryableAttendanceFailure(reason)) {
             _scheduleAutoRetry(reason);
+          } else {
+            // Kesalahan bisnis (mis. belum check-in atau sudah checkout)
+            // tidak akan membaik dengan foto yang sama. Jangan putar retry
+            // otomatis sampai tiga kali karena justru menyulitkan pengguna.
+            setState(() {
+              _isProcessingFace = false;
+              _isAutoRetrying = false;
+              _faceVerificationMessage = '❌ $reason';
+            });
           }
         }
       }
     } catch (e) {
       if (mounted) _scheduleAutoRetry("Error koneksi: ${e.toString()}");
     }
+  }
+
+  bool _isRetryableAttendanceFailure(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('koneksi') ||
+        lower.contains('timeout') ||
+        lower.contains('server') ||
+        lower.contains('wajah') ||
+        lower.contains('pencahayaan') ||
+        lower.contains('posisi') ||
+        lower.contains('keaslian') ||
+        lower.contains('coba lagi');
   }
 
   void _handleOutsideRadius(String userId, String imageBase64) {

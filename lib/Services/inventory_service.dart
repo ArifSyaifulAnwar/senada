@@ -343,7 +343,6 @@ class InventoryService {
     final res = await http.Response.fromStream(streamed);
 
     if (res.statusCode == 401 && !isRetry) {
-      TokenService.invalidate();
       return _sendMultipart(url, fields, buildFiles, isRetry: true);
     }
     return res;

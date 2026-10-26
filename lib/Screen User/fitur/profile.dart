@@ -204,13 +204,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     setState(() => _email = prefs.getString('Email') ?? '');
     try {
-      final r = await http.post(
+      final r = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/asn/getDataUser'),
-        headers: {
-          'Authorization': 'bearer $_accessToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
         body: json.encode({'UserId': userId}),
       );
       if (r.statusCode == 200) {
@@ -652,6 +647,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (rb['success'] == true || msg.toLowerCase().contains('berhasil')) {
           _showSuccessSnackBar(_l('successDeleteAccount'));
           await Future.delayed(const Duration(seconds: 2));
+          await TokenService.logout();
           await prefs.clear();
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
@@ -674,6 +670,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _performLogout() async {
+    await TokenService.logout();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     if (!mounted) return;

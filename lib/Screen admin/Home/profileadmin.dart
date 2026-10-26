@@ -1221,10 +1221,12 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       final directorUserId = data['UserId']?.toString() ?? '';
       final directorEmail = data['Email']?.toString() ?? '';
       final directorSessionToken = data['AccessToken']?.toString() ?? '';
+      final directorRefreshToken = data['RefreshToken']?.toString() ?? '';
       final directorExpiresIn = int.tryParse('${data['ExpiresIn'] ?? ''}') ?? 0;
       if (directorUserId.isEmpty ||
           directorEmail.isEmpty ||
           directorSessionToken.isEmpty ||
+          directorRefreshToken.isEmpty ||
           directorExpiresIn <= 0) {
         _showErrorSnackBar('Data akun Direktur belum lengkap.');
         return;
@@ -1235,7 +1237,8 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       // melihat kombinasi UserID Direktur + JWT HRD (yang menghasilkan 401).
       final sourceSessionToken = prefs.getString('SessionAccessToken') ?? '';
       final sourceSessionExpiry = prefs.getInt('SessionAccessTokenExpiry');
-      if (sourceSessionToken.isEmpty || sourceSessionExpiry == null) {
+      final sourceRefreshToken = prefs.getString('SessionRefreshToken') ?? '';
+      if (sourceSessionToken.isEmpty || sourceSessionExpiry == null || sourceRefreshToken.isEmpty) {
         _showErrorSnackBar('Sesi HRD tidak valid. Silakan login kembali.');
         return;
       }
@@ -1260,6 +1263,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       );
       await prefs.setString('CrossLoginSourceAccessToken', sourceSessionToken);
       await prefs.setInt('CrossLoginSourceAccessTokenExpiry', sourceSessionExpiry);
+      await prefs.setString('CrossLoginSourceRefreshToken', sourceRefreshToken);
       await prefs.setBool('IsDirectorCrossLogin', true);
 
       await prefs.setString('Name', data['Name']?.toString() ?? '');
@@ -1268,7 +1272,11 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
       await prefs.setString('FotoProfil', data['FotoProfil']?.toString() ?? '');
       await prefs.setString('Role', data['Role']?.toString() ?? 'User');
       await prefs.setString('ViewMode', 'director');
-      await TokenService.setSessionToken(directorSessionToken, directorExpiresIn);
+      await TokenService.setSessionToken(
+        directorSessionToken,
+        directorExpiresIn,
+        refreshToken: directorRefreshToken,
+      );
 
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
@@ -1356,14 +1364,16 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     final sourceSessionToken =
         prefs.getString('CrossLoginSourceAccessToken') ?? '';
     final sourceSessionExpiry = prefs.getInt('CrossLoginSourceAccessTokenExpiry');
+    final sourceRefreshToken =
+        prefs.getString('CrossLoginSourceRefreshToken') ?? '';
 
     if (prefs.getBool('IsDirectorCrossLogin') != true ||
         sourceUserId.isEmpty ||
         sourceEmail.isEmpty ||
         sourceRole.toLowerCase() != 'hrd' ||
         sourceSessionToken.isEmpty ||
-        sourceSessionExpiry == null ||
-        DateTime.now().millisecondsSinceEpoch >= sourceSessionExpiry) {
+        sourceRefreshToken.isEmpty ||
+        sourceSessionExpiry == null) {
       _showErrorSnackBar(
         'Sesi asal HRD tidak ditemukan. Silakan keluar lalu login kembali.',
       );
@@ -1374,12 +1384,6 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
         DateTime.fromMillisecondsSinceEpoch(sourceSessionExpiry)
             .difference(DateTime.now())
             .inSeconds;
-    if (remainingSeconds <= 0) {
-      _showErrorSnackBar(
-        'Sesi HRD telah berakhir. Silakan keluar lalu login kembali.',
-      );
-      return;
-    }
 
     await prefs.setString(
       'Name',
@@ -1409,8 +1413,16 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
     await prefs.remove('CrossLoginSourceViewMode');
     await prefs.remove('CrossLoginSourceAccessToken');
     await prefs.remove('CrossLoginSourceAccessTokenExpiry');
+    await prefs.remove('CrossLoginSourceRefreshToken');
     await prefs.remove('IsDirectorCrossLogin');
-    await TokenService.setSessionToken(sourceSessionToken, remainingSeconds);
+    await TokenService.setSessionToken(
+      sourceSessionToken,
+      remainingSeconds > 0 ? remainingSeconds : 0,
+      refreshToken: sourceRefreshToken,
+    );
+    // Jika access token asal sudah habis, TokenService memperbaruinya diam-diam
+    // dengan refresh token HRD sebelum halaman tujuan meminta data.
+    await TokenService.getToken();
 
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -1605,6 +1617,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
             ),
           );
           await Future.delayed(const Duration(seconds: 2));
+          await TokenService.logout();
           await prefs.clear();
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
@@ -1629,6 +1642,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
   }
 
   void _performLogout() async {
+    await TokenService.logout();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     if (!mounted) return;

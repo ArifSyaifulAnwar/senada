@@ -40,16 +40,11 @@ class AttendanceOutsideRadiusService {
         'AccuracyMeters': accuracyMeters,
       };
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/attendance/outside-radius/submit'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode(requestBody),
-          )
-          .timeout(const Duration(seconds: 45));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/attendance/outside-radius/submit'),
+        body: json.encode(requestBody),
+        timeout: const Duration(seconds: 45),
+      );
 
       final responseData = json.decode(response.body);
 

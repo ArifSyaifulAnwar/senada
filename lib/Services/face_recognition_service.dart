@@ -3,7 +3,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
 
@@ -46,16 +45,11 @@ class FaceRecognitionService {
       // ✅ PERBAIKAN: Gunakan PascalCase
       final requestBody = {'UserId': userId.trim()}; // ✅ Changed from 'userId'
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/face/check-registration'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode(requestBody),
-          )
-          .timeout(const Duration(seconds: 20));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/face/check-registration'),
+        body: json.encode(requestBody),
+        timeout: const Duration(seconds: 20),
+      );
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
@@ -124,16 +118,11 @@ class FaceRecognitionService {
 
       // Debug
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/face/register'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode(requestBody),
-          )
-          .timeout(const Duration(seconds: 45));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/face/register'),
+        body: json.encode(requestBody),
+        timeout: const Duration(seconds: 45),
+      );
 
       // Debug
       // Debug
@@ -244,16 +233,14 @@ class FaceRecognitionService {
       // Debug
       // Debug
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/face/verify-attendance'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode(requestBody),
-          )
-          .timeout(const Duration(seconds: 45));
+      // Endpoint checkout dapat dipanggil setelah access token berumur lama.
+      // authorizedPost memperbarui token lalu mengulang request satu kali jika
+      // server menjawab 401, sehingga checkout tidak gagal hanya karena sesi.
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/face/verify-attendance'),
+        body: json.encode(requestBody),
+        timeout: const Duration(seconds: 45),
+      );
 
       // Debug
       // Debug
@@ -284,7 +271,10 @@ class FaceRecognitionService {
           return {
             'success': false,
             'message':
-                'Verifikasi gagal - Status ${response.statusCode}: ${response.body}',
+                TokenService.responseMessage(
+                  response,
+                  fallback: 'Verifikasi absensi belum berhasil. Silakan coba lagi.',
+                ),
           };
         }
       }
@@ -314,16 +304,11 @@ class FaceRecognitionService {
       // ✅ PERBAIKAN: Gunakan PascalCase
       final requestBody = {'UserId': userId.trim()}; // ✅ Changed from 'userId'
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/attendance/today'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode(requestBody),
-          )
-          .timeout(const Duration(seconds: 20));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/attendance/today'),
+        body: json.encode(requestBody),
+        timeout: const Duration(seconds: 20),
+      );
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
@@ -333,10 +318,14 @@ class FaceRecognitionService {
           'message': responseData['message'] ?? 'Data berhasil diambil',
         };
       } else {
-        final responseData = json.decode(response.body);
+        final responseData = _decodeObject(response.body);
         return {
           'success': false,
-          'message': responseData['message'] ?? 'Gagal mengambil data absensi',
+          'message': responseData['message'] ??
+              TokenService.responseMessage(
+                response,
+                fallback: 'Gagal mengambil data absensi',
+              ),
         };
       }
     } catch (e) {
@@ -360,17 +349,12 @@ class FaceRecognitionService {
         return {'success': false, 'message': 'Gagal mendapatkan token akses'};
       }
 
-      final response = await http
-          .get(
-            Uri.parse('$baseURL/api/asn/office/locations').replace(
-              queryParameters: {'userId': userId.trim()},
-            ),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 20));
+      final response = await TokenService.authorizedGet(
+        Uri.parse('$baseURL/api/asn/office/locations').replace(
+          queryParameters: {'userId': userId.trim()},
+        ),
+        timeout: const Duration(seconds: 20),
+      );
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
@@ -380,11 +364,15 @@ class FaceRecognitionService {
           'message': responseData['message'] ?? 'Data lokasi berhasil diambil',
         };
       } else {
-        final responseData = json.decode(response.body);
+        final responseData = _decodeObject(response.body);
         return {
           'success': false,
           'message':
-              responseData['message'] ?? 'Gagal mengambil data lokasi kantor',
+              responseData['message'] ??
+              TokenService.responseMessage(
+                response,
+                fallback: 'Gagal mengambil data lokasi kantor',
+              ),
         };
       }
     } catch (e) {
@@ -392,6 +380,17 @@ class FaceRecognitionService {
         'success': false,
         'message': 'Terjadi kesalahan koneksi: ${e.toString()}',
       };
+    }
+  }
+
+  static Map<String, dynamic> _decodeObject(String body) {
+    try {
+      final decoded = json.decode(body);
+      return decoded is Map<String, dynamic>
+          ? decoded
+          : <String, dynamic>{};
+    } catch (_) {
+      return <String, dynamic>{};
     }
   }
 
@@ -417,16 +416,11 @@ class FaceRecognitionService {
         'year': year,
       };
 
-      final response = await http
-          .post(
-            Uri.parse('$baseURL/api/asn/attendance/summary'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: json.encode(requestBody),
-          )
-          .timeout(const Duration(seconds: 20));
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/attendance/summary'),
+        body: json.encode(requestBody),
+        timeout: const Duration(seconds: 20),
+      );
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);

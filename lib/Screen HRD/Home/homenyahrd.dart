@@ -279,7 +279,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
       }
 
       await Future.wait([
-        _loadProfileData(token),
+        _loadProfileData(),
         _loadPendingOrgCount(),
         _loadCompanyContext(),
       ]);
@@ -291,7 +291,7 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
     }
   }
 
-  Future<void> _loadProfileData(String accessToken) async {
+  Future<void> _loadProfileData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID');
@@ -304,13 +304,8 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         return;
       }
 
-      final response = await http.post(
+      final response = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/asn/getDataUser'),
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
         body: json.encode({'UserId': userId}),
       );
 
@@ -332,7 +327,10 @@ class _HomeScreenHRDState extends State<HomeScreenHRD> {
         }
       } else {
         _safeSetState(() {
-          _errorMessage = 'Error API: ${response.statusCode}';
+          _errorMessage = TokenService.responseMessage(
+            response,
+            fallback: 'Data akun belum dapat dimuat. Silakan coba lagi.',
+          );
           _isLoading = false;
         });
       }

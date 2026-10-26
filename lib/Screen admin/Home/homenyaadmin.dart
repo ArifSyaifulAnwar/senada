@@ -21,7 +21,6 @@ import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/designnya/tanggal.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:slide_to_act/slide_to_act.dart';
 
@@ -219,7 +218,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
       }
 
       await Future.wait([
-        _loadProfileData(token),
+        _loadProfileData(),
         _loadUserId(),
         _loadCompanyContext(),
       ]);
@@ -231,7 +230,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     }
   }
 
-  Future<void> _loadProfileData(String accessToken) async {
+  Future<void> _loadProfileData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID');
@@ -244,13 +243,8 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
         return;
       }
 
-      final response = await http.post(
+      final response = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/asn/getDataUser'),
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
         body: json.encode({'UserId': userId}),
       );
 
@@ -272,7 +266,10 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
         }
       } else {
         _safeSetState(() {
-          _errorMessage = 'Error API: ${response.statusCode}';
+          _errorMessage = TokenService.responseMessage(
+            response,
+            fallback: 'Data akun belum dapat dimuat. Silakan coba lagi.',
+          );
           _isLoading = false;
         });
       }

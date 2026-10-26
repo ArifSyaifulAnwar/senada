@@ -560,7 +560,6 @@ class AssetService {
     if (res.statusCode == 401 && !isRetry) {
       // Token expired di server — invalidate cache lalu coba sekali lagi
       // dengan token baru DAN file yang dibangun ulang dari bytes asli.
-      TokenService.invalidate();
       return _sendMultipart(url, fields, buildFiles, isRetry: true);
     }
 

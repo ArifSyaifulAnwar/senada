@@ -525,21 +525,15 @@ class _HomePageState extends State<HomeScreen> {
         });
         return;
       }
-      final token = await _getToken();
-      if (token == null) {
+      if (await _getToken() == null) {
         _safeSetState(() {
           _errorMessage = 'Gagal mendapatkan token';
           _isLoading = false;
         });
         return;
       }
-      final response = await http.post(
+      final response = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/asn/getDataUser'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
         body: json.encode({'UserId': userId}),
       );
       if (!mounted) return;
@@ -559,7 +553,10 @@ class _HomePageState extends State<HomeScreen> {
         }
       } else {
         _safeSetState(() {
-          _errorMessage = 'Error API: ${response.statusCode}';
+          _errorMessage = TokenService.responseMessage(
+            response,
+            fallback: 'Data akun belum dapat dimuat. Silakan coba lagi.',
+          );
           _isLoading = false;
         });
       }

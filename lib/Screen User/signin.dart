@@ -146,6 +146,7 @@ class _SignInScreenState extends State<SignInScreen>
                 );
                 await prefs.setString('Role', role);
                 final sessionToken = responseData['AccessToken']?.toString();
+                final refreshToken = responseData['RefreshToken']?.toString();
                 final expiresIn = responseData['ExpiresIn'];
                 if (sessionToken == null || sessionToken.isEmpty) {
                   // Jangan pernah meneruskan sesi sebelumnya: token tersebut
@@ -157,6 +158,7 @@ class _SignInScreenState extends State<SignInScreen>
                 await TokenService.setSessionToken(
                   sessionToken,
                   expiresIn is int ? expiresIn : int.tryParse('$expiresIn') ?? 28800,
+                  refreshToken: refreshToken,
                 );
 
                 // Upload FCM token ke backend setelah login berhasil

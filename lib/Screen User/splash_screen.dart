@@ -57,6 +57,17 @@ class _SplashScreenState extends State<SplashScreen>
         // berakhir 401 dan terlihat sebagai "gagal memuat data".
         final sessionToken = await TokenService.getToken();
         if (sessionToken == null || sessionToken.isEmpty) {
+          // Jangan menganggap gagal refresh (misalnya karena perangkat sedang
+          // offline) sebagai tindakan logout. Selama refresh token tersimpan,
+          // pengguna tetap masuk dan aplikasi akan mencoba memperbarui sesi
+          // lagi saat koneksi tersedia. Sesi hanya benar-benar dihapus melalui
+          // tombol Keluar atau ketika data login memang tidak ada.
+          final hasRefreshToken =
+              prefs.getString('SessionRefreshToken')?.isNotEmpty == true;
+          if (hasRefreshToken) {
+            _navigateByRole(role ?? '');
+            return;
+          }
           _navigateToSignIn();
           return;
         }
