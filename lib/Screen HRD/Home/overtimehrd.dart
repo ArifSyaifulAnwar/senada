@@ -46,6 +46,9 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   OvertimeAdminStatistics? _statistics;
   int _selectedYear = DateTime.now().year;
   int? _selectedMonth = DateTime.now().month;
+  // Default dapat melintasi bulan kalender, misalnya 23 Okt - 24 Nov.
+  // Rentang ini dipakai sampai HRD secara sadar memilih bulan/tahun lain.
+  DateTimeRange? _activeWorkPeriodRange;
   bool _isLoading = true;
   String? _currentUserId;
   String? _currentUserName;
@@ -99,6 +102,11 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       await _loadPolicySettings();
 
       if (_currentUserId != null && _currentUserName != null) {
+        final currentPeriod = await AdminAttendanceService()
+            .getCurrentWorkPeriod();
+        if (currentPeriod.success && currentPeriod.data != null && mounted) {
+          setState(() => _activeWorkPeriodRange = currentPeriod.data);
+        }
         await _loadAllData();
       } else {
         setState(() => _isLoading = false);
@@ -138,30 +146,31 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
         throw Exception('User ID tidak tersedia.');
       }
       try {
-        final periodRange = _selectedMonth != null
-            ? await _resolvePeriodRange(_selectedYear, _selectedMonth!)
-            : null;
+        final periodRange = await _effectivePeriodRange();
+        final hasWorkPeriodRange = periodRange != null;
 
         final futures =
             await Future.wait([
               OvertimeAdminService.getAllOvertimes(
                 adminId: _currentUserId!,
-                yearFilter: _selectedYear,
-                monthFilter: _selectedMonth,
+                // Bila rentang periode kerja tersedia, jangan tambah filter
+                // bulan kalender karena dapat memotong data lintas bulan.
+                yearFilter: hasWorkPeriodRange ? null : _selectedYear,
+                monthFilter: hasWorkPeriodRange ? null : _selectedMonth,
                 startDate: periodRange?.start,
                 endDate: periodRange?.end,
               ),
               OvertimeAdminService.getUsersWithOvertimes(
                 adminId: _currentUserId!,
-                year: _selectedYear,
-                month: _selectedMonth,
+                year: hasWorkPeriodRange ? null : _selectedYear,
+                month: hasWorkPeriodRange ? null : _selectedMonth,
                 startDate: periodRange?.start,
                 endDate: periodRange?.end,
               ),
               OvertimeAdminService.getAdminStatistics(
                 adminId: _currentUserId!,
-                year: _selectedYear,
-                month: _selectedMonth,
+                year: hasWorkPeriodRange ? null : _selectedYear,
+                month: hasWorkPeriodRange ? null : _selectedMonth,
                 startDate: periodRange?.start,
                 endDate: periodRange?.end,
               ),
@@ -196,6 +205,12 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       setState(() => _isLoading = false);
       _showErrorSnackBar('Terjadi kesalahan sistem: $e');
     }
+  }
+
+  Future<DateTimeRange?> _effectivePeriodRange() async {
+    if (_activeWorkPeriodRange != null) return _activeWorkPeriodRange;
+    if (_selectedMonth == null) return null;
+    return _resolvePeriodRange(_selectedYear, _selectedMonth!);
   }
 
   Widget _buildMonthYearFilter() {
@@ -238,6 +253,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
             onChanged: (value) async {
               setState(() {
                 _selectedMonth = value;
+                _activeWorkPeriodRange = null;
               });
               await _loadAllData();
             },
@@ -269,6 +285,7 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
 
               setState(() {
                 _selectedYear = value;
+                _activeWorkPeriodRange = null;
               });
               await _loadAllData();
             },
@@ -283,16 +300,15 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     List<UserWithOvertimes> users = [];
     OvertimeAdminStatistics? statistics;
 
-    final periodRange = _selectedMonth != null
-        ? await _resolvePeriodRange(_selectedYear, _selectedMonth!)
-        : null;
+    final periodRange = await _effectivePeriodRange();
+    final hasWorkPeriodRange = periodRange != null;
 
     try {
       overtimes =
           (await OvertimeAdminService.getAllOvertimes(
             adminId: _currentUserId!,
-            yearFilter: _selectedYear,
-            monthFilter: _selectedMonth,
+            yearFilter: hasWorkPeriodRange ? null : _selectedYear,
+            monthFilter: hasWorkPeriodRange ? null : _selectedMonth,
             startDate: periodRange?.start,
             endDate: periodRange?.end,
           )).data ??
@@ -305,8 +321,8 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       users =
           (await OvertimeAdminService.getUsersWithOvertimes(
             adminId: _currentUserId!,
-            year: _selectedYear,
-            month: _selectedMonth,
+            year: hasWorkPeriodRange ? null : _selectedYear,
+            month: hasWorkPeriodRange ? null : _selectedMonth,
             startDate: periodRange?.start,
             endDate: periodRange?.end,
           )).data ??
@@ -318,8 +334,8 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     try {
       statistics = (await OvertimeAdminService.getAdminStatistics(
         adminId: _currentUserId!,
-        year: _selectedYear,
-        month: _selectedMonth,
+        year: hasWorkPeriodRange ? null : _selectedYear,
+        month: hasWorkPeriodRange ? null : _selectedMonth,
         startDate: periodRange?.start,
         endDate: periodRange?.end,
       )).data;
@@ -1133,6 +1149,19 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
                   ),
                   const SizedBox(height: 12),
                   _buildMonthYearFilter(),
+                  if (_activeWorkPeriodRange != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Mengikuti periode kerja aktif: '
+                      '${DateFormat('dd MMM yyyy', 'id_ID').format(_activeWorkPeriodRange!.start)} - '
+                      '${DateFormat('dd MMM yyyy', 'id_ID').format(_activeWorkPeriodRange!.end)}',
+                      style: TextStyle(
+                        fontSize: _getResponsiveFontSize(context, 11),
+                        color: const Color(0xFF6366F1),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

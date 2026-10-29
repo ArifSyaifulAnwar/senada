@@ -159,10 +159,11 @@ class CompanyCalendarService {
     bool forceRefresh = false,
   }) async {
     try {
-      final res = await http
-          .post(
+      // Gunakan client terautentikasi agar token yang kedaluwarsa diperbarui
+      // terlebih dahulu. Tanpa ini daftar periode kosong setelah access-token
+      // habis, lalu layar memakai fallback bulan kalender yang keliru.
+      final res = await TokenService.authorizedPost(
             Uri.parse('$baseURL/api/calendar/period/list'),
-            headers: await _headers(),
             body: json.encode({'tahun': tahun, 'userId': userId}),
           )
           .timeout(const Duration(seconds: 15));

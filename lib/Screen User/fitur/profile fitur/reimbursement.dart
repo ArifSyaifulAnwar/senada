@@ -9,7 +9,6 @@ import 'package:absensikaryawan/Services/detailmodalcontent.dart';
 import 'package:absensikaryawan/Services/reimbursementmodel.dart';
 import 'package:absensikaryawan/Services/reimbursementservice.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../home/halaman_finance_reimbursement.dart';
@@ -51,10 +50,6 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
   }
 
   // ── Auth token ────────────────────────────────────────────────────────
-  static Future<String?> _getToken() async {
-    return TokenService.getToken();
-  }
-
   // ── Check Head Finance via API ─────────────────────────────────────────
   Future<void> _checkIsHeadFinance(String userId) async {
     if (!mounted) return;
@@ -137,16 +132,10 @@ class _HalamanReimbursementState extends State<HalamanReimbursement> {
     }
 
     try {
-      final token = await _getToken();
-
-      final response = await http
-          .post(
+      // Token yang kedaluwarsa harus diperbarui sebelum mengambil periode,
+      // agar filter tidak berubah menjadi kosong setelah sesi berjalan lama.
+      final response = await TokenService.authorizedPost(
             Uri.parse('$baseURL/api/calendar/period/list'),
-            headers: {
-              'Content-Type': 'application/json',
-              if (token != null && token.trim().isNotEmpty)
-                'Authorization': 'Bearer $token',
-            },
             body: jsonEncode({'tahun': year, 'userId': userId}),
           )
           .timeout(const Duration(seconds: 15));

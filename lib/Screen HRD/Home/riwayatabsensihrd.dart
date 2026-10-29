@@ -96,24 +96,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           customDateRange = result.data;
         });
       } else {
-        final now = DateTime.now();
         setState(() {
-          selectedTimeRange = 'Pilih Periode';
-          customDateRange = DateTimeRange(
-            start: DateTime(now.year, now.month, 1),
-            end: DateTime(now.year, now.month + 1, 0),
-          );
+          // Jangan pernah mengganti periode kerja dengan bulan kalender.
+          // Jika periodenya belum tersedia, tampilkan data tanpa rentang dan
+          // beri kesempatan HRD memilih periode yang benar.
+          selectedTimeRange = 'Semua Data';
+          customDateRange = null;
         });
       }
     } catch (_) {
       if (!mounted) return;
-      final now = DateTime.now();
       setState(() {
-        selectedTimeRange = 'Pilih Periode';
-        customDateRange = DateTimeRange(
-          start: DateTime(now.year, now.month, 1),
-          end: DateTime(now.year, now.month + 1, 0),
-        );
+        selectedTimeRange = 'Semua Data';
+        customDateRange = null;
       });
     }
   }
@@ -229,22 +224,33 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Future<void> _loadAnalyticsPeriods() async {
     try {
-      final periodsFuture = _adminService.getWorkPeriodsByYear(
-        tahun: _analyticsYear,
-      );
+      final periodsFuture = Future.wait([
+        _adminService.getWorkPeriodsByYear(tahun: _analyticsYear - 1),
+        _adminService.getWorkPeriodsByYear(tahun: _analyticsYear),
+        _adminService.getWorkPeriodsByYear(tahun: _analyticsYear + 1),
+      ]);
 
       final calendarFuture = CompanyCalendarService.getByYear(
         _analyticsYear,
         userId: _currentUserId ?? '',
         forceRefresh: true,
       );
-      final result = await periodsFuture;
+      final periodResults = await periodsFuture;
       final calendarEvents = await calendarFuture;
 
       if (!mounted) return;
 
-      if (result.success && result.data != null && result.data!.isNotEmpty) {
-        final periods = result.data!;
+      final periodsById = <int, HrdWorkPeriod>{};
+      for (final result in periodResults) {
+        if (!result.success || result.data == null) continue;
+        for (final period in result.data!) {
+          periodsById[period.id] = period;
+        }
+      }
+      final periods = periodsById.values.toList()
+        ..sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
+
+      if (periods.isNotEmpty) {
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
 
@@ -397,9 +403,12 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         start = _selectedAnalyticsPeriod!.tanggalMulai;
         end = _selectedAnalyticsPeriod!.tanggalSelesai;
       } else {
-        final now = DateTime.now();
-        start = DateTime(now.year, now.month, 1);
-        end = DateTime(now.year, now.month + 1, 0);
+        // Tidak boleh secara diam-diam memakai 1 s.d. akhir bulan karena
+        // periode kerja perusahaan bisa melintasi dua bulan kalender.
+        if (mounted) {
+          setState(() => _analyticsData = []);
+        }
+        return;
       }
 
       final all = <AdminAttendanceData>[];

@@ -1126,9 +1126,8 @@ class AssetService {
     int? tahun,
   }) async {
     try {
-      final res = await http.post(
+      final res = await TokenService.authorizedPost(
         Uri.parse('$baseURL$_base/report-periods'),
-        headers: await _jsonHeaders(),
         body: jsonEncode({'userId': userId, 'tahun': tahun}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -1158,9 +1157,8 @@ class AssetService {
     required int workPeriodId,
   }) async {
     try {
-      final res = await http.post(
+      final res = await TokenService.authorizedPost(
         Uri.parse('$baseURL$_base/report-employees'),
-        headers: await _jsonHeaders(),
         body: jsonEncode({'userId': userId, 'workPeriodId': workPeriodId}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -1192,10 +1190,8 @@ class AssetService {
     required String requestedBy,
   }) async {
     try {
-      final res = await http
-          .post(
+      final res = await TokenService.authorizedPost(
             Uri.parse('$baseURL$_base/report-generate'),
-            headers: await _jsonHeaders(),
             body: jsonEncode({
               'userId': userId,
               'workPeriodId': workPeriodId,
@@ -1225,9 +1221,8 @@ class AssetService {
     required String requestedBy,
   }) async {
     try {
-      final res = await http.post(
+      final res = await TokenService.authorizedPost(
         Uri.parse('$baseURL$_base/report-detail'),
-        headers: await _jsonHeaders(),
         body: jsonEncode({
           'userId': userId,
           'workPeriodId': workPeriodId,

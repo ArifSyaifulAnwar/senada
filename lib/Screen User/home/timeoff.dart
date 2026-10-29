@@ -56,12 +56,31 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     setState(() {
       if (res.success && res.data != null && res.data!.isNotEmpty) {
         _workPeriods = res.data!;
-        // Default: pilih periode terbaru (urutan sudah desc dari SP)
-        _selectedPeriod = _workPeriods.first;
+        _selectedPeriod = _findActiveWorkPeriod(_workPeriods);
       }
       _isLoadingPeriods = false;
     });
     await _loadTimeOffData();
+  }
+
+  WorkPeriodModel? _findActiveWorkPeriod(List<WorkPeriodModel> periods) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    for (final period in periods) {
+      final start = DateTime(
+        period.tanggalMulai.year,
+        period.tanggalMulai.month,
+        period.tanggalMulai.day,
+      );
+      final end = DateTime(
+        period.tanggalSelesai.year,
+        period.tanggalSelesai.month,
+        period.tanggalSelesai.day,
+      );
+      if (!today.isBefore(start) && !today.isAfter(end)) return period;
+    }
+    return null;
   }
 
   @override
@@ -123,7 +142,7 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
 
   void _resetFilter() {
     setState(() {
-      _selectedPeriod = _workPeriods.isNotEmpty ? _workPeriods.first : null;
+      _selectedPeriod = _findActiveWorkPeriod(_workPeriods);
     });
     _applyClientSideFilter();
   }

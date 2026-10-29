@@ -48,11 +48,31 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
     setState(() {
       if (res.success && res.data != null && res.data!.isNotEmpty) {
         _workPeriods = res.data!;
-        _selectedPeriod = _workPeriods.first;
+        _selectedPeriod = _findActiveWorkPeriod(_workPeriods);
       }
       _isLoadingPeriods = false;
     });
     _applyClientSideFilter();
+  }
+
+  WorkPeriodModel? _findActiveWorkPeriod(List<WorkPeriodModel> periods) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    for (final period in periods) {
+      final start = DateTime(
+        period.tanggalMulai.year,
+        period.tanggalMulai.month,
+        period.tanggalMulai.day,
+      );
+      final end = DateTime(
+        period.tanggalSelesai.year,
+        period.tanggalSelesai.month,
+        period.tanggalSelesai.day,
+      );
+      if (!today.isBefore(start) && !today.isAfter(end)) return period;
+    }
+    return null;
   }
 
   Future<void> _loadOvertimeData() async {

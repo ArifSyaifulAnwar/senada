@@ -55,10 +55,8 @@ class OvertimeAdminService {
         endDate: endDate,
       );
 
-      final response = await http
-          .post(
+      final response = await TokenService.authorizedPost(
             url,
-            headers: await _getHeaders(),
             body: jsonEncode(requestBody.toJson()),
           )
           .timeout(const Duration(seconds: 30));
@@ -109,10 +107,8 @@ class OvertimeAdminService {
         endDate: endDate,
       );
 
-      final response = await http
-          .post(
+      final response = await TokenService.authorizedPost(
             url,
-            headers: await _getHeaders(),
             body: jsonEncode(requestBody.toJson()),
           )
           .timeout(const Duration(seconds: 30));
@@ -161,10 +157,8 @@ class OvertimeAdminService {
         adminId: adminId,
       );
 
-      final response = await http
-          .post(
+      final response = await TokenService.authorizedPost(
             url,
-            headers: await _getHeaders(),
             body: jsonEncode(requestBody.toJson()),
           )
           .timeout(const Duration(seconds: 30));
@@ -303,10 +297,8 @@ class OvertimeAdminService {
         endDate: endDate,
       );
 
-      final response = await http
-          .post(
+      final response = await TokenService.authorizedPost(
             url,
-            headers: await _getHeaders(),
             body: jsonEncode(requestBody.toJson()),
           )
           .timeout(const Duration(seconds: 30));

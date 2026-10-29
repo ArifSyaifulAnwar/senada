@@ -285,9 +285,37 @@ class _AssetScreenState extends State<AssetScreen>
     final res = await AssetService.getReportPeriods(userId: widget.userId);
     if (mounted) {
       setState(() {
-        if (res.success && res.data != null) _reportPeriods = res.data!;
+        if (res.success && res.data != null) {
+          _reportPeriods = res.data!;
+
+          // Default laporan mengikuti periode kerja yang sedang aktif,
+          // termasuk periode yang dimulai pada bulan sebelumnya.
+          final now = DateTime.now();
+          final today = DateTime(now.year, now.month, now.day);
+          AssetReportPeriodModel? active;
+          for (final period in _reportPeriods) {
+            final start = DateTime(
+              period.tanggalMulai.year,
+              period.tanggalMulai.month,
+              period.tanggalMulai.day,
+            );
+            final end = DateTime(
+              period.tanggalSelesai.year,
+              period.tanggalSelesai.month,
+              period.tanggalSelesai.day,
+            );
+            if (!today.isBefore(start) && !today.isAfter(end)) {
+              active = period;
+              break;
+            }
+          }
+          _selectedReportPeriod = active;
+        }
         _isLoadingReportPeriods = false;
       });
+      if (_selectedReportPeriod != null) {
+        await _loadReportEmployees(_selectedReportPeriod!);
+      }
     }
   }
 

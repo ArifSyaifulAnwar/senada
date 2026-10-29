@@ -115,6 +115,7 @@ class _AllEmployeeActivitiesScreenState
       final results = await Future.wait([
         CompanyCalendarService.getWorkPeriodsByYear(now.year, userId: userId),
         CompanyCalendarService.getWorkPeriodsByYear(now.year - 1, userId: userId),
+        CompanyCalendarService.getWorkPeriodsByYear(now.year + 1, userId: userId),
       ]);
       final periodsById = <int, WorkPeriod>{};
       for (final periods in results) {

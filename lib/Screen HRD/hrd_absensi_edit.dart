@@ -55,29 +55,17 @@ class _HrdAbsensiEditPageState extends State<HrdAbsensiEditPage>
           _endDate = DateFormat('yyyy-MM-dd').format(range.end);
         });
       } else {
-        final now = DateTime.now();
-
         setState(() {
-          _startDate = DateFormat(
-            'yyyy-MM-dd',
-          ).format(DateTime(now.year, now.month, 1));
-          _endDate = DateFormat(
-            'yyyy-MM-dd',
-          ).format(DateTime(now.year, now.month + 1, 0));
+          _startDate = null;
+          _endDate = null;
         });
       }
     } catch (_) {
-      final now = DateTime.now();
-
       if (!mounted) return;
 
       setState(() {
-        _startDate = DateFormat(
-          'yyyy-MM-dd',
-        ).format(DateTime(now.year, now.month, 1));
-        _endDate = DateFormat(
-          'yyyy-MM-dd',
-        ).format(DateTime(now.year, now.month + 1, 0));
+        _startDate = null;
+        _endDate = null;
       });
     }
   }

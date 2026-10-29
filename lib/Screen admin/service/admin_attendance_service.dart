@@ -313,67 +313,40 @@ class AdminAttendanceService {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
 
-      final response = await TokenService.authorizedPost(
-        Uri.parse('$baseURL/api/calendar/period/list'),
-        body: jsonEncode({'tahun': now.year}),
-      );
-
-      if (response.statusCode != 200) {
-        return ApiResponse<DateTimeRange>(
-          success: false,
-          message: 'Server error (${response.statusCode})',
-        );
-      }
-
-      final jsonData = jsonDecode(response.body) as Map<String, dynamic>;
-      final success =
-          jsonData['Success'] == true || jsonData['success'] == true;
-
-      if (!success) {
-        return ApiResponse<DateTimeRange>(
-          success: false,
-          message:
-              jsonData['Message'] ??
-              jsonData['message'] ??
-              'Gagal mengambil periode kerja',
-        );
-      }
-
-      final rawData = jsonData['Data'] ?? jsonData['data'] ?? [];
-      if (rawData is! List) {
-        return ApiResponse<DateTimeRange>(
-          success: false,
-          message: 'Format periode kerja tidak valid.',
-        );
-      }
+      // Periode dapat dimulai pada Desember dan bernama Januari tahun depan,
+      // atau sebaliknya. Karena itu baca tiga tahun di sekitar tanggal hari
+      // ini, lalu pilih berdasarkan rentang tanggal aktual — bukan bulan.
+      final results = await Future.wait([
+        getWorkPeriodsByYear(tahun: now.year - 1),
+        getWorkPeriodsByYear(tahun: now.year),
+        getWorkPeriodsByYear(tahun: now.year + 1),
+      ]);
 
       final ranges = <DateTimeRange>[];
+      for (final result in results) {
+        if (!result.success || result.data == null) continue;
+        for (final period in result.data!) {
+          final start = DateTime(
+            period.tanggalMulai.year,
+            period.tanggalMulai.month,
+            period.tanggalMulai.day,
+          );
+          final end = DateTime(
+            period.tanggalSelesai.year,
+            period.tanggalSelesai.month,
+            period.tanggalSelesai.day,
+          );
+          if (!end.isBefore(start)) {
+            ranges.add(DateTimeRange(start: start, end: end));
+          }
+        }
+      }
 
-      for (final row in rawData) {
-        if (row is! Map<String, dynamic>) continue;
-
-        final startRaw =
-            row['TanggalMulai'] ?? row['tanggalMulai'] ?? row['tanggal_mulai'];
-        final endRaw =
-            row['TanggalSelesai'] ??
-            row['tanggalSelesai'] ??
-            row['tanggal_selesai'];
-
-        final parsedStart = DateTime.tryParse(startRaw?.toString() ?? '');
-        final parsedEnd = DateTime.tryParse(endRaw?.toString() ?? '');
-
-        if (parsedStart == null || parsedEnd == null) continue;
-
-        final start = DateTime(
-          parsedStart.year,
-          parsedStart.month,
-          parsedStart.day,
+      if (ranges.isEmpty) {
+        return ApiResponse<DateTimeRange>(
+          success: false,
+          message: 'Tidak ada periode kerja yang dapat dibaca untuk perusahaan ini.',
         );
-        final end = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
-
-        if (end.isBefore(start)) continue;
-
-        ranges.add(DateTimeRange(start: start, end: end));
       }
 
       // Ambil periode yang mencakup hari ini, bukan sekadar `bulan == now.month`.

@@ -67,6 +67,10 @@ class _HalamanRiwayatAbsensiState extends State<HalamanRiwayatAbsensi> {
         now.year - 1,
         userId: userId,
       ),
+      CompanyCalendarService.getWorkPeriodsByYear(
+        now.year + 1,
+        userId: userId,
+      ),
     ]);
 
     final periodsById = <int, WorkPeriod>{};

@@ -1190,9 +1190,11 @@ class TimeOffService {
           message: 'Sesi pengguna tidak ditemukan. Silakan login ulang.',
         );
       }
-      final res = await http.post(
+      // Daftar periode menjadi dasar filter Time Off dan Overtime. Pakai
+      // request terautentikasi supaya access token dapat diperbarui lalu
+      // diulang sekali, bukan mengembalikan daftar kosong saat token habis.
+      final res = await TokenService.authorizedPost(
         Uri.parse('$baseURL/api/timeoff/work-periods'),
-        headers: await _jsonHeaders(),
         body: jsonEncode({'userId': userId}),
       );
       final body = jsonDecode(res.body) as Map<String, dynamic>;

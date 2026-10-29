@@ -18,7 +18,9 @@ class TokenService {
   static DateTime? _sessionExpiry;
   static String? _refreshToken;
   static bool _sessionLoaded = false;
+  static Future<void>? _sessionLoadInFlight;
   static Future<String?>? _refreshInFlight;
+  static bool _legacyBootstrapAttempted = false;
 
   static bool get _isSessionStillValid =>
       _sessionToken != null &&
@@ -27,7 +29,20 @@ class TokenService {
 
   static Future<void> _loadSessionToken() async {
     if (_sessionLoaded) return;
-    _sessionLoaded = true;
+    final activeLoad = _sessionLoadInFlight;
+    if (activeLoad != null) return activeLoad;
+
+    final load = _readSessionToken();
+    _sessionLoadInFlight = load;
+    try {
+      await load;
+    } finally {
+      _sessionLoaded = true;
+      _sessionLoadInFlight = null;
+    }
+  }
+
+  static Future<void> _readSessionToken() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('SessionAccessToken');
     final expiryMs = prefs.getInt('SessionAccessTokenExpiry');
@@ -64,8 +79,51 @@ class TokenService {
   /// tidak membawa identitas user dan dapat membuka data perusahaan lain.
   static Future<String?> getToken({bool forceRefresh = false}) async {
     await _loadSessionToken();
-    if (!forceRefresh && _isSessionStillValid) return _sessionToken;
+    if (!forceRefresh && _isSessionStillValid) {
+      // Sesi pengguna lama (sebelum refresh-token dirilis) masih memiliki
+      // JWT yang berlaku, tetapi belum punya refresh token. Tukarkan secara
+      // diam-diam sekarang agar mereka tidak dipaksa login saat JWT 8 jamnya
+      // berakhir. Gagal bootstrap tidak menghapus sesi yang masih berlaku.
+      if ((_refreshToken == null || _refreshToken!.isEmpty) &&
+          !_legacyBootstrapAttempted) {
+        _legacyBootstrapAttempted = true;
+        final bootstrappedToken = await _bootstrapLegacySession(_sessionToken!);
+        if (bootstrappedToken != null && bootstrappedToken.isNotEmpty) {
+          return bootstrappedToken;
+        }
+      }
+      return _sessionToken;
+    }
     return _refreshSession();
+  }
+
+  static Future<String?> _bootstrapLegacySession(String accessToken) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseURL/api/asn/session/bootstrap'),
+            headers: _jsonHeaders(accessToken),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) return null;
+
+      final data = jsonDecode(response.body);
+      if (data is! Map<String, dynamic>) return null;
+      final token = data['accessToken']?.toString();
+      final refresh = data['refreshToken']?.toString();
+      final expiresIn = data['expiresIn'];
+      if (token == null || token.isEmpty || refresh == null || refresh.isEmpty) {
+        return null;
+      }
+      await setSessionToken(
+        token,
+        expiresIn is int ? expiresIn : int.tryParse('$expiresIn') ?? 28800,
+        refreshToken: refresh,
+      );
+      return token;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<String?> _refreshSession() {
@@ -301,6 +359,7 @@ class TokenService {
     _sessionExpiry = null;
     _refreshToken = null;
     _sessionLoaded = true;
+    _legacyBootstrapAttempted = true;
     // Hapus sesi persisten tanpa menunggu UI; sesi yang sudah ditolak server
     // tidak boleh hidup kembali setelah aplikasi dibuka ulang.
     SharedPreferences.getInstance().then((prefs) {
