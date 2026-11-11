@@ -1281,8 +1281,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
       fit: StackFit.expand,
       children: [
         kIsWeb
-            ? Image.memory(_capturedImageBytes!, fit: BoxFit.cover)
-            : Image.file(_capturedImage!, fit: BoxFit.cover),
+            ? Image.memory(_capturedImageBytes!, fit: BoxFit.contain)
+            : Image.file(_capturedImage!, fit: BoxFit.contain),
         if (_isProcessingFace)
           AnimatedBuilder(
             animation: _pulseAnimation,
@@ -1746,8 +1746,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           width: double.infinity,
           height: double.infinity,
           child: kIsWeb
-              ? Image.memory(_capturedImageBytes!, fit: BoxFit.cover)
-              : Image.file(_capturedImage!, fit: BoxFit.cover),
+              ? Image.memory(_capturedImageBytes!, fit: BoxFit.contain)
+              : Image.file(_capturedImage!, fit: BoxFit.contain),
         ),
         if (_isProcessingFace)
           AnimatedBuilder(
@@ -1813,15 +1813,21 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Cover mempertahankan aspect ratio asli kamera. Preview tidak
-              // lagi gepeng/melebar pada rasio layar atau webcam yang berbeda.
-              ClipRect(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: controller.value.previewSize?.height ?? 720.0,
-                    height: controller.value.previewSize?.width ?? 1280.0,
-                    child: CameraPreview(controller),
+              // Jangan gunakan BoxFit.cover di sini. Pada browser ponsel,
+              // rasio layar dan sensor kamera hampir selalu berbeda sehingga
+              // cover memangkas sisi gambar dan terasa seperti kamera zoom.
+              // Contain mempertahankan bidang pandang asli seperti aplikasi
+              // kamera; ruang kosong diisi latar hitam tanpa meregangkan foto.
+              ColoredBox(
+                color: Colors.black,
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    child: SizedBox(
+                      width: controller.value.previewSize?.height ?? 720.0,
+                      height: controller.value.previewSize?.width ?? 1280.0,
+                      child: CameraPreview(controller),
+                    ),
                   ),
                 ),
               ),

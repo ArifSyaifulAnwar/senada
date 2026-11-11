@@ -5,6 +5,7 @@ import 'package:absensikaryawan/Screen%20User/splashscreen/intro1.dart';
 import 'package:absensikaryawan/Screen%20User/home.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
+import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart'; // Untuk kIsWeb
 import 'package:shared_preferences/shared_preferences.dart';
@@ -72,6 +73,11 @@ class _SplashScreenState extends State<SplashScreen>
           return;
         }
 
+        // Daftarkan token FCM setiap startup yang masih memiliki sesi. Ini
+        // penting untuk Flutter Web karena pengguna lama tidak harus login
+        // ulang agar browsernya mulai menerima push notification.
+        FcmService.uploadToken();
+
         // Status PIN yang sudah pernah diverifikasi digunakan langsung agar
         // pengguna lama tidak menunggu dua request API setiap membuka app.
         if (prefs.containsKey('PinEnabled') && prefs.containsKey('HasPin')) {
@@ -94,7 +100,21 @@ class _SplashScreenState extends State<SplashScreen>
       } else {
         _navigateToSignIn();
       }
-    } catch (e) {
+    } catch (_) {
+      // Error baca storage, timeout refresh, atau endpoint sementara tidak
+      // tersedia bukan alasan untuk menghapus/mengakhiri login. Selama
+      // identitas lokal masih ada, masuk ke halaman utama dan TokenService
+      // akan menyegarkan sesi ketika koneksi/API kembali tersedia.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final savedUserId = prefs.getString('UserID');
+        final savedEmail = prefs.getString('Email');
+        if ((savedUserId?.isNotEmpty ?? false) &&
+            (savedEmail?.isNotEmpty ?? false)) {
+          _navigateByRole(prefs.getString('Role') ?? '');
+          return;
+        }
+      } catch (_) {}
       _navigateToSignIn();
     }
   }

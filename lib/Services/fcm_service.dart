@@ -41,10 +41,20 @@ class PendingNav {
 
 class FcmService {
   static PendingNav? _pendingNavigation;
+  static const String _webVapidKey =
+      'BL0-KX4oCGB9_ejxzVoU-IoHhBOtbgwF3cXu4rJJjklhMpyphO4UWjXeUGr3aTRj86OLo1hloJTQrHGviK4Ctx8';
 
   static Future<void> init() async {
     // Semua ini hanya untuk mobile — web tidak support
-    if (kIsWeb) return;
+    if (kIsWeb) {
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+      FirebaseMessaging.onMessage.listen(_onWebForegroundMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_onMessageTap);
+      final initial = await messaging.getInitialMessage();
+      if (initial != null) _onMessageTap(initial);
+      return;
+    }
 
     await _localNotif
         .resolvePlatformSpecificImplementation<
@@ -75,9 +85,10 @@ class FcmService {
   }
 
   static Future<void> uploadToken() async {
-    if (kIsWeb) return; // notif push tidak tersedia di web
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await FirebaseMessaging.instance.getToken(
+        vapidKey: kIsWeb ? _webVapidKey : null,
+      );
       if (token == null) return;
 
       final prefs = await SharedPreferences.getInstance();
@@ -86,13 +97,15 @@ class FcmService {
 
       // Hapus subscription topic global versi lama. Notifikasi HRD/Admin
       // sekarang dikirim ke topic personal user agar tidak bocor antar PT.
-      await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
-      await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
+      if (!kIsWeb) {
+        await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
+        await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
 
       // Notifikasi personal (mis. Finance yang di-assign ke reimbursement
       // tertentu) lewat topic per-user ini — tidak perlu lagi cek role
       // Head Finance secara terpisah.
-      await FirebaseMessaging.instance.subscribeToTopic('user_$userId');
+        await FirebaseMessaging.instance.subscribeToTopic('user_$userId');
+      }
       await _postToken(userId, token);
 
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
@@ -117,21 +130,22 @@ class FcmService {
         body: jsonEncode({
           'userId': userId,
           'fcmToken': token,
-          'platform': Platform.isIOS ? 'ios' : 'android',
+          'platform': kIsWeb ? 'web' : (Platform.isIOS ? 'ios' : 'android'),
         }),
       );
     } catch (_) {}
   }
 
   static Future<void> deleteToken() async {
-    if (kIsWeb) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('UserID');
-      await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
-      await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
-      if (userId != null && userId.isNotEmpty) {
-        await FirebaseMessaging.instance.unsubscribeFromTopic('user_$userId');
+      if (!kIsWeb) {
+        await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
+        await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
+        if (userId != null && userId.isNotEmpty) {
+          await FirebaseMessaging.instance.unsubscribeFromTopic('user_$userId');
+        }
       }
 
       if (userId != null && userId.isNotEmpty) {
@@ -173,6 +187,15 @@ class FcmService {
         iOS: const DarwinNotificationDetails(),
       ),
       payload: jsonEncode(message.data),
+    );
+  }
+
+  static void _onWebForegroundMessage(RemoteMessage message) {
+    final notification = message.notification;
+    if (notification == null) return;
+    _pendingNavigation = PendingNav(
+      message.data['type']?.toString() ?? 'notification',
+      message.data['referenceId']?.toString(),
     );
   }
 

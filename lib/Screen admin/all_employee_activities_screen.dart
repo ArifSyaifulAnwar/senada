@@ -84,6 +84,17 @@ class _AllEmployeeActivitiesScreenState
   DateTime _dateOnly(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
+  WorkPeriod? get _currentWorkPeriod {
+    final today = _dateOnly(DateTime.now());
+    for (final period in _workPeriods) {
+      if (!today.isBefore(_dateOnly(period.tanggalMulai)) &&
+          !today.isAfter(_dateOnly(period.tanggalSelesai))) {
+        return period;
+      }
+    }
+    return _workPeriods.isEmpty ? null : _workPeriods.first;
+  }
+
   String get _dateFilterLabel {
     if (_selectedWorkPeriod != null) {
       return _workPeriodLabel(_selectedWorkPeriod!);
@@ -160,7 +171,15 @@ class _AllEmployeeActivitiesScreenState
 
   void _applyRelativeRange(String range) {
     final today = _dateOnly(DateTime.now());
+    if (range == 'Semua Data') {
+      _selectedTimeRange = range;
+      _selectedWorkPeriod = null;
+      _startDate = null;
+      _endDate = null;
+      return;
+    }
     final days = switch (range) {
+      'Hari Ini' => 0,
       '1 Hari' => 0,
       '7 Hari Terakhir' => 6,
       '30 Hari Terakhir' => 29,
@@ -206,35 +225,6 @@ class _AllEmployeeActivitiesScreenState
       _isLoading = false;
     });
   }
-
-  Future<void> _pickDateRange() async {
-    final now = _dateOnly(DateTime.now());
-
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2024, 1, 1),
-      lastDate: now,
-      initialDateRange: _startDate != null && _endDate != null
-          ? DateTimeRange(start: _startDate!, end: _endDate!)
-          : null,
-      helpText: 'Pilih rentang tanggal aktivitas',
-      confirmText: 'Terapkan',
-      cancelText: 'Batal',
-    );
-
-    if (picked == null || !mounted) return;
-
-    setState(() {
-      _startDate = _dateOnly(picked.start);
-      _endDate = _dateOnly(picked.end);
-      _selectedTimeRange = 'Pilih Periode';
-      _selectedWorkPeriod = null;
-    });
-
-    // Saat pengguna memilih tanggal, data langsung dimuat ulang.
-    await _loadData();
-  }
-
 
   List<DailyActivityHRDItem> get _filteredActivities {
     return _activities.where((a) {
@@ -844,6 +834,7 @@ class _AllEmployeeActivitiesScreenState
   }
 
   Future<void> _showPeriodSelector() async {
+    final currentWorkPeriod = _currentWorkPeriod;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -869,34 +860,43 @@ class _AllEmployeeActivitiesScreenState
                 ),
               ),
               const SizedBox(height: 18),
-              const Text('Periode aktivitas',
+              const Text('Filter Periode Aktivitas',
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
-              Text('Pilih rentang data aktivitas yang ingin ditampilkan.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const Text('Default mengikuti periode kerja bulan berjalan yang disetting HRD.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
               const SizedBox(height: 14),
               _periodOption(
                 icon: Icons.event_note_rounded,
-                title: _selectedWorkPeriod != null
-                    ? _workPeriodLabel(_selectedWorkPeriod!)
-                    : 'Periode kerja HRD',
-                subtitle: _selectedWorkPeriod == null
+                title: 'Periode Kerja Bulan Ini',
+                subtitle: currentWorkPeriod == null
                     ? 'Periode kerja belum tersedia'
-                    : '${_formatDate(_selectedWorkPeriod!.tanggalMulai)} - ${_formatDate(_selectedWorkPeriod!.tanggalSelesai)}',
-                selected: _selectedWorkPeriod != null,
-                onTap: _workPeriods.isEmpty
-                    ? null
-                    : () async {
+                    : '${_formatDate(currentWorkPeriod.tanggalMulai)} - ${_formatDate(currentWorkPeriod.tanggalSelesai)}',
+                selected: _selectedWorkPeriod?.id == currentWorkPeriod?.id,
+                onTap: currentWorkPeriod == null ? null : () async {
                         Navigator.pop(sheetContext);
-                        await _showWorkPeriodPicker();
+                        await _selectWorkPeriod(currentWorkPeriod);
                       },
               ),
               const SizedBox(height: 8),
+              _periodOption(
+                icon: Icons.calendar_month_rounded,
+                title: 'Pilih Periode Kerja',
+                subtitle: 'Pilih dari periode yang sudah disetting HRD',
+                selected: false,
+                onTap: _workPeriods.isEmpty ? null : () async {
+                  Navigator.pop(sheetContext);
+                  await _showWorkPeriodPicker();
+                },
+              ),
+              const SizedBox(height: 8),
               for (final range in const [
+                'Hari Ini',
                 '1 Hari',
                 '7 Hari Terakhir',
                 '30 Hari Terakhir',
                 '1 Tahun Terakhir',
+                'Semua Data',
               ])
                 _periodOption(
                   icon: Icons.radio_button_checked_rounded,
@@ -907,18 +907,6 @@ class _AllEmployeeActivitiesScreenState
                     await _selectRelativeRange(range);
                   },
                 ),
-              _periodOption(
-                icon: Icons.date_range_rounded,
-                title: 'Pilih Periode',
-                subtitle: _selectedTimeRange == 'Pilih Periode' && _startDate != null
-                    ? '${_formatDate(_startDate!)} - ${_formatDate(_endDate!)}'
-                    : null,
-                selected: _selectedTimeRange == 'Pilih Periode',
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  await _pickDateRange();
-                },
-              ),
             ],
           ),
         ),

@@ -44,14 +44,31 @@ class TokenService {
 
   static Future<void> _readSessionToken() async {
     final prefs = await SharedPreferences.getInstance();
+    _adoptSessionFromPreferences(prefs);
+  }
+
+  /// Web dapat dibuka di beberapa tab. Saat satu tab merotasi refresh token,
+  /// tab lain harus memakai token yang baru disimpan, bukan menganggap sesi
+  /// berakhir dan meminta pengguna login kembali.
+  static void _adoptSessionFromPreferences(SharedPreferences prefs) {
     final token = prefs.getString('SessionAccessToken');
     final expiryMs = prefs.getInt('SessionAccessTokenExpiry');
-    _refreshToken = prefs.getString('SessionRefreshToken');
+    final refreshToken = prefs.getString('SessionRefreshToken');
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      _refreshToken = refreshToken;
+    }
     if (token != null && expiryMs != null) {
       final expiry = DateTime.fromMillisecondsSinceEpoch(expiryMs);
-      _sessionToken = token;
-      _sessionExpiry = expiry;
+      if (_sessionToken != token || _sessionExpiry != expiry) {
+        _sessionToken = token;
+        _sessionExpiry = expiry;
+      }
     }
+  }
+
+  static Future<void> _synchronizeSessionFromStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    _adoptSessionFromPreferences(prefs);
   }
 
   static Future<void> setSessionToken(
@@ -137,11 +154,40 @@ class TokenService {
   static Future<String?> _performRefresh() async {
     final refreshToken = _refreshToken;
     if (refreshToken == null || refreshToken.isEmpty) return null;
+
+    final refreshed = await _requestRefresh(refreshToken);
+    if (refreshed != null) return refreshed;
+
+    // Jika refresh gagal, mungkin tab/browser lain sudah berhasil merotasi
+    // token yang sama. Ambil token baru dari storage lalu coba satu kali lagi.
+    // Ini mencegah 401 palsu pada web yang dibuka di beberapa tab.
+    try {
+      await _synchronizeSessionFromStorage();
+      if (_isSessionStillValid) {
+        return _sessionToken;
+      }
+      final persistedRefresh = _refreshToken;
+      if (persistedRefresh != null &&
+          persistedRefresh.isNotEmpty &&
+          persistedRefresh != refreshToken) {
+        return await _requestRefresh(persistedRefresh);
+      }
+    } catch (_) {
+      // Kegagalan storage/jaringan bukan logout. Sesi tetap tersimpan dan
+      // akan dicoba kembali oleh request berikutnya.
+    }
+    return null;
+  }
+
+  static Future<String?> _requestRefresh(String refreshToken) async {
     try {
       final response = await http
           .post(
             Uri.parse('$baseURL/api/asn/session/refresh'),
-            headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            headers: const {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
             body: jsonEncode({'RefreshToken': refreshToken}),
           )
           .timeout(const Duration(seconds: 20));
@@ -161,7 +207,7 @@ class TokenService {
       );
       return token;
     } catch (_) {
-      // Kegagalan jaringan bukan logout. Sesi dicoba lagi saat request berikutnya.
+      // Kegagalan jaringan bukan logout.
       return null;
     }
   }
@@ -209,7 +255,14 @@ class TokenService {
   }
 
   static Future<String?> _refreshAfter401(String failedToken) async {
-    if (failedToken != _sessionToken) return _sessionToken;
+    // Ambil kemungkinan token yang baru ditulis oleh tab web lain sebelum
+    // merotasi refresh token sekali lagi.
+    try {
+      await _synchronizeSessionFromStorage();
+    } catch (_) {}
+    if (failedToken != _sessionToken && _isSessionStillValid) {
+      return _sessionToken;
+    }
     return _refreshSession();
   }
 

@@ -241,6 +241,17 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   DateTime _dateOnly(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
+  WorkPeriod? get _currentWorkPeriod {
+    final today = _dateOnly(DateTime.now());
+    for (final period in _workPeriods) {
+      if (!today.isBefore(_dateOnly(period.tanggalMulai)) &&
+          !today.isAfter(_dateOnly(period.tanggalSelesai))) {
+        return period;
+      }
+    }
+    return _workPeriods.isEmpty ? null : _workPeriods.first;
+  }
+
   String get _dateFilterLabel {
     if (_selectedWorkPeriod != null) return _workPeriodLabel(_selectedWorkPeriod!);
     if (_selectedTimeRange != 'Pilih Periode') return _selectedTimeRange;
@@ -261,7 +272,15 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
 
   void _applyRelativeRange(String range) {
     final today = _dateOnly(DateTime.now());
+    if (range == 'Semua Data') {
+      _selectedTimeRange = range;
+      _selectedWorkPeriod = null;
+      _startDate = null;
+      _endDate = null;
+      return;
+    }
     final days = switch (range) {
+      'Hari Ini' => 0,
       '1 Hari' => 0,
       '7 Hari Terakhir' => 6,
       '30 Hari Terakhir' => 29,
@@ -284,30 +303,6 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
       _selectedWorkPeriod = period;
       _startDate = _dateOnly(period.tanggalMulai);
       _endDate = _dateOnly(period.tanggalSelesai);
-    });
-    await _loadActivities();
-  }
-
-  Future<void> _pickDateRange() async {
-    final now = _dateOnly(DateTime.now());
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020, 1, 1),
-      lastDate: now,
-      initialDateRange: _startDate != null && _endDate != null
-          ? DateTimeRange(start: _startDate!, end: _endDate!)
-          : null,
-      helpText: 'Pilih periode aktivitas',
-      confirmText: 'Terapkan',
-      cancelText: 'Batal',
-    );
-
-    if (picked == null || !mounted) return;
-    setState(() {
-      _startDate = _dateOnly(picked.start);
-      _endDate = _dateOnly(picked.end);
-      _selectedTimeRange = 'Pilih Periode';
-      _selectedWorkPeriod = null;
     });
     await _loadActivities();
   }
@@ -582,6 +577,7 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
   }
 
   Future<void> _showPeriodSelector() async {
+    final currentWorkPeriod = _currentWorkPeriod;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
@@ -597,20 +593,31 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
             children: [
               Center(child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4)))),
               const SizedBox(height: 18),
-              const Text('Periode aktivitas', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              const Text('Filter Periode Aktivitas', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              const Text('Default mengikuti periode kerja bulan berjalan yang disetting HRD.', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
               const SizedBox(height: 12),
               _periodTile(
-                title: _selectedWorkPeriod == null ? 'Periode kerja HRD' : _workPeriodLabel(_selectedWorkPeriod!),
-                subtitle: _selectedWorkPeriod == null
+                title: 'Periode Kerja Bulan Ini',
+                subtitle: currentWorkPeriod == null
                     ? 'Periode kerja belum tersedia'
-                    : '${_formatDate(_selectedWorkPeriod!.tanggalMulai)} - ${_formatDate(_selectedWorkPeriod!.tanggalSelesai)}',
-                selected: _selectedWorkPeriod != null,
+                    : '${_formatDate(currentWorkPeriod.tanggalMulai)} - ${_formatDate(currentWorkPeriod.tanggalSelesai)}',
+                selected: _selectedWorkPeriod?.id == currentWorkPeriod?.id,
+                onTap: currentWorkPeriod == null ? null : () async {
+                  Navigator.pop(sheetContext);
+                  await _selectWorkPeriod(currentWorkPeriod);
+                },
+              ),
+              _periodTile(
+                title: 'Pilih Periode Kerja',
+                subtitle: 'Pilih dari periode yang sudah disetting HRD',
+                selected: false,
                 onTap: _workPeriods.isEmpty ? null : () async {
                   Navigator.pop(sheetContext);
                   await _showWorkPeriodPicker();
                 },
               ),
-              for (final range in const ['1 Hari', '7 Hari Terakhir', '30 Hari Terakhir', '1 Tahun Terakhir'])
+              for (final range in const ['Hari Ini', '1 Hari', '7 Hari Terakhir', '30 Hari Terakhir', '1 Tahun Terakhir', 'Semua Data'])
                 _periodTile(
                   title: range,
                   selected: _selectedWorkPeriod == null && _selectedTimeRange == range,
@@ -619,17 +626,6 @@ class _DailyActivityScreenState extends State<DailyActivityScreen> {
                     await _selectRelativeRange(range);
                   },
                 ),
-              _periodTile(
-                title: 'Pilih Periode',
-                subtitle: _selectedTimeRange == 'Pilih Periode' && _startDate != null
-                    ? '${_formatDate(_startDate!)} - ${_formatDate(_endDate!)}'
-                    : null,
-                selected: _selectedWorkPeriod == null && _selectedTimeRange == 'Pilih Periode',
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  await _pickDateRange();
-                },
-              ),
             ],
           ),
         ),

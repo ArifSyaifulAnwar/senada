@@ -148,10 +148,12 @@ class _PengingatAbsenScreenState extends State<PengingatAbsenScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Jika sampai jam 10:00 Anda belum melakukan absen '
-                              'masuk pada hari kerja Anda, aplikasi akan '
+                              'Pengingat aktif secara default. Jika Anda belum '
+                              'absen masuk sampai 10 menit setelah jam masuk '
+                              'perusahaan, aplikasi akan '
                               'mengirim notifikasi pengingat satu kali di '
-                              'hari itu. Tidak muncul di hari libur/weekend '
+                              'hari itu. Jam masuk mengikuti pengaturan PT Anda. '
+                              'Tidak muncul di hari libur/weekend '
                               'atau di luar jadwal kerja Anda.',
                               style: TextStyle(
                                 color: Colors.blue[900],

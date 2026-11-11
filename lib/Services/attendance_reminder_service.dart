@@ -7,17 +7,21 @@
 // (cancel-on-checkin). ID notifikasi tetap/fixed supaya selalu bisa dicancel.
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import 'package:absensikaryawan/Services/fcm_service.dart';
+import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/Screen%20User/Screen%20HRD/hrd_employee_service.dart';
+import 'attendance_reminder_web_stub.dart'
+    if (dart.library.html) 'attendance_reminder_web.dart' as web_reminder;
 
 class AttendanceReminderService {
   static const int _notificationId = 900001;
-  static const int _reminderHour = 10;
   static const String _prefsKeyPrefix = 'attendance_reminder_enabled_';
   static bool _tzReady = false;
 
@@ -33,6 +37,14 @@ class AttendanceReminderService {
     if (userId.trim().isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefsKey(userId), enabled);
+    // Simpan juga di server agar push pengingat tidak tetap masuk ketika
+    // pengguna sengaja mematikan toggle ini di perangkat lain.
+    try {
+      await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/attendance/reminder-preference'),
+        body: jsonEncode({'UserId': userId, 'IsEnabled': enabled}),
+      );
+    } catch (_) {}
     if (!enabled) await cancel();
   }
 
@@ -41,6 +53,37 @@ class AttendanceReminderService {
     tzdata.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
     _tzReady = true;
+  }
+
+  static Future<({int hour, int minute, int graceMinutes, bool enabled})>
+      getCompanySchedule(String userId) async {
+    const fallback = (hour: 8, minute: 0, graceMinutes: 10, enabled: true);
+    try {
+      final response = await TokenService.authorizedPost(
+        Uri.parse('$baseURL/api/asn/attendance/reminder-settings'),
+        body: jsonEncode({'UserId': userId}),
+      );
+      if (response.statusCode != 200) return fallback;
+      final data = jsonDecode(response.body);
+      if (data is! Map<String, dynamic>) return fallback;
+      final rawTime = (data['StartTime'] ?? data['startTime'] ?? '').toString();
+      final match = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(rawTime);
+      final hour = int.tryParse(match?.group(1) ?? '') ?? fallback.hour;
+      final minute = int.tryParse(match?.group(2) ?? '') ?? fallback.minute;
+      final grace = int.tryParse('${data['GraceMinutes'] ?? data['graceMinutes']}') ?? fallback.graceMinutes;
+      final rawEnabled = data['IsEnabled'] ?? data['isEnabled'];
+      final enabled = rawEnabled is bool
+          ? rawEnabled
+          : rawEnabled?.toString().toLowerCase() != 'false';
+      return (
+        hour: hour.clamp(0, 23).toInt(),
+        minute: minute.clamp(0, 59).toInt(),
+        graceMinutes: grace.clamp(0, 120).toInt(),
+        enabled: enabled,
+      );
+    } catch (_) {
+      return fallback;
+    }
   }
 
   /// Dipanggil tiap kali home screen karyawan dibuka. [isHariLibur] harus
@@ -63,7 +106,8 @@ class AttendanceReminderService {
     }
 
     final now = DateTime.now();
-    if (now.hour >= _reminderHour) {
+    final schedule = await getCompanySchedule(userId);
+    if (!schedule.enabled) {
       await cancel();
       return;
     }
@@ -79,18 +123,32 @@ class AttendanceReminderService {
 
     try {
       _ensureTz();
-      final scheduledDate = tz.TZDateTime(
+      final companyStart = tz.TZDateTime(
         tz.local,
         now.year,
         now.month,
         now.day,
-        _reminderHour,
+        schedule.hour,
+        schedule.minute,
       );
+      final scheduledDate = companyStart.add(Duration(minutes: schedule.graceMinutes));
+      if (!scheduledDate.isAfter(tz.TZDateTime.now(tz.local))) return;
+      final body =
+          'Jam masuk Anda sudah lewat ${schedule.graceMinutes} menit. Jangan lupa check-in ya!';
+
+      if (kIsWeb) {
+        await web_reminder.scheduleBrowserAttendanceReminder(
+          scheduledAt: scheduledDate,
+          title: 'Pengingat Absen',
+          body: body,
+        );
+        return;
+      }
 
       await localNotificationsPlugin.zonedSchedule(
         _notificationId,
         'Pengingat Absen',
-        'Anda belum melakukan absen masuk hari ini. Jangan lupa check-in ya!',
+        body,
         scheduledDate,
         NotificationDetails(
           android: AndroidNotificationDetails(
@@ -117,6 +175,7 @@ class AttendanceReminderService {
   /// Dipanggil begitu karyawan berhasil check-in, supaya pengingat jam 10
   /// tidak muncul lagi hari itu.
   static Future<void> cancel() async {
+    await web_reminder.cancelBrowserAttendanceReminder();
     try {
       await localNotificationsPlugin.cancel(_notificationId);
     } catch (_) {}

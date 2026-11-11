@@ -18,6 +18,7 @@ import '../../Screen admin/service/timeoffserviceadmin.dart';
 import '../../Screen admin/service/overtimeadminservice.dart';
 import '../../Screen User/Screen HRD/hrd_employee_service.dart';
 import '../../Services/company_calendar_service.dart';
+import '../../Services/attendance_reminder_service.dart';
 import '../doa_karyawan_screen.dart';
 import '../hrd_absensi_edit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -75,6 +76,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   // dianggap "belum absen"/"tidak hadir" di hari yang bukan jadwalnya.
   // Tidak ada entri untuk seorang userId di map = jadwal normal (semua hari).
   Map<String, List<int>> _workDaysMap = {};
+  int _companyStartMinutes = 8 * 60;
   @override
   void initState() {
     super.initState();
@@ -129,7 +131,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         DateFormat('yyyy-MM-dd').format(now);
 
     if (!isToday) {
-      _showErrorSnackBar('Notifikasi WA hanya bisa dikirim untuk hari ini.');
+      _showErrorSnackBar('Pengingat hanya bisa dikirim untuk hari ini.');
       return;
     }
 
@@ -139,11 +141,11 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Kirim Pengingat WA?'),
+        title: const Text('Kirim Pengingat Absen?'),
         content: Text(
-          'Sistem akan mengirim pengingat WhatsApp ke semua $totalBelumAbsen karyawan yang belum absen.\n\n'
-          'Pesan dikirim bertahap (beberapa per kelompok, dengan jeda) di background selama beberapa menit '
-          'agar akun WhatsApp tetap aman dan tidak terdeteksi spam. Tidak perlu diklik berulang.',
+          'Sistem akan mengirim notifikasi aplikasi ke semua $totalBelumAbsen karyawan yang belum absen, '
+          'di Android, iOS, dan Web.\n\n'
+          'WhatsApp juga dikirim bila nomor karyawan tersedia. Pesan WA diproses bertahap agar akun tetap aman.',
         ),
         actions: [
           TextButton(
@@ -207,7 +209,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       }
     } catch (e) {
       if (mounted) {
-        _showErrorSnackBar('Gagal memproses notifikasi WA: $e');
+        _showErrorSnackBar('Gagal memproses pengingat: $e');
       }
     } finally {
       if (mounted) {
@@ -218,8 +220,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
   Future<void> _initAll() async {
     await _loadCurrentUser();
-    await Future.wait([_loadDefaultWorkPeriod(), _loadAnalyticsPeriods()]);
+    await Future.wait([
+      _loadDefaultWorkPeriod(),
+      _loadAnalyticsPeriods(),
+      _loadCompanyStartTime(),
+    ]);
     await _loadInitialData();
+  }
+
+  Future<void> _loadCompanyStartTime() async {
+    final userId = _currentUserId;
+    if (userId == null || userId.trim().isEmpty) return;
+    final schedule = await AttendanceReminderService.getCompanySchedule(userId);
+    if (!mounted) return;
+    setState(() => _companyStartMinutes = schedule.hour * 60 + schedule.minute);
   }
 
   Future<void> _loadAnalyticsPeriods() async {
@@ -660,7 +674,6 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       );
       final timeOffFuture = TimeOffAdminService.getAllTimeOffs(
         adminId: _currentUserId ?? '',
-        status: 'Approved',
         yearFilter: targetDate.year,
         monthFilter: targetDate.month,
       );
@@ -692,6 +705,16 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         final izinRes = await timeOffFuture;
         if (izinRes.success && izinRes.data != null) {
           for (final izin in izinRes.data!) {
+            // Izin yang masih diajukan/Pending tetap membebaskan karyawan
+            // dari status "Belum Absen" pada rentang tanggal izinnya.
+            final status = izin.status.trim().toLowerCase();
+            if (status == 'rejected' ||
+                status == 'ditolak' ||
+                status == 'cancelled' ||
+                status == 'canceled' ||
+                status == 'dibatalkan') {
+              continue;
+            }
             final mulai = DateTime(
               izin.tanggalMulai.year,
               izin.tanggalMulai.month,
@@ -2415,7 +2438,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 label: Text(
                   _isSendingBelumAbsenWa
                       ? 'Memproses...'
-                      : 'Kirim WA ke Karyawan Belum Absen',
+                      : 'Kirim Pengingat Karyawan Belum Absen',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -2963,6 +2986,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
     final sections = <Widget>[
       _buildAnalyticsSummaryGrid(a),
+      _buildStatusDonut(a),
+      _buildDailyAttendanceChart(a),
       _buildAttendancePercentageByEmployee(a),
       if ((a['deptStats'] as Map<String, int>).isNotEmpty)
         _buildDepartmentAnalytics(
@@ -3212,6 +3237,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     final Map<String, _PerfData> perfByUser = {};
     final Map<String, int> deptCount = {};
     final Map<String, int> deptHadir = {};
+    final Map<String, _DailyAttendanceStats> dailyStats = {};
 
     for (final d in data) {
       final s = d.displayStatus.toLowerCase();
@@ -3247,13 +3273,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       final dateKey = DateFormat('yyyy-MM-dd').format(d.attendanceDate);
       final isHadir = isTepat || isTerlambat;
+      final daily = dailyStats.putIfAbsent(
+        dateKey,
+        () => _DailyAttendanceStats(d.attendanceDate),
+      );
 
       if (isTepat) {
         tepatWaktu++;
+        daily.tepatWaktu++;
       } else if (isTerlambat) {
         terlambat++;
+        daily.terlambat++;
       } else if (isCuti) {
         cuti++;
+        daily.izinCuti++;
       } else if (isAbsent) {
         // Tidak langsung dijadikan final total,
         // karena total tidak hadir akan dihitung ulang dari hari kerja efektif.
@@ -3286,6 +3319,23 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       );
 
       p.total++;
+
+      // Bandingkan jam check-in dengan jam masuk PT. Tepat pukul mendapat 80,
+      // lalu naik hingga 100 bila datang 60 menit atau lebih awal; terlambat
+      // menurunkan skor. Jadi hadir lebih awal benar-benar bernilai lebih tinggi.
+      if (isHadir && d.checkInTime != null) {
+        final checkInMinutes =
+            d.checkInTime!.hour * 60 + d.checkInTime!.minute;
+        final difference = (_companyStartMinutes - checkInMinutes)
+            .clamp(-120, 120)
+            .toInt();
+        final double checkInScore = difference >= 0
+            ? 80.0 + (difference.clamp(0, 60) / 60 * 20)
+            : (80.0 + (difference / 30 * 20)).clamp(0.0, 80.0).toDouble();
+        p.checkInScoreTotal += checkInScore;
+        p.checkInRecordCount++;
+        if (difference > 0) p.totalEarlyMinutes += difference;
+      }
 
       if (isTepat) {
         p.tepat++;
@@ -3338,6 +3388,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       p.attendancePercent = effectiveWorkDays > 0
           ? hadirUnik / effectiveWorkDays * 100
           : 0;
+      final averageCheckInScore = p.checkInRecordCount > 0
+          ? p.checkInScoreTotal / p.checkInRecordCount
+          : 0.0;
+      p.disciplineScore = p.attendancePercent * .5 + averageCheckInScore * .5;
     }
 
     tidakHadir = performers.fold<int>(0, (sum, p) => sum + p.tidakHadir);
@@ -3345,8 +3399,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     cuti = performers.fold<int>(0, (sum, p) => sum + p.cuti);
 
     performers.sort((a, b) {
-      final cmp = b.attendancePercent.compareTo(a.attendancePercent);
+      final cmp = b.disciplineScore.compareTo(a.disciplineScore);
       if (cmp != 0) return cmp;
+      final earlyCmp = b.totalEarlyMinutes.compareTo(a.totalEarlyMinutes);
+      if (earlyCmp != 0) return earlyCmp;
       return b.hadir.compareTo(a.hadir);
     });
 
@@ -3385,6 +3441,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       'performers': performers,
       'deptStats': deptCount,
       'deptRate': deptRate,
+      'dailyStats': dailyStats,
       'problematic': problematic,
     };
   }
@@ -3870,6 +3927,127 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   }
 
   // ── Bar chart tren kehadiran harian ──
+  Widget _buildDailyAttendanceChart(Map<String, dynamic> a) {
+    final daily = a['dailyStats'] as Map<String, _DailyAttendanceStats>;
+    final entries = daily.entries.toList()
+      ..sort((left, right) => left.key.compareTo(right.key));
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    final maxValue = entries
+        .map((entry) => entry.value.total)
+        .fold<int>(1, (max, value) => value > max ? value : max);
+
+    Widget legend(Color color, String label) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+      ],
+    );
+
+    return _card(
+      title: 'Tren Kehadiran Harian',
+      icon: Icons.bar_chart_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Mengikuti filter ${_analyticsPeriodLabel()}',
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 6,
+            children: [
+              legend(const Color(0xFF10B981), 'Tepat waktu'),
+              legend(const Color(0xFFF59E0B), 'Terlambat'),
+              legend(const Color(0xFF3B82F6), 'Izin/Cuti'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 205,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: entries.map((entry) {
+                  final item = entry.value;
+                  final totalHeight = item.total / maxValue * 125;
+                  final tepatHeight = item.total == 0
+                      ? 0.0
+                      : totalHeight * item.tepatWaktu / item.total;
+                  final terlambatHeight = item.total == 0
+                      ? 0.0
+                      : totalHeight * item.terlambat / item.total;
+                  final izinHeight = item.total == 0
+                      ? 0.0
+                      : totalHeight * item.izinCuti / item.total;
+
+                  Widget bar(double height, Color color) => Container(
+                    width: 26,
+                    height: height,
+                    color: color,
+                  );
+
+                  return Container(
+                    width: 44,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          '${item.total}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF334155),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        SizedBox(
+                          height: 128,
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(5),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  bar(izinHeight, const Color(0xFF3B82F6)),
+                                  bar(terlambatHeight, const Color(0xFFF59E0B)),
+                                  bar(tepatHeight, const Color(0xFF10B981)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        Text(
+                          DateFormat('dd/MM').format(item.date),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Widget _buildDailyTrendChart(Map<String, dynamic> a) {
   //   var entries = (a['dailyHadir'] as Map<String, int>).entries.toList()
   //     ..sort((x, y) => x.key.compareTo(y.key));
@@ -3940,7 +4118,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   // ── Top performers ──
   Widget _buildTopPerformers(Map<String, dynamic> a) {
     final performers = (a['performers'] as List<_PerfData>)
-        .where((p) => p.total > 0 && p.tepat > 0)
+        .where((p) => p.total > 0 && p.hadir > 0)
         .take(5)
         .toList();
     if (performers.isEmpty) return const SizedBox.shrink();
@@ -3952,7 +4130,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         children: performers.asMap().entries.map((entry) {
           final i = entry.key;
           final p = entry.value;
-          final rate = p.tepat / p.total * 100;
+          final rate = p.disciplineScore;
           final medal = i == 0
               ? '🥇'
               : i == 1
@@ -3992,7 +4170,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${p.department ?? "-"} • ${p.hadir}/${p.effectiveWorkDays} tepat waktu',
+                        '${p.department ?? "-"} - ${p.hadir}/${p.effectiveWorkDays} hadir${p.totalEarlyMinutes > 0 ? " - ${p.totalEarlyMinutes} menit lebih awal" : ""}',
                         style: const TextStyle(
                           fontSize: 11,
                           color: Color(0xFF64748B),
@@ -6652,6 +6830,17 @@ class _WebNavItem {
   const _WebNavItem(this.icon, this.label, this.index);
 }
 
+class _DailyAttendanceStats {
+  final DateTime date;
+  int tepatWaktu = 0;
+  int terlambat = 0;
+  int izinCuti = 0;
+
+  _DailyAttendanceStats(this.date);
+
+  int get total => tepatWaktu + terlambat + izinCuti;
+}
+
 class _PerfData {
   final String userId;
   final String name;
@@ -6666,6 +6855,10 @@ class _PerfData {
 
   int effectiveWorkDays = 0;
   double attendancePercent = 0;
+  double disciplineScore = 0;
+  double checkInScoreTotal = 0;
+  int checkInRecordCount = 0;
+  int totalEarlyMinutes = 0;
 
   final Set<String> hadirDates = <String>{};
   final Set<String> cutiDates = <String>{};

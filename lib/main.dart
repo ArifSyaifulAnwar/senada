@@ -7,11 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
+import 'package:absensikaryawan/firebase_web_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (!kIsWeb) {
+  if (kIsWeb) {
+    await Firebase.initializeApp(options: FirebaseWebOptions.current);
+  } else {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
@@ -20,9 +23,7 @@ void main() async {
 
   // Persiapan channel, permission, dan listener notifikasi tidak perlu
   // menahan splash screen. Firebase inti tetap disiapkan sebelum runApp.
-  if (!kIsWeb) {
-    _initializeNotificationsInBackground();
-  }
+  _initializeNotificationsInBackground();
 }
 
 Future<void> _initializeNotificationsInBackground() async {
