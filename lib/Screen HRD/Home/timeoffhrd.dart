@@ -43,10 +43,12 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       _isDirectorView ? 'Manajemen Perusahaan' : 'Human Resource Department';
   List<WorkPeriodModel> _workPeriods = [];
   WorkPeriodModel? _selectedWorkPeriod; // null = semua periode
+  // Menyimpan hasil API utuh agar pengguna tetap dapat mengganti periode
+  // tanpa fetch ulang. _allTimeOffs selalu menjadi data periode terpilih.
+  List<AdminTimeOffData> _sourceTimeOffs = [];
   List<AdminTimeOffData> _allTimeOffs = [];
   List<AdminTimeOffData> _filteredTimeOffs = [];
   List<UserWithTimeOffs> _users = [];
-  TimeOffAdminStatistics? _statistics;
   double _annualLeaveQuota = 21;
   double _maxConsecutiveLeaveDays = 12;
   bool _requireAttachmentForSickLeave = true;
@@ -67,7 +69,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
   List<String> get _departments {
     final departments =
-        _users
+        _periodUsers
             .map((u) => u.department)
             .where((d) => d != null && d.trim().isNotEmpty)
             .map((d) => d!.trim())
@@ -76,6 +78,72 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           ..sort();
 
     return ['Semua Departemen', ...departments];
+  }
+
+  /// Identitas dan kuota tetap berasal dari API karyawan, sedangkan jumlah
+  /// pengajuan pada kartu karyawan dihitung ulang dari periode yang sedang
+  /// dipilih. Dengan begitu tab Karyawan tidak menampilkan akumulasi semua
+  /// waktu ketika Dashboard/Pengajuan sedang melihat satu periode kerja.
+  List<UserWithTimeOffs> get _periodUsers {
+    if (_selectedWorkPeriod == null) return _users;
+
+    final itemsByUser = <String, List<AdminTimeOffData>>{};
+    for (final item in _allTimeOffs) {
+      itemsByUser.putIfAbsent(item.userId, () => []).add(item);
+    }
+
+    return _users
+        .where((user) => itemsByUser.containsKey(user.userId))
+        .map((user) {
+          final items = itemsByUser[user.userId]!;
+          final pending = items.where(
+            (item) => _pendingLikeStatuses.contains(item.status.toLowerCase()),
+          );
+          final approved = items.where((item) {
+            final status = item.status.toLowerCase();
+            return status == 'approved' || status == 'disetujui';
+          });
+          final rejected = items.where((item) {
+            final status = item.status.toLowerCase();
+            return status == 'rejected' || status == 'ditolak';
+          });
+          final processed = items.where(
+            (item) => item.status.toLowerCase() == 'processed',
+          );
+          final approvedDays = items
+              .where((item) {
+                final status = item.status.toLowerCase();
+                return status == 'approved' ||
+                    status == 'disetujui' ||
+                    status == 'processed';
+              })
+              .fold<int>(0, (total, item) => total + item.totalHari);
+
+          return UserWithTimeOffs(
+            annualQuota: user.annualQuota,
+            usedDays: user.usedDays,
+            remainingDays: user.remainingDays,
+            userId: user.userId,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            jobs: user.jobs,
+            companyName: user.companyName,
+            department: user.department,
+            jobPosition: user.jobPosition,
+            totalTimeOff: items.length,
+            pendingCount: pending.length,
+            approvedCount: approved.length,
+            rejectedCount: rejected.length,
+            processedCount: processed.length,
+            totalApprovedDays: approvedDays,
+            totalRequestedDays: items.fold<int>(
+              0,
+              (total, item) => total + item.totalHari,
+            ),
+          );
+        })
+        .toList();
   }
 
   void _openEmployeesTab() {
@@ -112,22 +180,58 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   Future<void> _loadWorkPeriods() async {
     final res = await TimeOffService.getWorkPeriods();
     if (mounted && res.success && res.data != null) {
+      final periods = List<WorkPeriodModel>.from(res.data!)
+        ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
+      final today = DateTime.now();
+      final todayNorm = DateTime(today.year, today.month, today.day);
+      WorkPeriodModel? active;
+      for (final period in periods) {
+        final start = DateTime(
+          period.tanggalMulai.year,
+          period.tanggalMulai.month,
+          period.tanggalMulai.day,
+        );
+        final end = DateTime(
+          period.tanggalSelesai.year,
+          period.tanggalSelesai.month,
+          period.tanggalSelesai.day,
+        );
+        if (!todayNorm.isBefore(start) && !todayNorm.isAfter(end)) {
+          active = period;
+          break;
+        }
+      }
       setState(() {
-        _workPeriods = res.data!;
-        _selectedWorkPeriod = null;
+        _workPeriods = periods;
+        _selectedWorkPeriod = active ?? (periods.isEmpty ? null : periods.first);
+        _syncPeriodTimeOffs();
       });
     }
   }
 
-  WorkPeriodModel? get _activePeriod {
-    final today = DateTime.now();
-    final todayNorm = DateTime(today.year, today.month, today.day);
-    for (final p in _workPeriods) {
-      final start = DateTime(p.tanggalMulai.year, p.tanggalMulai.month, p.tanggalMulai.day);
-      final end = DateTime(p.tanggalSelesai.year, p.tanggalSelesai.month, p.tanggalSelesai.day);
-      if (!todayNorm.isBefore(start) && !todayNorm.isAfter(end)) return p;
+  void _syncPeriodTimeOffs() {
+    final period = _selectedWorkPeriod;
+    if (period == null) {
+      _allTimeOffs = List<AdminTimeOffData>.from(_sourceTimeOffs);
+      return;
     }
-    return null;
+
+    final start = DateTime(
+      period.tanggalMulai.year,
+      period.tanggalMulai.month,
+      period.tanggalMulai.day,
+    );
+    final end = DateTime(
+      period.tanggalSelesai.year,
+      period.tanggalSelesai.month,
+      period.tanggalSelesai.day,
+    );
+    _allTimeOffs = _sourceTimeOffs.where((item) {
+      // Izin yang melintasi batas periode tetap termasuk karena hari izinnya
+      // benar-benar beririsan dengan periode yang dilihat HRD.
+      return !item.tanggalSelesai.isBefore(start) &&
+          !item.tanggalMulai.isAfter(end);
+    }).toList();
   }
 
   @override
@@ -170,21 +274,16 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           await Future.wait([
             TimeOffAdminService.getAllTimeOffs(adminId: _currentUserId!),
             TimeOffAdminService.getUsersWithTimeOffs(adminId: _currentUserId!),
-            TimeOffAdminService.getAdminStatistics(
-              adminId: _currentUserId!,
-              year: _activePeriod?.tanggalMulai.year ?? DateTime.now().year,
-              month: _activePeriod?.tanggalMulai.month ?? DateTime.now().month,
-            ),
           ]).timeout(
             const Duration(seconds: 30),
             onTimeout: () => throw Exception('Request timeout.'),
           );
 
       setState(() {
-        _allTimeOffs =
+        _sourceTimeOffs =
             (futures[0] as ApiResponse<List<AdminTimeOffData>>).data ?? [];
+        _syncPeriodTimeOffs();
         _users = (futures[1] as ApiResponse<List<UserWithTimeOffs>>).data ?? [];
-        _statistics = (futures[2] as ApiResponse<TimeOffAdminStatistics>).data;
         _calculateDepartmentStats();
         _calculateLeaveBalances();
         _applyFilters();
@@ -199,7 +298,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
   void _calculateDepartmentStats() {
     _departmentStats.clear();
 
-    for (var u in _users) {
+    final usersById = {for (final user in _users) user.userId: user};
+    for (final item in _allTimeOffs) {
+      final u = usersById[item.userId];
+      if (u == null) continue;
       final d = (u.department?.trim().isNotEmpty ?? false)
           ? u.department!.trim()
           : (u.jobs?.trim().isNotEmpty ?? false)
@@ -208,7 +310,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           ? u.jobPosition!.trim()
           : 'Tidak Ada Departemen';
 
-      _departmentStats[d] = (_departmentStats[d] ?? 0) + u.totalTimeOff;
+      _departmentStats[d] = (_departmentStats[d] ?? 0) + 1;
     }
   }
 
@@ -454,12 +556,16 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       isExpanded: true,
       items: items,
       onChanged: (v) {
-        setState(() {
-          _selectedWorkPeriod = (v == null || v == 0)
-              ? null
-              : _workPeriods.firstWhere((p) => p.id == v);
-          _applyFilters();
-        });
+        _selectedWorkPeriod = (v == null || v == 0)
+            ? null
+            : _workPeriods.firstWhere((p) => p.id == v);
+        _syncPeriodTimeOffs();
+        if (_selectedUserId != null &&
+            !_periodUsers.any((user) => user.userId == _selectedUserId)) {
+          _selectedUserId = null;
+        }
+        _calculateDepartmentStats();
+        _applyFilters();
       },
     );
   }
@@ -503,17 +609,9 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       f = f.where((i) => ids.contains(i.userId)).toList();
     }
 
-    // Filter berdasarkan rentang periode kerja. Filter ini tidak mengubah
-    // urutan data yang sudah dikirim API.
-    if (_selectedWorkPeriod != null) {
-      final start = _selectedWorkPeriod!.tanggalMulai;
-      final end = _selectedWorkPeriod!.tanggalSelesai;
-
-      f = f.where((i) {
-        return !i.tanggalSelesai.isBefore(start) &&
-            !i.tanggalMulai.isAfter(end);
-      }).toList();
-    }
+    // _allTimeOffs sudah disinkronkan dengan periode terpilih oleh
+    // _syncPeriodTimeOffs(), sehingga dashboard dan daftar memakai sumber
+    // periode yang sama.
 
     final keyword = _searchController.text.trim().toLowerCase();
     if (keyword.isNotEmpty) {
@@ -914,8 +1012,10 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildWelcomeBanner(),
+          const SizedBox(height: 16),
+          _buildWorkPeriodFilter(),
           const SizedBox(height: 24),
-          if (_statistics != null) _buildHRDStatistics(_statistics!),
+          _buildHRDStatistics(),
           const SizedBox(height: 24),
           LayoutBuilder(
             builder: (_, c) => c.maxWidth >= 600
@@ -1026,7 +1126,11 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildQuickStat('Karyawan', '${_users.length}', Icons.people),
+              _buildQuickStat(
+                'Karyawan',
+                '${_periodUsers.length}',
+                Icons.people,
+              ),
               Container(width: 1, height: 36, color: Colors.white24),
               _buildQuickStat(
                 'Cuti Hari Ini',
@@ -1077,7 +1181,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
         .length;
   }
 
-  Widget _buildHRDStatistics(TimeOffAdminStatistics stats) => Column(
+  Widget _buildHRDStatistics() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Row(
@@ -1364,7 +1468,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           ],
         ),
         const SizedBox(height: 12),
-        ..._users.take(5).map((u) {
+        ..._periodUsers.take(5).map((u) {
           final bal = _leaveBalances[u.userId] ?? 21.0;
           final low = bal < 7;
 
@@ -1550,7 +1654,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
           children: [
             _buildQuickActionCard(
               title: 'Review Pending',
-              subtitle: '${_statistics?.pendingCount ?? 0} pengajuan',
+              subtitle: '$_pendingCountLive pengajuan',
               icon: Icons.pending_actions,
               color: const Color(0xFFF59E0B),
               onTap: () => _navFilter('Pending'),
@@ -2126,7 +2230,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
     // dibangun langsung dari ID.
     final validSelectedId =
         _selectedUserId != null &&
-            _users.any((u) => u.userId == _selectedUserId)
+            _periodUsers.any((u) => u.userId == _selectedUserId)
         ? _selectedUserId
         : null;
 
@@ -2143,7 +2247,7 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       isExpanded: true,
       items: [
         const DropdownMenuItem<String?>(value: null, child: Text('Semua User')),
-        ..._users.map(
+        ..._periodUsers.map(
           (u) => DropdownMenuItem<String?>(
             value: u.userId,
             child: Text(u.name, overflow: TextOverflow.ellipsis, maxLines: 1),
@@ -2161,13 +2265,22 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
 
   Widget _buildEmployeesTab() => RefreshIndicator(
     onRefresh: _refreshData,
-    child: _users.isEmpty
-        ? _buildEmptyState()
-        : ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _users.length,
-            itemBuilder: (_, i) => _buildEmployeeCard(_users[i]),
+    child: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildWorkPeriodFilter(),
+        const SizedBox(height: 16),
+        if (_periodUsers.isEmpty)
+          _buildEmptyState()
+        else
+          ..._periodUsers.map(
+            (user) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildEmployeeCard(user),
+            ),
           ),
+      ],
+    ),
   );
 
   Widget _buildReportsTab() => SingleChildScrollView(
@@ -2205,6 +2318,8 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
             ],
           ),
         ),
+        const SizedBox(height: 24),
+        _buildWorkPeriodFilter(),
         const SizedBox(height: 24),
         LayoutBuilder(
           builder: (_, c) => GridView.count(
@@ -2764,22 +2879,22 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       summarySheet.cell(xl.CellIndex.indexByString('A5')).value =
           xl.TextCellValue('Total Karyawan');
       summarySheet.cell(xl.CellIndex.indexByString('B5')).value =
-          xl.IntCellValue(_users.length);
+          xl.IntCellValue(_periodUsers.length);
 
       summarySheet.cell(xl.CellIndex.indexByString('A6')).value =
           xl.TextCellValue('Approved');
       summarySheet.cell(xl.CellIndex.indexByString('B6')).value =
-          xl.IntCellValue(_statistics?.approvedCount ?? 0);
+          xl.IntCellValue(_approvedCountLive);
 
       summarySheet.cell(xl.CellIndex.indexByString('A7')).value =
           xl.TextCellValue('Pending');
       summarySheet.cell(xl.CellIndex.indexByString('B7')).value =
-          xl.IntCellValue(_statistics?.pendingCount ?? 0);
+          xl.IntCellValue(_pendingCountLive);
 
       summarySheet.cell(xl.CellIndex.indexByString('A8')).value =
           xl.TextCellValue('Rejected');
       summarySheet.cell(xl.CellIndex.indexByString('B8')).value =
-          xl.IntCellValue(_statistics?.rejectedCount ?? 0);
+          xl.IntCellValue(_rejectedCountLive);
 
       summarySheet.setColumnWidth(0, 20);
       summarySheet.setColumnWidth(1, 24);
@@ -3602,11 +3717,13 @@ class _TimeOffHRDScreenState extends State<TimeOffHRDScreen>
       .where((i) => i.status == 'Approved')
       .fold(0, (s, i) => s + i.totalHari);
   double _calculateAverageDays() =>
-      _users.isEmpty ? 0 : _calculateTotalDaysUsed() / _users.length;
-  double _calculateApprovalRate() =>
-      (_statistics == null || _statistics!.totalSubmissions == 0)
+      _periodUsers.isEmpty
       ? 0
-      : _statistics!.approvedCount / _statistics!.totalSubmissions * 100;
+      : _calculateTotalDaysUsed() / _periodUsers.length;
+  double _calculateApprovalRate() =>
+      _allTimeOffs.isEmpty
+      ? 0
+      : _approvedCountLive / _allTimeOffs.length * 100;
   String _getMostActiveDepartment() => _departmentStats.isEmpty
       ? 'N/A'
       : (_departmentStats.entries.toList()

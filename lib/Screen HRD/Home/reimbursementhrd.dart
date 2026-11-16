@@ -51,7 +51,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   List<AdminReimbursementData> _filteredReimbursements = [];
   List<UserWithReimbursements> _users = [];
   List<EmployeeApiData> _allActiveEmployees = [];
-  AdminReimbursementStatistics? _statistics;
 
   bool _isLoading = true;
   bool _initialDetailHandled = false;
@@ -103,6 +102,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     try {
       final res = await TimeOffService.getWorkPeriods();
       if (mounted && res.success && res.data != null) {
+        final periods = List<WorkPeriodModel>.from(res.data!)
+          ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
         final today = DateTime.now();
         final todayNorm = DateTime(today.year, today.month, today.day);
         WorkPeriodModel? active;
@@ -123,8 +124,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
           }
         }
         setState(() {
-          _workPeriods = res.data!;
-          _selectedPeriod = active;
+          _workPeriods = periods;
+          // Bila HRD belum membuat periode yang mencakup hari ini, gunakan
+          // periode terbaru. Statistik tidak pernah diam-diam kembali total.
+          _selectedPeriod = active ?? (periods.isEmpty ? null : periods.first);
           _isLoadingPeriods = false;
         });
         _applyFilters();
@@ -166,7 +169,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       }
       List<AdminReimbursementData> reimbursements = [];
       List<UserWithReimbursements> users = [];
-      AdminReimbursementStatistics? statistics;
 
       // Load semua data secara parallel
       try {
@@ -176,7 +178,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                 currentUserId: _currentUserId!,
               ),
               _adminService.getUsersWithReimbursements(_currentUserId!),
-              _adminService.getAdminStatistics(currentUserId: _currentUserId!),
               HrdEmployeeService.getEmployeeList(
                 status: 'Aktif',
                 pageSize: 1000,
@@ -190,9 +191,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
         reimbursements = futures[0] as List<AdminReimbursementData>;
         users = futures[1] as List<UserWithReimbursements>;
-        statistics = futures[2] as AdminReimbursementStatistics?;
 
-        final empRes = futures[3] as ApiResponse<EmployeeListResponse>;
+        final empRes = futures[2] as ApiResponse<EmployeeListResponse>;
         if (empRes.success && empRes.data != null) {
           _allActiveEmployees = empRes.data!.data;
         }
@@ -217,7 +217,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       setState(() {
         _allReimbursements = reimbursements;
         _users = users;
-        _statistics = statistics;
         _applyFilters();
         _isLoading = false;
       });
@@ -247,7 +246,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   Future<void> _loadDataIndividually() async {
     List<AdminReimbursementData> reimbursements = [];
     List<UserWithReimbursements> users = [];
-    AdminReimbursementStatistics? statistics;
 
     // Load reimbursements
     try {
@@ -265,15 +263,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       _showErrorSnackBar('Gagal memuat data users: $e');
     }
 
-    // Load statistics
-    try {
-      statistics = await _adminService.getAdminStatistics(
-        currentUserId: _currentUserId!,
-      );
-    } catch (e) {
-      _showErrorSnackBar('Statistik menggunakan data default');
-    }
-
     // Load semua karyawan aktif
     try {
       final empRes = await HrdEmployeeService.getEmployeeList(
@@ -288,7 +277,6 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     setState(() {
       _allReimbursements = reimbursements;
       _users = users;
-      _statistics = statistics;
       _applyFilters();
       _isLoading = false;
     });
@@ -341,6 +329,66 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     _applyFilters();
   }
 
+  /// Satu sumber data untuk seluruh tampilan reimbursement. Filter periode
+  /// memakai tanggal pengajuan, sama seperti daftar pengajuan. Dengan begitu
+  /// dashboard, karyawan, dan laporan tidak pernah kembali menghitung total
+  /// sepanjang waktu ketika periode kerja HRD sedang dipilih.
+  List<AdminReimbursementData> get _periodReimbursements {
+    if (_selectedPeriod == null) return List.of(_allReimbursements);
+
+    final start = DateTime(
+      _selectedPeriod!.tanggalMulai.year,
+      _selectedPeriod!.tanggalMulai.month,
+      _selectedPeriod!.tanggalMulai.day,
+    );
+    final end = DateTime(
+      _selectedPeriod!.tanggalSelesai.year,
+      _selectedPeriod!.tanggalSelesai.month,
+      _selectedPeriod!.tanggalSelesai.day,
+    );
+
+    return _allReimbursements.where((item) {
+      final submittedDate = DateTime(
+        item.submittedAt.year,
+        item.submittedAt.month,
+        item.submittedAt.day,
+      );
+      return !submittedDate.isBefore(start) && !submittedDate.isAfter(end);
+    }).toList();
+  }
+
+  AdminReimbursementStatistics get _periodStatistics {
+    final data = _periodReimbursements;
+    bool hasStatus(AdminReimbursementData item, String value) =>
+        item.status.toLowerCase().replaceAll(' ', '_') == value;
+    final pending = data.where((item) {
+      final status = item.status.toLowerCase().replaceAll(' ', '_');
+      return status == 'pending' || status == 'pending_finance';
+    });
+    final approved = data.where(
+      (item) => hasStatus(item, 'approved') || hasStatus(item, 'paid'),
+    );
+    final paid = data.where((item) => hasStatus(item, 'paid'));
+    final rejected = data.where((item) => hasStatus(item, 'rejected'));
+    final approvedAmount = approved.fold<double>(0, (sum, item) => sum + item.amount);
+    final paidAmount = paid.fold<double>(0, (sum, item) => sum + item.amount);
+    final pendingAmount = pending.fold<double>(0, (sum, item) => sum + item.amount);
+
+    return AdminReimbursementStatistics(
+      totalSubmissions: data.length,
+      pendingCount: pending.length,
+      approvedCount: approved.length,
+      rejectedCount: rejected.length,
+      paidCount: paid.length,
+      totalApprovedAmount: approvedAmount,
+      totalPaidAmount: paidAmount,
+      totalPendingAmount: pendingAmount,
+      formattedTotalApproved: _formatCurrency(approvedAmount),
+      formattedTotalPaid: _formatCurrency(paidAmount),
+      formattedTotalPending: _formatCurrency(pendingAmount),
+    );
+  }
+
   double _getResponsiveFontSize(BuildContext context, double baseSize) {
     final screenWidth = MediaQuery.of(context).size.width;
     if (screenWidth < 360) {
@@ -353,29 +401,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   void _applyFilters() {
-    List<AdminReimbursementData> filtered = _allReimbursements;
-
-    // Filter by period
-    if (_selectedPeriod != null) {
-      final start = DateTime(
-        _selectedPeriod!.tanggalMulai.year,
-        _selectedPeriod!.tanggalMulai.month,
-        _selectedPeriod!.tanggalMulai.day,
-      );
-      final end = DateTime(
-        _selectedPeriod!.tanggalSelesai.year,
-        _selectedPeriod!.tanggalSelesai.month,
-        _selectedPeriod!.tanggalSelesai.day,
-      );
-      filtered = filtered.where((item) {
-        final d = DateTime(
-          item.submittedAt.year,
-          item.submittedAt.month,
-          item.submittedAt.day,
-        );
-        return !d.isBefore(start) && !d.isAfter(end);
-      }).toList();
-    }
+    List<AdminReimbursementData> filtered = _periodReimbursements;
 
     // Filter by status
     if (_selectedStatus != null && _selectedStatus != 'Semua Status') {
@@ -751,44 +777,72 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     );
   }
 
-  int get _pendingCountLive => _allReimbursements.where((item) {
+  int get _pendingCountLive => _periodReimbursements.where((item) {
     final status = item.status.toLowerCase().replaceAll(' ', '_');
     return status == 'pending' || status == 'pending_finance';
   }).length;
 
-  int get _approvedCountLive => _allReimbursements.where((item) {
+  int get _approvedCountLive => _periodReimbursements.where((item) {
     final status = item.status.toLowerCase();
     return status == 'approved' || status == 'paid';
   }).length;
 
-  int get _rejectedCountLive => _allReimbursements
+  int get _rejectedCountLive => _periodReimbursements
       .where((item) => item.status.toLowerCase() == 'rejected')
       .length;
 
-  /// Semua karyawan aktif + data reimbursement masing-masing (0 jika belum pernah)
+  /// Karyawan yang memiliki pengajuan pada periode aktif. Statistik pada kartu
+  /// dihitung ulang dari data periode, bukan agregat seluruh riwayat API.
   List<UserWithReimbursements> get _mergedUsers {
-    if (_allActiveEmployees.isEmpty) return _users;
-    final Map<String, UserWithReimbursements> byId = {
+    final periodData = _periodReimbursements;
+    final Map<String, UserWithReimbursements> previousById = {
       for (final u in _users) u.userId: u,
     };
-    return _allActiveEmployees.map((emp) {
-      final existing = byId[emp.userId];
-      if (existing != null) return existing;
-      return UserWithReimbursements(
-        userId: emp.userId,
-        name: emp.name,
-        department: emp.department ?? '-',
-        mail: emp.email,
-        jobs: emp.jobs ?? emp.jobPosition,
-        totalReimbursements: 0,
-        pendingCount: 0,
-        approvedCount: 0,
-        rejectedCount: 0,
-        paidCount: 0,
-        totalAmount: 0,
-        formattedTotalAmount: 'Rp 0',
+
+    final Map<String, EmployeeApiData> employeesById = {
+      for (final employee in _allActiveEmployees) employee.userId: employee,
+    };
+    final userIds = periodData.map((item) => item.userId).toSet();
+
+    return userIds.map((userId) {
+      final records = periodData.where((item) => item.userId == userId).toList();
+      final knownUser = previousById[userId];
+      final employee = employeesById[userId];
+      final first = records.first;
+      final pending = records.where((item) {
+        final status = item.status.toLowerCase().replaceAll(' ', '_');
+        return status == 'pending' || status == 'pending_finance';
+      }).length;
+      final approved = records.where((item) {
+        final status = item.status.toLowerCase();
+        return status == 'approved' || status == 'paid';
+      }).length;
+      final rejected = records
+          .where((item) => item.status.toLowerCase() == 'rejected')
+          .length;
+      final paid = records
+          .where((item) => item.status.toLowerCase() == 'paid')
+          .length;
+      final totalAmount = records.fold<double>(
+        0,
+        (sum, item) => sum + item.amount,
       );
-    }).toList();
+
+      return UserWithReimbursements(
+        userId: userId,
+        name: employee?.name ?? knownUser?.name ?? first.userName,
+        department: employee?.department ?? knownUser?.department ?? '-',
+        mail: employee?.email ?? knownUser?.mail ?? first.userEmail,
+        jobs: employee?.jobs ?? employee?.jobPosition ?? knownUser?.jobs ?? first.userJob,
+        totalReimbursements: records.length,
+        pendingCount: pending,
+        approvedCount: approved,
+        rejectedCount: rejected,
+        paidCount: paid,
+        totalAmount: totalAmount,
+        formattedTotalAmount: _formatCurrency(totalAmount),
+      );
+    }).toList()..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
   }
 
   Widget _buildWebStatsSummary() {
@@ -869,8 +923,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildWelcomeBanner(),
+            const SizedBox(height: 16),
+            _buildPeriodFilter(),
             const SizedBox(height: 24),
-            if (_statistics != null) _buildStatisticsCards(_statistics!),
+            _buildStatisticsCards(),
             const SizedBox(height: 24),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1164,39 +1220,52 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
   Widget _buildUsersTab() {
     final merged = _mergedUsers;
-    if (merged.isEmpty) return _buildEmptyState();
 
-    return RefreshIndicator(
-      onRefresh: _refreshData,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columns = constraints.maxWidth >= 1100
-              ? 3
-              : constraints.maxWidth >= 700
-              ? 2
-              : 1;
-          return GridView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(16),
-            itemCount: merged.length,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: columns == 1 ? 1.0 : 1.20,
-            ),
-            itemBuilder: (context, index) => _buildHRDUserCard(merged[index]),
-          );
-        },
-      ),
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: _buildPeriodFilter(),
+        ),
+        Expanded(
+          child: merged.isEmpty
+              ? _buildEmptyState()
+              : RefreshIndicator(
+                  onRefresh: _refreshData,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final columns = constraints.maxWidth >= 1100
+                          ? 3
+                          : constraints.maxWidth >= 700
+                          ? 2
+                          : 1;
+                      return GridView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        itemCount: merged.length,
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          crossAxisSpacing: 14,
+                          mainAxisSpacing: 14,
+                          childAspectRatio: columns == 1 ? 1.0 : 1.20,
+                        ),
+                        itemBuilder: (context, index) =>
+                            _buildHRDUserCard(merged[index]),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ],
     );
   }
 
   Widget _buildReportsTab() {
     final totalNominal = _calculateTotalReimbursementAmount();
-    final average = _allReimbursements.isEmpty
+    final periodData = _periodReimbursements;
+    final average = periodData.isEmpty
         ? 0.0
-        : totalNominal / _allReimbursements.length;
+        : totalNominal / periodData.length;
     final approvalRate = _calculateApprovalRate();
 
     return RefreshIndicator(
@@ -1223,6 +1292,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                 color: const Color(0xFF6B7280),
               ),
             ),
+            const SizedBox(height: 18),
+            _buildPeriodFilter(),
             const SizedBox(height: 18),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1488,7 +1559,8 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     );
   }
 
-  Widget _buildStatisticsCards(AdminReimbursementStatistics stats) {
+  Widget _buildStatisticsCards() {
+    final stats = _periodStatistics;
     final screenWidth = MediaQuery.of(context).size.width;
     final crossAxisCount = screenWidth > 600 ? 4 : 2;
 
@@ -1583,7 +1655,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
     final totalAmount = _calculateTotalReimbursementAmount();
     final averageAmount =
         totalAmount /
-        (_allReimbursements.isEmpty ? 1 : _allReimbursements.length);
+        (_periodReimbursements.isEmpty ? 1 : _periodReimbursements.length);
     final topCategory = _getTopReimbursementCategory();
     final approvalRate = _calculateApprovalRate();
 
@@ -1901,7 +1973,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   Widget _buildUrgentItems() {
-    final urgentItems = _allReimbursements
+    final urgentItems = _periodReimbursements
         .where(
           (item) =>
               item.status.toLowerCase() == 'pending' &&
@@ -1994,6 +2066,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   Widget _buildQuickActions() {
+    final stats = _periodStatistics;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2020,14 +2093,14 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               children: [
                 _buildQuickActionCard(
                   title: 'Review Pending',
-                  subtitle: '${_statistics?.pendingCount ?? 0} pengajuan',
+                  subtitle: '${stats.pendingCount} pengajuan',
                   icon: Icons.pending_actions,
                   color: const Color(0xFFF59E0B),
                   onTap: () => _navigateToReimbursementsWithFilter('pending'),
                 ),
                 _buildQuickActionCard(
                   title: 'Process Payment',
-                  subtitle: '${_statistics?.approvedCount ?? 0} approved',
+                  subtitle: '${stats.approvedCount} approved',
                   icon: Icons.payments,
                   color: const Color(0xFF10B981),
                   onTap: () => _navigateToReimbursementsWithFilter('approved'),
@@ -2904,7 +2977,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
                 borderRadius: BorderRadius.circular(100),
               ),
               child: Icon(
-                _allReimbursements.isEmpty && _users.isEmpty
+                _periodReimbursements.isEmpty && _users.isEmpty
                     ? Icons.cloud_off_outlined
                     : Icons.inbox_outlined,
                 size: 64,
@@ -2913,7 +2986,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
             ),
             const SizedBox(height: 24),
             Text(
-              _allReimbursements.isEmpty && _users.isEmpty
+              _periodReimbursements.isEmpty && _users.isEmpty
                   ? 'Tidak Ada Koneksi Data'
                   : 'Tidak Ada Data',
               style: TextStyle(
@@ -2925,7 +2998,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
             ),
             const SizedBox(height: 8),
             Text(
-              _allReimbursements.isEmpty && _users.isEmpty
+              _periodReimbursements.isEmpty && _users.isEmpty
                   ? 'Periksa koneksi internet dan coba lagi'
                   : 'Belum ada data yang sesuai dengan filter',
               style: TextStyle(
@@ -2934,7 +3007,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
               ),
               textAlign: TextAlign.center,
             ),
-            if (_allReimbursements.isEmpty && _users.isEmpty) ...[
+            if (_periodReimbursements.isEmpty && _users.isEmpty) ...[
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: _refreshData,
@@ -2961,7 +3034,7 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
 
   // Helper Methods
   double _calculateTotalReimbursementAmount() {
-    return _allReimbursements
+    return _periodReimbursements
         .where(
           (item) =>
               item.status.toLowerCase() == 'approved' ||
@@ -2976,10 +3049,10 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   String _getTopReimbursementCategory() {
-    if (_allReimbursements.isEmpty) return 'N/A';
+    if (_periodReimbursements.isEmpty) return 'N/A';
 
     Map<String, int> categoryCount = {};
-    for (var item in _allReimbursements) {
+    for (var item in _periodReimbursements) {
       categoryCount[item.category] = (categoryCount[item.category] ?? 0) + 1;
     }
 
@@ -2990,8 +3063,9 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
   }
 
   double _calculateApprovalRate() {
-    if (_statistics == null || _statistics!.totalSubmissions == 0) return 0;
-    return (_statistics!.approvedCount / _statistics!.totalSubmissions * 100);
+    final stats = _periodStatistics;
+    if (stats.totalSubmissions == 0) return 0;
+    return stats.approvedCount / stats.totalSubmissions * 100;
   }
 
   String _calculateTrend(String type) {
@@ -3065,11 +3139,12 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       builder: (context) {
         return ReimbursementReportModal(
           allReimbursements: _allReimbursements,
-          users: _users,
-          statistics: _statistics,
+          users: _mergedUsers,
+          statistics: _periodStatistics,
           currentUserId: _currentUserId ?? '',
           currentUserName: _currentUserName ?? '',
           workPeriods: _workPeriods,
+          initialPeriod: _selectedPeriod,
           presentationRole: _roleLabel,
         );
       },
@@ -3085,9 +3160,9 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
       ),
       builder: (context) {
         return BudgetOverviewModal(
-          allReimbursements: _allReimbursements,
-          users: _users,
-          statistics: _statistics,
+          allReimbursements: _periodReimbursements,
+          users: _mergedUsers,
+          statistics: _periodStatistics,
           currentUserId: _currentUserId ?? '',
           currentUserName: _currentUserName ?? '',
         );
@@ -3104,6 +3179,7 @@ class ReimbursementReportModal extends StatefulWidget {
   final String currentUserId;
   final String currentUserName;
   final List<WorkPeriodModel> workPeriods;
+  final WorkPeriodModel? initialPeriod;
   final String presentationRole;
 
   const ReimbursementReportModal({
@@ -3114,6 +3190,7 @@ class ReimbursementReportModal extends StatefulWidget {
     required this.currentUserId,
     required this.currentUserName,
     this.workPeriods = const [],
+    this.initialPeriod,
     this.presentationRole = 'HRD',
   });
 
@@ -3138,6 +3215,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   @override
   void initState() {
     super.initState();
+    _selectedPeriod = widget.initialPeriod;
     if (widget.workPeriods.isNotEmpty) {
       final today = DateTime.now();
       final todayNorm = DateTime(today.year, today.month, today.day);
@@ -3152,13 +3230,87 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           p.tanggalSelesai.month,
           p.tanggalSelesai.day,
         );
-        if (!todayNorm.isBefore(start) && !todayNorm.isAfter(end)) {
+        if (_selectedPeriod == null &&
+            !todayNorm.isBefore(start) &&
+            !todayNorm.isAfter(end)) {
           _selectedPeriod = p;
           break;
         }
       }
       _selectedPeriod ??= widget.workPeriods.first;
     }
+  }
+
+  List<AdminReimbursementData> get _selectedPeriodReimbursements {
+    if (_selectedPeriod == null) {
+      return widget.allReimbursements.cast<AdminReimbursementData>();
+    }
+    final start = DateTime(
+      _selectedPeriod!.tanggalMulai.year,
+      _selectedPeriod!.tanggalMulai.month,
+      _selectedPeriod!.tanggalMulai.day,
+    );
+    final end = DateTime(
+      _selectedPeriod!.tanggalSelesai.year,
+      _selectedPeriod!.tanggalSelesai.month,
+      _selectedPeriod!.tanggalSelesai.day,
+    );
+    return widget.allReimbursements
+        .cast<AdminReimbursementData>()
+        .where((item) {
+          final submittedDate = DateTime(
+            item.submittedAt.year,
+            item.submittedAt.month,
+            item.submittedAt.day,
+          );
+          return !submittedDate.isBefore(start) && !submittedDate.isAfter(end);
+        })
+        .toList();
+  }
+
+  List<UserWithReimbursements> get _selectedPeriodUsers {
+    final knownUsers = <String, UserWithReimbursements>{
+      for (final user in widget.users.cast<UserWithReimbursements>())
+        user.userId: user,
+    };
+    final data = _selectedPeriodReimbursements;
+    final userIds = data.map((item) => item.userId).toSet();
+
+    return userIds.map((userId) {
+      final records = data.where((item) => item.userId == userId).toList();
+      final first = records.first;
+      final known = knownUsers[userId];
+      final pending = records.where((item) {
+        final status = item.status.toLowerCase().replaceAll(' ', '_');
+        return status == 'pending' || status == 'pending_finance';
+      }).length;
+      final approved = records.where((item) {
+        final status = item.status.toLowerCase();
+        return status == 'approved' || status == 'paid';
+      }).length;
+      final rejected = records
+          .where((item) => item.status.toLowerCase() == 'rejected')
+          .length;
+      final paid = records
+          .where((item) => item.status.toLowerCase() == 'paid')
+          .length;
+      final amount = records.fold<double>(0, (sum, item) => sum + item.amount);
+
+      return UserWithReimbursements(
+        userId: userId,
+        name: known?.name ?? first.userName,
+        department: known?.department ?? '-',
+        mail: known?.mail ?? first.userEmail,
+        jobs: known?.jobs ?? first.userJob,
+        totalReimbursements: records.length,
+        pendingCount: pending,
+        approvedCount: approved,
+        rejectedCount: rejected,
+        paidCount: paid,
+        totalAmount: amount,
+        formattedTotalAmount: _formatCurrency(amount),
+      );
+    }).toList()..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
   }
 
   double _getResponsiveFontSize(BuildContext context, double baseSize) {
@@ -3421,9 +3573,9 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   Widget _buildUserReport() {
-    final sortedUsers = List<dynamic>.from(
-      widget.users,
-    )..sort((a, b) => ((b.totalAmount ?? 0.0).compareTo(a.totalAmount ?? 0.0)));
+    final sortedUsers = List<UserWithReimbursements>.from(
+      _selectedPeriodUsers,
+    )..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4188,25 +4340,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   Map<String, dynamic> _getMonthlyData() {
-    final monthlyReimbursements = widget.allReimbursements.where((item) {
-      if (_selectedPeriod == null) return true;
-      final start = DateTime(
-        _selectedPeriod!.tanggalMulai.year,
-        _selectedPeriod!.tanggalMulai.month,
-        _selectedPeriod!.tanggalMulai.day,
-      );
-      final end = DateTime(
-        _selectedPeriod!.tanggalSelesai.year,
-        _selectedPeriod!.tanggalSelesai.month,
-        _selectedPeriod!.tanggalSelesai.day,
-      );
-      final d = DateTime(
-        item.submittedAt.year,
-        item.submittedAt.month,
-        item.submittedAt.day,
-      );
-      return !d.isBefore(start) && !d.isAfter(end);
-    }).toList();
+    final monthlyReimbursements = _selectedPeriodReimbursements;
 
     final totalAmount = monthlyReimbursements.fold(
       0.0,
@@ -4263,11 +4397,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   Map<String, dynamic> _getYearlyData() {
-    final selectedYear =
-        _selectedPeriod?.tanggalMulai.year ?? DateTime.now().year;
-    final yearlyReimbursements = widget.allReimbursements.where((item) {
-      return item.submittedAt.year == selectedYear;
-    }).toList();
+    final yearlyReimbursements = _selectedPeriodReimbursements;
 
     final totalAmount = yearlyReimbursements.fold(
       0.0,
@@ -4290,7 +4420,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
 
     // Department data
     Map<String, Map<String, dynamic>> departments = {};
-    for (var user in widget.users) {
+    for (var user in _selectedPeriodUsers) {
       final dept = _getUserDepartmentFromUser(user);
       if (!departments.containsKey(dept)) {
         departments[dept] = {
@@ -4300,8 +4430,8 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
         };
       }
       departments[dept]!['employeeCount']++;
-      departments[dept]!['requestCount'] += (user.totalReimbursements ?? 0);
-      departments[dept]!['totalAmount'] += (user.totalAmount ?? 0.0);
+      departments[dept]!['requestCount'] += user.totalReimbursements;
+      departments[dept]!['totalAmount'] += user.totalAmount;
     }
 
     return {
@@ -4321,7 +4451,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   Map<String, Map<String, dynamic>> _getCategoryData() {
     Map<String, Map<String, dynamic>> categories = {};
 
-    for (var item in widget.allReimbursements) {
+    for (var item in _selectedPeriodReimbursements) {
       if (!categories.containsKey(item.category)) {
         categories[item.category] = {'count': 0, 'amount': 0.0, 'average': 0.0};
       }
@@ -4342,7 +4472,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   Map<String, Map<String, dynamic>> _getDepartmentData() {
     Map<String, Map<String, dynamic>> departments = {};
 
-    for (var user in widget.users) {
+    for (var user in _selectedPeriodUsers) {
       final dept = _getUserDepartmentFromUser(user);
       if (!departments.containsKey(dept)) {
         departments[dept] = {
@@ -4352,8 +4482,8 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
         };
       }
       departments[dept]!['employeeCount']++;
-      departments[dept]!['requestCount'] += (user.totalReimbursements ?? 0);
-      departments[dept]!['totalAmount'] += (user.totalAmount ?? 0.0);
+      departments[dept]!['requestCount'] += user.totalReimbursements;
+      departments[dept]!['totalAmount'] += user.totalAmount;
     }
 
     return departments;
@@ -4368,8 +4498,8 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   Map<String, dynamic> _getSummaryData() {
-    final totalReimbursements = widget.allReimbursements.length;
-    final totalAmount = widget.allReimbursements.fold(
+    final totalReimbursements = _selectedPeriodReimbursements.length;
+    final totalAmount = _selectedPeriodReimbursements.fold(
       0.0,
       (sum, item) => sum + item.amount,
     );
@@ -4409,7 +4539,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   int _calculateAverageProcessingTime() {
-    final processedItems = widget.allReimbursements
+    final processedItems = _selectedPeriodReimbursements
         .where(
           (item) =>
               item.status.toLowerCase() == 'approved' ||
@@ -4424,10 +4554,10 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   }
 
   String _getTopCategory() {
-    if (widget.allReimbursements.isEmpty) return 'N/A';
+    if (_selectedPeriodReimbursements.isEmpty) return 'N/A';
 
     Map<String, int> categoryCount = {};
-    for (var item in widget.allReimbursements) {
+    for (var item in _selectedPeriodReimbursements) {
       categoryCount[item.category] = (categoryCount[item.category] ?? 0) + 1;
     }
 
@@ -4594,33 +4724,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
   void _exportReport() => _exportAsExcel();
 
   List<dynamic> _getFilteredReimbursements() {
-    if (_selectedReportType == 'monthly' && _selectedPeriod != null) {
-      final start = DateTime(
-        _selectedPeriod!.tanggalMulai.year,
-        _selectedPeriod!.tanggalMulai.month,
-        _selectedPeriod!.tanggalMulai.day,
-      );
-      final end = DateTime(
-        _selectedPeriod!.tanggalSelesai.year,
-        _selectedPeriod!.tanggalSelesai.month,
-        _selectedPeriod!.tanggalSelesai.day,
-      );
-      return widget.allReimbursements.where((r) {
-        final d = DateTime(
-          r.submittedAt.year,
-          r.submittedAt.month,
-          r.submittedAt.day,
-        );
-        return !d.isBefore(start) && !d.isAfter(end);
-      }).toList();
-    }
-    if (_selectedReportType == 'yearly') {
-      final y = _selectedPeriod?.tanggalMulai.year ?? DateTime.now().year;
-      return widget.allReimbursements
-          .where((r) => r.submittedAt.year == y)
-          .toList();
-    }
-    return List.from(widget.allReimbursements);
+    return _selectedPeriodReimbursements;
   }
 
   Future<void> _exportAsExcel() async {

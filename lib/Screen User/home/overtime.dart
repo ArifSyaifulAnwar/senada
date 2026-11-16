@@ -47,7 +47,8 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
     if (!mounted) return;
     setState(() {
       if (res.success && res.data != null && res.data!.isNotEmpty) {
-        _workPeriods = res.data!;
+        _workPeriods = List<WorkPeriodModel>.from(res.data!)
+          ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
         _selectedPeriod = _findActiveWorkPeriod(_workPeriods);
       }
       _isLoadingPeriods = false;
@@ -72,7 +73,12 @@ class _OvertimeScreenState extends State<OvertimeScreen> {
       );
       if (!today.isBefore(start) && !today.isAfter(end)) return period;
     }
-    return null;
+    // Jika HRD belum mengaktifkan periode yang mencakup hari ini, gunakan
+    // periode terbaru agar riwayat lembur tidak kembali ke seluruh data.
+    if (periods.isEmpty) return null;
+    final newest = List<WorkPeriodModel>.from(periods)
+      ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
+    return newest.first;
   }
 
   Future<void> _loadOvertimeData() async {

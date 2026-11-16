@@ -55,7 +55,8 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
     if (!mounted) return;
     setState(() {
       if (res.success && res.data != null && res.data!.isNotEmpty) {
-        _workPeriods = res.data!;
+        _workPeriods = List<WorkPeriodModel>.from(res.data!)
+          ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
         _selectedPeriod = _findActiveWorkPeriod(_workPeriods);
       }
       _isLoadingPeriods = false;
@@ -80,7 +81,13 @@ class _TimeOffScreenState extends State<TimeOffScreen> {
       );
       if (!today.isBefore(start) && !today.isAfter(end)) return period;
     }
-    return null;
+    // Bila periode aktif belum tersedia (mis. awal tahun/periode baru belum
+    // diaktifkan), tetap pilih periode terbaru. Jangan diam-diam kembali ke
+    // seluruh riwayat izin.
+    if (periods.isEmpty) return null;
+    final newest = List<WorkPeriodModel>.from(periods)
+      ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
+    return newest.first;
   }
 
   @override

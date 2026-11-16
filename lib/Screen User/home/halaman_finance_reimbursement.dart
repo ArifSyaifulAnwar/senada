@@ -84,12 +84,39 @@ class _HalamanFinanceReimbursementState
     _StatusFilter('paid', 'Dibayar'),
   ];
 
-  int get _totalCount => _allItems.length;
+  /// Data dasar untuk semua statistik Finance. Status/pencarian hanya
+  /// memengaruhi daftar, sedangkan angka dashboard selalu mengikuti periode
+  /// kerja yang dipilih HRD.
+  List<FinanceReimbursementItem> get _periodItems {
+    if (_selectedPeriod == null) return List.of(_allItems);
+    final start = DateTime(
+      _selectedPeriod!.tanggalMulai.year,
+      _selectedPeriod!.tanggalMulai.month,
+      _selectedPeriod!.tanggalMulai.day,
+    );
+    final end = DateTime(
+      _selectedPeriod!.tanggalSelesai.year,
+      _selectedPeriod!.tanggalSelesai.month,
+      _selectedPeriod!.tanggalSelesai.day,
+    );
+    return _allItems.where((item) {
+      final submittedDate = DateTime(
+        item.submittedAt.year,
+        item.submittedAt.month,
+        item.submittedAt.day,
+      );
+      return !submittedDate.isBefore(start) && !submittedDate.isAfter(end);
+    }).toList();
+  }
+
+  int get _totalCount => _periodItems.length;
   int get _pendingCount =>
-      _allItems.where((item) => item.isPendingFinance).length;
-  int get _approvedCount => _allItems.where((item) => item.isApproved).length;
-  int get _rejectedCount => _allItems.where((item) => item.isRejected).length;
-  int get _paidCount => _allItems.where((item) => item.isPaid).length;
+      _periodItems.where((item) => item.isPendingFinance).length;
+  int get _approvedCount =>
+      _periodItems.where((item) => item.isApproved).length;
+  int get _rejectedCount =>
+      _periodItems.where((item) => item.isRejected).length;
+  int get _paidCount => _periodItems.where((item) => item.isPaid).length;
 
   double get _pendingAmount => _sumWhere((item) => item.isPendingFinance);
   double get _approvedAmount => _sumWhere((item) => item.isApproved);
@@ -97,18 +124,18 @@ class _HalamanFinanceReimbursementState
   double get _rejectedAmount => _sumWhere((item) => item.isRejected);
 
   double _sumWhere(bool Function(FinanceReimbursementItem item) test) =>
-      _allItems
+      _periodItems
           .where(test)
           .fold<double>(0, (total, item) => total + item.amount);
 
   List<FinanceReimbursementItem> get _urgentItems =>
-      _allItems.where((item) => item.isUrgent).toList()
+      _periodItems.where((item) => item.isUrgent).toList()
         ..sort((a, b) => b.daysSinceSubmitted.compareTo(a.daysSinceSubmitted));
 
   List<FinanceReimbursementItem> get _paymentItems {
     final keyword = _searchController.text.trim().toLowerCase();
 
-    final result = _allItems.where((item) {
+    final result = _periodItems.where((item) {
       if (!item.isApproved && !item.isPaid) return false;
       return _matchesKeyword(item, keyword);
     }).toList();
@@ -180,10 +207,12 @@ class _HalamanFinanceReimbursementState
     try {
       final res = await TimeOffService.getWorkPeriods();
       if (mounted && res.success && res.data != null) {
+        final periods = List<WorkPeriodModel>.from(res.data!)
+          ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
         final today = DateTime.now();
         final todayNorm = DateTime(today.year, today.month, today.day);
         WorkPeriodModel? active;
-        for (final p in res.data!) {
+        for (final p in periods) {
           final start = DateTime(
             p.tanggalMulai.year,
             p.tanggalMulai.month,
@@ -200,8 +229,8 @@ class _HalamanFinanceReimbursementState
           }
         }
         setState(() {
-          _workPeriods = res.data!;
-          _selectedPeriod = active;
+          _workPeriods = periods;
+          _selectedPeriod = active ?? (periods.isEmpty ? null : periods.first);
           _isLoadingPeriods = false;
         });
         _applyFilters();
@@ -269,6 +298,7 @@ class _HalamanFinanceReimbursementState
       builder: (context) => FinanceReimbursementReportModal(
         allItems: _allItems,
         workPeriods: _workPeriods,
+        initialPeriod: _selectedPeriod,
         currentUserId: _currentUserId ?? '',
         currentUserName: _currentUserName ?? '',
       ),
@@ -1066,6 +1096,8 @@ class _HalamanFinanceReimbursementState
         padding: const EdgeInsets.all(20),
         children: [
           _buildWelcomeBanner(),
+          const SizedBox(height: 16),
+          _buildPeriodDropdown(),
           const SizedBox(height: 24),
           _buildFinanceStatistics(),
           const SizedBox(height: 24),
@@ -1480,7 +1512,7 @@ class _HalamanFinanceReimbursementState
   }
 
   Widget _buildPaymentOverview() {
-    final latestPaid = _allItems.where((item) => item.isPaid).toList()
+    final latestPaid = _periodItems.where((item) => item.isPaid).toList()
       ..sort((a, b) {
         final dateA = a.paidAt ?? a.submittedAt;
         final dateB = b.paidAt ?? b.submittedAt;
@@ -3721,6 +3753,7 @@ class _HalamanFinanceReimbursementState
 class FinanceReimbursementReportModal extends StatefulWidget {
   final List<FinanceReimbursementItem> allItems;
   final List<WorkPeriodModel> workPeriods;
+  final WorkPeriodModel? initialPeriod;
   final String currentUserId;
   final String currentUserName;
 
@@ -3728,6 +3761,7 @@ class FinanceReimbursementReportModal extends StatefulWidget {
     super.key,
     required this.allItems,
     required this.workPeriods,
+    this.initialPeriod,
     this.currentUserId = '',
     this.currentUserName = '',
   });
@@ -3755,6 +3789,7 @@ class _FinanceReimbursementReportModalState
   @override
   void initState() {
     super.initState();
+    _selectedPeriod = widget.initialPeriod;
     if (widget.workPeriods.isNotEmpty) {
       final today = DateTime.now();
       final todayNorm = DateTime(today.year, today.month, today.day);
@@ -3769,7 +3804,9 @@ class _FinanceReimbursementReportModalState
           p.tanggalSelesai.month,
           p.tanggalSelesai.day,
         );
-        if (!todayNorm.isBefore(s) && !todayNorm.isAfter(e)) {
+        if (_selectedPeriod == null &&
+            !todayNorm.isBefore(s) &&
+            !todayNorm.isAfter(e)) {
           _selectedPeriod = p;
           break;
         }
@@ -3781,7 +3818,7 @@ class _FinanceReimbursementReportModalState
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   List<FinanceReimbursementItem> get _filteredItems {
-    if (_selectedReportType == 'period' && _selectedPeriod != null) {
+    if (_selectedPeriod != null) {
       final s = DateTime(
         _selectedPeriod!.tanggalMulai.year,
         _selectedPeriod!.tanggalMulai.month,
@@ -3801,21 +3838,11 @@ class _FinanceReimbursementReportModalState
         return !d.isBefore(s) && !d.isAfter(e);
       }).toList();
     }
-    if (_selectedReportType == 'yearly') {
-      final y = _selectedPeriod?.tanggalMulai.year ?? DateTime.now().year;
-      return widget.allItems.where((r) => r.submittedAt.year == y).toList();
-    }
     return List.from(widget.allItems);
   }
 
   String get _periodLabel {
-    if (_selectedReportType == 'period') {
-      return _selectedPeriod?.label ?? 'Semua Periode';
-    }
-    if (_selectedReportType == 'yearly') {
-      return 'Tahun ${_selectedPeriod?.tanggalMulai.year ?? DateTime.now().year}';
-    }
-    return 'Semua Data';
+    return _selectedPeriod?.label ?? 'Semua Periode';
   }
 
   String _fmtCurr(double v) => NumberFormat.currency(

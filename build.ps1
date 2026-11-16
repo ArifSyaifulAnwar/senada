@@ -48,6 +48,9 @@ function Build-Web {
         --dart-define=APP_VERSION=$buildName `
         --dart-define=APP_BUILD_NUMBER=$buildNumber
     if ($LASTEXITCODE -ne 0) { throw 'Build Web gagal.' }
+    $iisConfig = Join-Path $projectRoot 'web\web.config'
+    $builtIisConfig = Join-Path $projectRoot 'build\web\web.config'
+    Copy-Item -LiteralPath $iisConfig -Destination $builtIisConfig -Force
     Write-Host 'Web selesai: build/web'
 }
 

@@ -65,8 +65,10 @@ class _AbsensiScreenState extends State<AbsensiScreen>
   bool _isAttendanceSubmitted = false;
   bool _isCompanyUser = false;
 
-  // Auto-retry
-  static const int _maxAutoRetry = 3;
+  // Satu pengambilan foto per aksi pengguna. Jika server menolak foto karena
+  // kondisi nyata (wajah tidak utuh, liveness, atau pencahayaan), pengguna
+  // dapat memperbaiki posisi lalu menekan Ambil Foto lagi.
+  static const int _maxAutoRetry = 0;
   int _autoRetryCount = 0;
   bool _isAutoRetrying = false;
   Timer? _autoRetryTimer;
@@ -237,10 +239,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
 
       _cameraController = CameraController(
         camera,
-        // Medium tetap cukup untuk verifikasi wajah, tetapi ukuran unggahan
-        // jauh lebih kecil. Waktu absensi dicatat saat request tiba di API,
-        // jadi unggahan foto besar dapat membuat jam terlihat terlambat.
-        ResolutionPreset.medium,
+        // Detail wajah diprioritaskan agar pengambilan pertama lebih andal.
+        // API sudah menyimpan waktu saat request diterima server.
+        ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -333,8 +334,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
             : "📸 Mengambil foto...";
       });
 
-      // Beri waktu singkat agar preview stabil tanpa sengaja menunda absensi.
-      await Future.delayed(Duration(milliseconds: isAutoRetry ? 300 : 150));
+      // Beri autofocus dan auto-exposure waktu untuk stabil sebelum foto.
+      await Future.delayed(const Duration(milliseconds: 650));
 
       final XFile imageFile = await _cameraController!.takePicture();
       if (!mounted) return;
@@ -477,7 +478,7 @@ class _AbsensiScreenState extends State<AbsensiScreen>
           : FaceRecognitionService.fileToBase64(_capturedImage!);
 
       if (!FaceRecognitionService.isImageQualityGood(imageBase64)) {
-        _scheduleAutoRetry("Foto kurang jelas, mengambil ulang...");
+        _scheduleAutoRetry("Foto kurang jelas.");
         return;
       }
 

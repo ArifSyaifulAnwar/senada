@@ -9,6 +9,8 @@ import 'package:absensikaryawan/Screen%20admin/service/admin_attendance_service.
     hide ApiResponse;
 import 'package:absensikaryawan/Screen%20admin/service/overtimeadminservice.dart';
 import 'package:absensikaryawan/Services/excel_export_service.dart';
+import 'package:absensikaryawan/Services/time_off_model.dart' hide ApiResponse;
+import 'package:absensikaryawan/Services/time_off_service.dart';
 import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -102,10 +104,20 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
       await _loadPolicySettings();
 
       if (_currentUserId != null && _currentUserName != null) {
-        final currentPeriod = await AdminAttendanceService()
-            .getCurrentWorkPeriod();
-        if (currentPeriod.success && currentPeriod.data != null && mounted) {
-          setState(() => _activeWorkPeriodRange = currentPeriod.data);
+        // Gunakan sumber periode yang sama dengan Cuti dan Reimbursement.
+        // Endpoint ini memakai token akun login, sehingga periode yang dibaca
+        // adalah periode HRD dari perusahaan akun tersebut.
+        final companyPeriod = await _getCurrentCompanyWorkPeriod();
+        if (companyPeriod != null && mounted) {
+          setState(() => _activeWorkPeriodRange = companyPeriod);
+        } else {
+          // Fallback kompatibilitas bila endpoint periode belum tersedia pada
+          // server lama. Jalur ini tetap memakai kalender perusahaan login.
+          final currentPeriod = await AdminAttendanceService()
+              .getCurrentWorkPeriod();
+          if (currentPeriod.success && currentPeriod.data != null && mounted) {
+            setState(() => _activeWorkPeriodRange = currentPeriod.data);
+          }
         }
         await _loadAllData();
       } else {
@@ -118,6 +130,47 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
     }
   }
 
+  Future<DateTimeRange?> _getCurrentCompanyWorkPeriod() async {
+    try {
+      final res = await TimeOffService.getWorkPeriods();
+      if (!res.success || res.data == null || res.data!.isEmpty) return null;
+
+      final periods = List<WorkPeriodModel>.from(res.data!)
+        ..sort((a, b) => b.tanggalSelesai.compareTo(a.tanggalSelesai));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final active = periods.where((period) {
+        final start = DateTime(
+          period.tanggalMulai.year,
+          period.tanggalMulai.month,
+          period.tanggalMulai.day,
+        );
+        final end = DateTime(
+          period.tanggalSelesai.year,
+          period.tanggalSelesai.month,
+          period.tanggalSelesai.day,
+        );
+        return !today.isBefore(start) && !today.isAfter(end);
+      });
+      final selected = active.isNotEmpty ? active.first : periods.first;
+
+      return DateTimeRange(
+        start: DateTime(
+          selected.tanggalMulai.year,
+          selected.tanggalMulai.month,
+          selected.tanggalMulai.day,
+        ),
+        end: DateTime(
+          selected.tanggalSelesai.year,
+          selected.tanggalSelesai.month,
+          selected.tanggalSelesai.day,
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Periode Kerja custom yang di-setting HRD (misal "Juli" = 25 Jun-24 Jul)
   // tidak selalu sama dengan bulan kalender. Kalau ada periode custom untuk
   // bulan/tahun yang dipilih, pakai tanggal mulai/selesainya — bukan cuma
@@ -125,6 +178,32 @@ class _OvertimeHRDScreenState extends State<OvertimeHRDScreen>
   // dikembalikan dan fallback ke filter bulan kalender seperti biasa.
   Future<DateTimeRange?> _resolvePeriodRange(int year, int month) async {
     try {
+      // Sumber utama harus sama dengan Cuti/Reimbursement, termasuk saat
+      // pengguna memilih periode selain periode aktif.
+      final companyPeriods = await TimeOffService.getWorkPeriods();
+      if (companyPeriods.success && companyPeriods.data != null) {
+        final match = companyPeriods.data!
+            .where((period) => period.tahun == year && period.bulan == month)
+            .toList()
+          ..sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
+        if (match.isNotEmpty) {
+          final period = match.first;
+          return DateTimeRange(
+            start: DateTime(
+              period.tanggalMulai.year,
+              period.tanggalMulai.month,
+              period.tanggalMulai.day,
+            ),
+            end: DateTime(
+              period.tanggalSelesai.year,
+              period.tanggalSelesai.month,
+              period.tanggalSelesai.day,
+            ),
+          );
+        }
+      }
+
+      // Fallback untuk API kalender lama selama masa transisi server.
       final res = await AdminAttendanceService().getWorkPeriodsByYear(
         tahun: year,
       );
