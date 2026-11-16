@@ -194,7 +194,10 @@ class _HomePageState extends State<HomeScreen> {
         );
       } else if (nav.type == 'asset_submitted' ||
           nav.type == 'asset_approved' ||
-          nav.type == 'asset_rejected') {
+          nav.type == 'asset_rejected' ||
+          nav.type == 'inventory_submitted' ||
+          nav.type == 'inventory_approved' ||
+          nav.type == 'inventory_rejected') {
         if (userID == null || userID!.isEmpty) await loadUserId();
         if (!mounted) return;
         Navigator.push(

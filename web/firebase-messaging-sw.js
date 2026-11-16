@@ -13,11 +13,14 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
-  const notification = payload.notification || {};
-  self.registration.showNotification(notification.title || 'SENADA', {
-    body: notification.body || 'Anda memiliki notifikasi baru.',
+  // FCM menampilkan payload notification secara otomatis di background.
+  // Tampilkan manual hanya untuk pesan data-only agar tidak muncul dua kali.
+  if (payload.notification) return;
+  const data = payload.data || {};
+  self.registration.showNotification(data.title || 'SENADA', {
+    body: data.body || 'Anda memiliki notifikasi baru.',
     icon: '/icons/Icon-192.png',
-    data: payload.data || {}
+    data
   });
 });
 

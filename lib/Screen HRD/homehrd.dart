@@ -87,7 +87,9 @@ class _HomePageHRDState extends State<HomePageHRD> {
           nav.type == 'dl_pending_finance' ||
           nav.type == 'dl_pending_hrd' ||
           nav.type == 'dl_pending_hrd_verify' ||
-          nav.type == 'asset_new') {
+          nav.type == 'asset_new' ||
+          nav.type == 'inventory_new' ||
+          nav.type == 'attendance_outside_radius_pending') {
         setState(() => myCurrentIndex = 0); // pastikan di tab Home
         final prefs = await SharedPreferences.getInstance();
         final uid = prefs.getString('UserID') ?? '';

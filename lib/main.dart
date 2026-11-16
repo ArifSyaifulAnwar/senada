@@ -60,7 +60,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       // Berlaku untuk Android, iOS, dan web: ketika aplikasi/tab kembali
       // aktif, perbarui access token bila perlu. Kegagalan jaringan sengaja
       // diabaikan; tidak boleh berubah menjadi aksi logout lokal.
-      unawaited(TokenService.getToken());
+      unawaited(_refreshSessionAndNotifications());
     }
   }
 
@@ -72,6 +72,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const SplashScreen(),
     );
+  }
+}
+
+Future<void> _refreshSessionAndNotifications() async {
+  final token = await TokenService.getToken();
+  if (token != null && token.isNotEmpty) {
+    await FcmService.uploadToken();
   }
 }
 

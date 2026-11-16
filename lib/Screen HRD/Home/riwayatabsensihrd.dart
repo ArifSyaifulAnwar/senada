@@ -28,13 +28,18 @@ import 'dart:typed_data';
 bool _isWeb(BuildContext context) => MediaQuery.of(context).size.width >= 768;
 
 class HalamanHRDAbsensi extends StatefulWidget {
-  const HalamanHRDAbsensi({super.key});
+  final String presentationRole;
+
+  const HalamanHRDAbsensi({super.key, this.presentationRole = 'HRD'});
   @override
   _HalamanHRDAbsensiState createState() => _HalamanHRDAbsensiState();
 }
 
 class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     with SingleTickerProviderStateMixin {
+  bool get _isDirectorView =>
+      widget.presentationRole.trim().toLowerCase() == 'direktur';
+  String get _roleLabel => _isDirectorView ? 'Direktur' : 'HRD';
   final AdminAttendanceService _adminService = AdminAttendanceService();
   final TextEditingController _searchController = TextEditingController();
   late TabController _tabController;
@@ -80,7 +85,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(
+      length: _isDirectorView ? 3 : 4,
+      vsync: this,
+    );
     _tabController.addListener(() {
       if (mounted) setState(() => _webTabIndex = _tabController.index);
     });
@@ -845,9 +853,9 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       });
     } catch (e) {
       if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Gagal meload data HRD.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal memuat data $_roleLabel.')),
+        );
     }
   }
 
@@ -950,18 +958,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           : uniqueDates.length;
       final batch = uniqueDates.sublist(offset, end);
       final results = await Future.wait(
-        batch.map(
-          (tanggal) async {
-            try {
-              return await DoaService.getDoaByTanggal(
-                _currentUserId!,
-                tanggal,
-              );
-            } catch (_) {
-              return <DoaRecord>[];
-            }
-          },
-        ),
+        batch.map((tanggal) async {
+          try {
+            return await DoaService.getDoaByTanggal(_currentUserId!, tanggal);
+          } catch (_) {
+            return <DoaRecord>[];
+          }
+        }),
       );
 
       for (final records in results) {
@@ -1769,7 +1772,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
     if (!mounted) return;
 
     if (!result.success || result.data == null || result.data!.isEmpty) {
-      _showErrorSnackBar('Belum ada periode kerja yang disetting HRD.');
+      _showErrorSnackBar('Belum ada periode kerja yang diatur perusahaan.');
       return;
     }
 
@@ -1811,7 +1814,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20),
                 child: Text(
-                  'Periode diambil dari data yang sudah disetting HRD.',
+                  'Periode diambil dari pengaturan kalender perusahaan.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                 ),
@@ -1945,10 +1948,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             ),
           ),
           const SizedBox(width: 10),
-          const Flexible(
+          Flexible(
             child: Text(
-              'HRD - Data Absensi',
-              style: TextStyle(
+              '$_roleLabel - Data Absensi',
+              style: const TextStyle(
                 color: Color(0xFF1E293B),
                 fontWeight: FontWeight.w600,
                 fontSize: 18,
@@ -1962,31 +1965,32 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       elevation: 0,
       centerTitle: isWebLayout ? false : true,
       actions: [
-        Container(
-          margin: const EdgeInsets.only(right: 4),
-          child: IconButton(
-            tooltip: 'Halaman Edit Absensi',
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(12),
+        if (!_isDirectorView)
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            child: IconButton(
+              tooltip: 'Halaman Edit Absensi',
+              icon: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.edit_calendar,
+                  color: Color(0xFF6366F1),
+                  size: 20,
+                ),
               ),
-              child: const Icon(
-                Icons.edit_calendar,
-                color: Color(0xFF6366F1),
-                size: 20,
-              ),
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const HrdAbsensiEditPage()),
+                );
+                _refreshData();
+              },
             ),
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const HrdAbsensiEditPage()),
-              );
-              _refreshData();
-            },
           ),
-        ),
         Container(
           margin: const EdgeInsets.only(right: 16),
           child: IconButton(
@@ -2014,14 +2018,24 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
               unselectedLabelColor: Colors.grey,
               indicatorColor: const Color(0xFF6366F1),
               isScrollable: MediaQuery.of(context).size.width < 400,
-              tabs: const [
-                Tab(icon: Icon(Icons.dashboard, size: 18), text: 'Dashboard'),
-                Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Absensi'),
-                Tab(icon: Icon(Icons.analytics, size: 18), text: 'Analitik'),
-                Tab(
-                  icon: Icon(Icons.volunteer_activism, size: 18),
-                  text: 'Input Doa',
+              tabs: [
+                const Tab(
+                  icon: Icon(Icons.dashboard, size: 18),
+                  text: 'Dashboard',
                 ),
+                const Tab(
+                  icon: Icon(Icons.list_alt, size: 18),
+                  text: 'Absensi',
+                ),
+                const Tab(
+                  icon: Icon(Icons.analytics, size: 18),
+                  text: 'Analitik',
+                ),
+                if (!_isDirectorView)
+                  const Tab(
+                    icon: Icon(Icons.volunteer_activism, size: 18),
+                    text: 'Input Doa',
+                  ),
               ],
             ),
     );
@@ -2033,7 +2047,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _buildDashboardTab(),
       _buildAttendanceTab(),
       _buildAnalyticsTab(),
-      _buildKaryawanDoa(),
+      if (!_isDirectorView) _buildKaryawanDoa(),
     ],
   );
 
@@ -2048,7 +2062,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             _buildDashboardTab(),
             _buildAttendanceTab(),
             _buildAnalyticsTab(),
-            _buildKaryawanDoa(),
+            if (!_isDirectorView) _buildKaryawanDoa(),
           ],
         ),
       ),
@@ -2060,7 +2074,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _WebNavItem(Icons.dashboard, 'Dashboard', 0),
       _WebNavItem(Icons.list_alt, 'Absensi', 1),
       _WebNavItem(Icons.analytics, 'Analitik', 2),
-      _WebNavItem(Icons.volunteer_activism, 'Input Doa', 3),
+      if (!_isDirectorView)
+        _WebNavItem(Icons.volunteer_activism, 'Input Doa', 3),
     ];
     return Container(
       width: 180,
@@ -2137,10 +2152,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             // ── Header: judul + filter tanggal ──────────────────────
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Dashboard HRD - Absensi',
-                    style: TextStyle(
+                    'Dashboard $_roleLabel - Absensi',
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF1E293B),
@@ -3086,7 +3101,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Analitik HRD',
+                    'Analitik $_roleLabel',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
@@ -3095,7 +3110,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Rekap absensi berdasarkan periode kerja HRD',
+                    'Rekap absensi berdasarkan periode kerja perusahaan',
                     style: TextStyle(fontSize: 14, color: Colors.white70),
                   ),
                   const SizedBox(height: 12),
@@ -3324,8 +3339,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       // lalu naik hingga 100 bila datang 60 menit atau lebih awal; terlambat
       // menurunkan skor. Jadi hadir lebih awal benar-benar bernilai lebih tinggi.
       if (isHadir && d.checkInTime != null) {
-        final checkInMinutes =
-            d.checkInTime!.hour * 60 + d.checkInTime!.minute;
+        final checkInMinutes = d.checkInTime!.hour * 60 + d.checkInTime!.minute;
         final difference = (_companyStartMinutes - checkInMinutes)
             .clamp(-120, 120)
             .toInt();
@@ -3714,21 +3728,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           final width = constraints.maxWidth;
 
           int crossAxisCount;
-          double ratio;
-
           if (width >= 1200) {
             crossAxisCount = 4;
-            ratio = 4.2;
           } else if (width >= 900) {
             crossAxisCount = 3;
-            ratio = 3.8;
           } else if (width >= 650) {
             crossAxisCount = 2;
-            ratio = 3.5;
           } else {
             crossAxisCount = 1;
-            ratio = 4.6;
           }
+
+          final scaledTextHeight = MediaQuery.textScalerOf(context).scale(18);
+          final textScale = scaledTextHeight / 18;
+          final cardHeight = 80.0 * (textScale > 1 ? textScale : 1);
+          final cardWidth = (width - 12 * (crossAxisCount - 1)) / crossAxisCount;
 
           return GridView.count(
             crossAxisCount: crossAxisCount,
@@ -3736,7 +3749,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             mainAxisSpacing: 10,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: ratio,
+            childAspectRatio: cardWidth / cardHeight,
             children: items,
           );
         },
@@ -3946,7 +3959,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 5),
-        Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+        ),
       ],
     );
 
@@ -3990,11 +4006,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                       ? 0.0
                       : totalHeight * item.izinCuti / item.total;
 
-                  Widget bar(double height, Color color) => Container(
-                    width: 26,
-                    height: height,
-                    color: color,
-                  );
+                  Widget bar(double height, Color color) =>
+                      Container(width: 26, height: height, color: color);
 
                   return Container(
                     width: 44,
@@ -4249,7 +4262,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       final sb = StringBuffer();
 
-      sb.writeln('\uFEFFLAPORAN ANALITIK ABSENSI HRD');
+      sb.writeln('\uFEFFLAPORAN ANALITIK ABSENSI $_roleLabel');
       sb.writeln(
         'Tanggal Export,${DateFormat('dd MMM yyyy HH:mm', 'id_ID').format(DateTime.now())}',
       );
@@ -4316,7 +4329,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
 
       final bytes = Uint8List.fromList(utf8.encode(sb.toString()));
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final fileName = 'Analitik_HRD_${year}_$timestamp.csv';
+      final fileName = 'Analitik_${_roleLabel}_${year}_$timestamp.csv';
 
       if (kIsWeb) {
         downloadFileWeb(bytes, fileName);
@@ -4710,10 +4723,10 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Filter Data HRD',
-                  style: TextStyle(
+                  'Filter Data $_roleLabel',
+                  style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF1E293B),
@@ -5128,22 +5141,23 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                   ],
                 ),
               ),
-              GestureDetector(
-                onTap: () => _openEditSheet(data),
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  margin: const EdgeInsets.only(left: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF6366F1).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.edit_calendar,
-                    size: 16,
-                    color: Color(0xFF6366F1),
+              if (!_isDirectorView)
+                GestureDetector(
+                  onTap: () => _openEditSheet(data),
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.edit_calendar,
+                      size: 16,
+                      color: Color(0xFF6366F1),
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -5444,9 +5458,9 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Detail Absensi HRD',
-                                  style: TextStyle(
+                                Text(
+                                  'Detail Absensi $_roleLabel',
+                                  style: const TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
                                     color: Color(0xFF1E293B),
@@ -5489,18 +5503,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                       const SizedBox(height: 20),
                       Row(
                         children: [
-                          Expanded(
-                            child: _actionBtn(
-                              'Edit Absensi',
-                              Icons.edit_calendar,
-                              const Color(0xFF6366F1),
-                              () {
-                                Navigator.pop(ctx);
-                                _openEditSheet(data);
-                              },
+                          if (!_isDirectorView)
+                            Expanded(
+                              child: _actionBtn(
+                                'Edit Absensi',
+                                Icons.edit_calendar,
+                                const Color(0xFF6366F1),
+                                () {
+                                  Navigator.pop(ctx);
+                                  _openEditSheet(data);
+                                },
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
+                          if (!_isDirectorView) const SizedBox(width: 8),
                           Expanded(
                             child: _actionBtn(
                               'Report',
@@ -5509,15 +5524,16 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                               () => _generateReport(data),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _actionBtn(
-                              'Warning',
-                              Icons.warning,
-                              const Color(0xFFEF4444),
-                              () => _sendWarning(data),
+                          if (!_isDirectorView) const SizedBox(width: 8),
+                          if (!_isDirectorView)
+                            Expanded(
+                              child: _actionBtn(
+                                'Warning',
+                                Icons.warning,
+                                const Color(0xFFEF4444),
+                                () => _sendWarning(data),
+                              ),
                             ),
-                          ),
                         ],
                       ),
                       const SizedBox(height: 20),
@@ -5687,19 +5703,19 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
         ),
       );
 
-  Widget _buildLoadingWidget() => const Center(
+  Widget _buildLoadingWidget() => Center(
     child: Padding(
-      padding: EdgeInsets.all(32),
+      padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(
+          const CircularProgressIndicator(
             valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6366F1)),
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           Text(
-            'Memuat data absensi HRD...',
-            style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
+            'Memuat data absensi $_roleLabel...',
+            style: const TextStyle(fontSize: 14, color: Color(0xFF64748B)),
           ),
         ],
       ),
@@ -5892,7 +5908,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 20),
                   child: Text(
-                    'Default mengikuti periode kerja bulan berjalan yang disetting HRD.',
+                    'Default mengikuti periode kerja berjalan yang diatur perusahaan.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                   ),
@@ -5964,7 +5980,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                   subtitle: const Text(
-                    'Pilih dari periode yang sudah disetting HRD',
+                    'Pilih periode kerja dari kalender perusahaan',
                     style: TextStyle(fontSize: 12),
                   ),
                   onTap: () async {

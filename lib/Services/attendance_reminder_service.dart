@@ -1,29 +1,18 @@
-// Pengingat Absen — notifikasi lokal (bukan push server) yang mengingatkan
-// karyawan jika belum check-in di atas jam 10:00 pada hari kerjanya sendiri.
-//
-// Backend tidak punya scheduler/cron sama sekali (murni reaktif terhadap
-// request), jadi ini murni client-side: dijadwalkan ulang setiap home screen
-// dibuka (schedule-on-open) dan dibatalkan begitu karyawan berhasil check-in
-// (cancel-on-checkin). ID notifikasi tetap/fixed supaya selalu bisa dicancel.
+// Pengingat otomatis dikirim Cloud Scheduler + API saat jam masuk + masa
+// tenggang. Klien hanya menyimpan preferensi dan membatalkan jadwal lokal lama.
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/data/latest.dart' as tzdata;
-import 'package:timezone/timezone.dart' as tz;
 
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/config.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
-import 'package:absensikaryawan/Screen%20User/Screen%20HRD/hrd_employee_service.dart';
 import 'attendance_reminder_web_stub.dart'
     if (dart.library.html) 'attendance_reminder_web.dart' as web_reminder;
 
 class AttendanceReminderService {
   static const int _notificationId = 900001;
   static const String _prefsKeyPrefix = 'attendance_reminder_enabled_';
-  static bool _tzReady = false;
 
   static String _prefsKey(String userId) => '$_prefsKeyPrefix$userId';
 
@@ -46,13 +35,6 @@ class AttendanceReminderService {
       );
     } catch (_) {}
     if (!enabled) await cancel();
-  }
-
-  static void _ensureTz() {
-    if (_tzReady) return;
-    tzdata.initializeTimeZones();
-    tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
-    _tzReady = true;
   }
 
   static Future<({int hour, int minute, int graceMinutes, bool enabled})>
@@ -86,94 +68,17 @@ class AttendanceReminderService {
     }
   }
 
-  /// Dipanggil tiap kali home screen karyawan dibuka. [isHariLibur] harus
-  /// sudah menggabungkan weekend + libur kalender perusahaan (lihat
-  /// `_checkHariIni`/`_checkHariIniHome` yang sudah ada). Cek jadwal kerja
-  /// kustom per-karyawan dilakukan di dalam sini sendiri.
+  /// Dipanggil saat home dibuka untuk membersihkan jadwal lokal versi lama.
   static Future<void> scheduleIfNeeded({
     required String userId,
     required bool isHariLibur,
     required bool hasCheckedIn,
   }) async {
-    if (userId.isEmpty || hasCheckedIn || isHariLibur) {
-      await cancel();
-      return;
-    }
-
-    if (!await isEnabled(userId)) {
-      await cancel();
-      return;
-    }
-
-    final now = DateTime.now();
-    final schedule = await getCompanySchedule(userId);
-    if (!schedule.enabled) {
-      await cancel();
-      return;
-    }
-
-    final customDays = await HrdEmployeeService.getWorkDays(userId);
-    if (customDays != null &&
-        customDays.isNotEmpty &&
-        !customDays.contains(now.weekday)) {
-      // Karyawan dengan jadwal kustom dan hari ini bukan jadwalnya.
-      await cancel();
-      return;
-    }
-
-    try {
-      _ensureTz();
-      final companyStart = tz.TZDateTime(
-        tz.local,
-        now.year,
-        now.month,
-        now.day,
-        schedule.hour,
-        schedule.minute,
-      );
-      final scheduledDate = companyStart.add(Duration(minutes: schedule.graceMinutes));
-      if (!scheduledDate.isAfter(tz.TZDateTime.now(tz.local))) return;
-      final body =
-          'Jam masuk Anda sudah lewat ${schedule.graceMinutes} menit. Jangan lupa check-in ya!';
-
-      if (kIsWeb) {
-        await web_reminder.scheduleBrowserAttendanceReminder(
-          scheduledAt: scheduledDate,
-          title: 'Pengingat Absen',
-          body: body,
-        );
-        return;
-      }
-
-      await localNotificationsPlugin.zonedSchedule(
-        _notificationId,
-        'Pengingat Absen',
-        body,
-        scheduledDate,
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            highImportanceChannel.id,
-            highImportanceChannel.name,
-            channelDescription: highImportanceChannel.description,
-            importance: Importance.high,
-            priority: Priority.high,
-            icon: 'ic_stat_senada',
-          ),
-          iOS: const DarwinNotificationDetails(),
-        ),
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        payload: jsonEncode({'type': 'attendance_reminder'}),
-      );
-    } catch (_) {
-      // Gagal menjadwalkan (mis. izin notifikasi ditolak) — diamkan saja,
-      // ini fitur pengingat tambahan, bukan alur kritis absensi.
-    }
+    // Cloud Scheduler + API adalah satu-satunya pengirim pengingat otomatis.
+    // Bersihkan jadwal lokal dari versi lama agar tidak muncul dua kali.
+    await cancel();
   }
-
-  /// Dipanggil begitu karyawan berhasil check-in, supaya pengingat jam 10
-  /// tidak muncul lagi hari itu.
+  /// Dipanggil saat check-in dan saat home dibuka.
   static Future<void> cancel() async {
     await web_reminder.cancelBrowserAttendanceReminder();
     try {

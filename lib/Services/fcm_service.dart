@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,6 +41,7 @@ class PendingNav {
 
 class FcmService {
   static PendingNav? _pendingNavigation;
+  static bool _tokenRefreshListenerRegistered = false;
   static const String _webVapidKey =
       'BL0-KX4oCGB9_ejxzVoU-IoHhBOtbgwF3cXu4rJJjklhMpyphO4UWjXeUGr3aTRj86OLo1hloJTQrHGviK4Ctx8';
 
@@ -95,25 +96,20 @@ class FcmService {
       final userId = prefs.getString('UserID');
       if (userId == null || userId.isEmpty) return;
 
-      // Hapus subscription topic global versi lama. Notifikasi HRD/Admin
-      // sekarang dikirim ke topic personal user agar tidak bocor antar PT.
-      if (!kIsWeb) {
-        await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
-        await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
-
-      // Notifikasi personal (mis. Finance yang di-assign ke reimbursement
-      // tertentu) lewat topic per-user ini — tidak perlu lagi cek role
-      // Head Finance secara terpisah.
-        await FirebaseMessaging.instance.subscribeToTopic('user_$userId');
-      }
+      // API mendaftarkan token ke topic personal setelah token diunggah.
       await _postToken(userId, token);
 
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-        final p = await SharedPreferences.getInstance();
-        final uid = p.getString('UserID');
-        if (uid != null && uid.isNotEmpty) await _postToken(uid, newToken);
-      });
-    } catch (_) {}
+      if (!_tokenRefreshListenerRegistered) {
+        _tokenRefreshListenerRegistered = true;
+        FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+          final p = await SharedPreferences.getInstance();
+          final uid = p.getString('UserID');
+          if (uid != null && uid.isNotEmpty) await _postToken(uid, newToken);
+        });
+      }
+    } catch (error) {
+      debugPrint('[FCM] Gagal menyiapkan token: $error');
+    }
   }
 
   static Future<void> _postToken(String userId, String token) async {
@@ -121,7 +117,7 @@ class FcmService {
       final accessToken = await TokenService.getToken();
       if (accessToken == null) return;
 
-      await http.post(
+      final response = await http.post(
         Uri.parse('$baseURL/api/fcm/token'),
         headers: {
           'Content-Type': 'application/json',
@@ -133,21 +129,18 @@ class FcmService {
           'platform': kIsWeb ? 'web' : (Platform.isIOS ? 'ios' : 'android'),
         }),
       );
-    } catch (_) {}
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint('[FCM] Pendaftaran token gagal: HTTP ${response.statusCode}');
+      }
+    } catch (error) {
+      debugPrint('[FCM] Pendaftaran token gagal: $error');
+    }
   }
 
   static Future<void> deleteToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('UserID');
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('UserID');
-      if (!kIsWeb) {
-        await FirebaseMessaging.instance.unsubscribeFromTopic('hrd_notifications');
-        await FirebaseMessaging.instance.unsubscribeFromTopic('admin_notifications');
-        if (userId != null && userId.isNotEmpty) {
-          await FirebaseMessaging.instance.unsubscribeFromTopic('user_$userId');
-        }
-      }
-
       if (userId != null && userId.isNotEmpty) {
         final accessToken = await TokenService.getToken();
         if (accessToken != null) {
@@ -157,8 +150,27 @@ class FcmService {
           );
         }
       }
+    } catch (error) {
+      debugPrint('[FCM] Gagal mencabut token dari API: $error');
+    }
+    if (!kIsWeb) {
+      for (final topic in [
+        'hrd_notifications',
+        'admin_notifications',
+        if (userId != null && userId.isNotEmpty) 'user_$userId',
+      ]) {
+        try {
+          await FirebaseMessaging.instance.unsubscribeFromTopic(topic);
+        } catch (error) {
+          debugPrint('[FCM] Gagal keluar dari topic: $error');
+        }
+      }
+    }
+    try {
       await FirebaseMessaging.instance.deleteToken();
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('[FCM] Gagal menghapus token perangkat: $error');
+    }
   }
 
   static PendingNav? consumePendingNavigation() {

@@ -1161,7 +1161,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
     ),
     ServiceIconData(
       icon: Icons.location_on,
-      label: 'Live Absensi',
+      label: 'Absensi',
       color: const Color(0xFFFF9500),
       onTap: () async {
         await Navigator.push(
@@ -1268,7 +1268,7 @@ class _HomeScreenAdminState extends State<HomeScreenAdmin> {
                         : w >= 900
                         ? 5
                         : 4)
-                  : 4; // admin: 4 kolom mobile (8 item pas 2 baris)
+                  : 3; // Sama dengan grid layanan HRD di mobile.
               const double ratio = 1.15;
 
               return GridView.builder(

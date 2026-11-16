@@ -4552,9 +4552,8 @@ class _FinanceReimbursementReportModalState
           xl.CellIndex.indexByString('A${row + 1}'),
           xl.CellIndex.indexByString('$endSub${row + 1}'),
         );
-        s.cell(
-            xl.CellIndex.indexByString('${endDate.substring(0, 1)}${row + 1}'),
-          )
+        final dateStart = String.fromCharCode(endSub.codeUnitAt(0) + 1);
+        s.cell(xl.CellIndex.indexByString('$dateStart${row + 1}'))
           ..value = xl.TextCellValue(date)
           ..cellStyle = style(
             bg: cColHdr,
@@ -4564,7 +4563,7 @@ class _FinanceReimbursementReportModalState
             border: false,
           );
         s.merge(
-          xl.CellIndex.indexByString('${endDate.substring(0, 1)}${row + 1}'),
+          xl.CellIndex.indexByString('$dateStart${row + 1}'),
           xl.CellIndex.indexByString('$endDate${row + 1}'),
         );
       }
@@ -4575,6 +4574,9 @@ class _FinanceReimbursementReportModalState
       final s1 = excel['Ringkasan'];
       titleRow(s1, 'LAPORAN FINANCE REIMBURSEMENT', 'E', 0);
       subRow(s1, _periodLabel, printDate, 'C', 'E', 1);
+      s1.setRowHeight(0, 28);
+      s1.setRowHeight(1, 22);
+      s1.setRowHeight(3, 26);
 
       final totalAmt = data.fold(0.0, (s, r) => s + r.amount);
       final paidItems = data.where((r) => r.isPaid).toList();
@@ -4637,16 +4639,22 @@ class _FinanceReimbursementReportModalState
           _fmtCurr(summaryData[i][2] as double),
           style(bg: bg, bold: bold, hAlign: xl.HorizontalAlign.Right),
         );
+        s1.setRowHeight(row, 26);
       }
 
       s1.setColumnWidth(0, 30);
       s1.setColumnWidth(1, 20);
       s1.setColumnWidth(2, 25);
+      s1.setColumnWidth(3, 18);
+      s1.setColumnWidth(4, 18);
 
       // ── SHEET 2 — DATA DETAIL ────────────────────────────────────────────
       final s2 = excel['Data Detail'];
       titleRow(s2, 'DETAIL REIMBURSEMENT FINANCE', 'J', 0);
       subRow(s2, _periodLabel, printDate, 'E', 'J', 1);
+      s2.setRowHeight(0, 28);
+      s2.setRowHeight(1, 22);
+      s2.setRowHeight(3, 26);
 
       const s2Hdrs = [
         'No',
@@ -4735,6 +4743,7 @@ class _FinanceReimbursementReportModalState
           r.paidAt != null ? _fmtDate(r.paidAt!) : '-',
           style(bg: bg, hAlign: xl.HorizontalAlign.Center),
         );
+        s2.setRowHeight(row, 34);
       }
 
       if (data.isNotEmpty) {
@@ -4767,10 +4776,10 @@ class _FinanceReimbursementReportModalState
             hAlign: xl.HorizontalAlign.Right,
           ),
         );
-        s2.merge(
-          xl.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: tRow),
-          xl.CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: tRow),
-        );
+        for (int col = 6; col <= 9; col++) {
+          setC(s2, col, tRow, '', style(bg: cTotalRow, border: false));
+        }
+        s2.setRowHeight(tRow, 26);
       }
 
       s2.setColumnWidth(0, 5);
@@ -4786,8 +4795,11 @@ class _FinanceReimbursementReportModalState
 
       // ── SHEET 3 — PER KATEGORI ───────────────────────────────────────────
       final s3 = excel['Per Kategori'];
-      titleRow(s3, 'RINGKASAN PER KATEGORI', 'E', 0);
-      subRow(s3, _periodLabel, printDate, 'C', 'E', 1);
+      titleRow(s3, 'RINGKASAN PER KATEGORI', 'F', 0);
+      subRow(s3, _periodLabel, printDate, 'C', 'F', 1);
+      s3.setRowHeight(0, 28);
+      s3.setRowHeight(1, 22);
+      s3.setRowHeight(3, 26);
 
       final Map<String, ({int count, double total})> catMap = {};
       for (final r in data) {
@@ -4862,6 +4874,7 @@ class _FinanceReimbursementReportModalState
           '$pct%',
           style(bg: bg, hAlign: xl.HorizontalAlign.Center),
         );
+        s3.setRowHeight(row, 26);
       }
 
       if (catList.isNotEmpty) {
@@ -4894,10 +4907,10 @@ class _FinanceReimbursementReportModalState
             hAlign: xl.HorizontalAlign.Right,
           ),
         );
-        s3.merge(
-          xl.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: tRow),
-          xl.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: tRow),
-        );
+        for (int col = 4; col <= 5; col++) {
+          setC(s3, col, tRow, '', style(bg: cTotalRow, border: false));
+        }
+        s3.setRowHeight(tRow, 26);
       }
 
       s3.setColumnWidth(0, 5);

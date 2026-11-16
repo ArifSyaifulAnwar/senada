@@ -1298,11 +1298,13 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
             LayoutBuilder(
               builder: (context, constraints) {
                 final columns = constraints.maxWidth >= 850 ? 3 : 1;
+                final textScale =
+                    MediaQuery.textScalerOf(context).scale(18) / 18;
                 return GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   crossAxisCount: columns,
-                  childAspectRatio: columns == 1 ? 3.7 : 1.7,
+                  mainAxisExtent: 96 * (textScale > 1 ? textScale : 1),
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
                   children: [
@@ -2083,13 +2085,15 @@ class _HalamanHRDReimbursementState extends State<HalamanHRDReimbursement>
         LayoutBuilder(
           builder: (context, constraints) {
             final crossAxisCount = constraints.maxWidth > 600 ? 4 : 2;
+            final textScale =
+                MediaQuery.textScalerOf(context).scale(18) / 18;
             return GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               crossAxisCount: crossAxisCount,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 2.5,
+              mainAxisExtent: 80 * (textScale > 1 ? textScale : 1),
               children: [
                 _buildQuickActionCard(
                   title: 'Review Pending',
@@ -4965,6 +4969,9 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
       final s1 = excel['Ringkasan'];
       titleRow(s1, 'LAPORAN REIMBURSEMENT HRD', 'H', 0);
       subtitleRow(s1, 'Periode: $periodLabel', printDate, 'D', 'H', 1);
+      s1.setRowHeight(0, 28);
+      s1.setRowHeight(1, 22);
+      s1.setRowHeight(3, 24);
       // blank row 2
 
       // Statistik utama header
@@ -5021,6 +5028,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           xl.CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row),
           xl.CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: row),
         );
+        s1.setRowHeight(row, 22);
       }
 
       // blank
@@ -5057,6 +5065,8 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
       for (int c = 0; c < catHdrs.length; c++) {
         setC(s1, c, catStartRow + 1, catHdrs[c], catHStyle);
       }
+      s1.setRowHeight(catStartRow, 24);
+      s1.setRowHeight(catStartRow + 1, 24);
       final catList = catMap.entries.toList()
         ..sort((a, b) => b.value.total.compareTo(a.value.total));
       for (int i = 0; i < catList.length; i++) {
@@ -5095,6 +5105,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           pct,
           makeStyle(bg: bg, hAlign: xl.HorizontalAlign.Center),
         );
+        s1.setRowHeight(row, 24);
       }
 
       s1.setColumnWidth(0, 30);
@@ -5112,6 +5123,9 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
       final s2 = excel['Detail Pengajuan'];
       titleRow(s2, 'DETAIL PENGAJUAN REIMBURSEMENT', 'K', 0);
       subtitleRow(s2, 'Periode: $periodLabel', printDate, 'F', 'K', 1);
+      s2.setRowHeight(0, 28);
+      s2.setRowHeight(1, 22);
+      s2.setRowHeight(3, 26);
 
       const d2Hdrs = [
         'No',
@@ -5189,6 +5203,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           makeStyle(bg: bg, hAlign: xl.HorizontalAlign.Center),
         );
         setC(s2, 10, row, r.reviewNotes ?? '-', makeStyle(bg: bg, wrap: true));
+        s2.setRowHeight(row, 34);
       }
 
       // Total row
@@ -5216,10 +5231,10 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
         xl.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: totalRow2),
       );
       setC(s2, 6, totalRow2, fmtCurr(totalAmount), tStyle);
-      s2.merge(
-        xl.CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: totalRow2),
-        xl.CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: totalRow2),
-      );
+      for (int col = 7; col <= 10; col++) {
+        setC(s2, col, totalRow2, '', tStyle);
+      }
+      s2.setRowHeight(totalRow2, 26);
 
       s2.setColumnWidth(0, 5);
       s2.setColumnWidth(1, 15);
@@ -5237,8 +5252,11 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
       // SHEET 3 — PER KARYAWAN
       // ══════════════════════════════════════════════════════════════════════
       final s3 = excel['Per Karyawan'];
-      titleRow(s3, 'RINGKASAN REIMBURSEMENT PER KARYAWAN', 'I', 0);
-      subtitleRow(s3, 'Periode: $periodLabel', printDate, 'E', 'I', 1);
+      titleRow(s3, 'RINGKASAN REIMBURSEMENT PER KARYAWAN', 'J', 0);
+      subtitleRow(s3, 'Periode: $periodLabel', printDate, 'E', 'J', 1);
+      s3.setRowHeight(0, 28);
+      s3.setRowHeight(1, 22);
+      s3.setRowHeight(3, 26);
 
       const e3Hdrs = [
         'No',
@@ -5344,6 +5362,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           fmtCurr(e.amount),
           makeStyle(bg: bg, bold: true, hAlign: xl.HorizontalAlign.Right),
         );
+        s3.setRowHeight(row, 26);
       }
       // Total row
       final totalRow3 = 4 + empList.length;
@@ -5370,6 +5389,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           hAlign: xl.HorizontalAlign.Right,
         ),
       );
+      s3.setRowHeight(totalRow3, 26);
 
       s3.setColumnWidth(0, 5);
       s3.setColumnWidth(1, 26);
@@ -5388,6 +5408,9 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
       final s4 = excel['Per Kategori'];
       titleRow(s4, 'RINGKASAN REIMBURSEMENT PER KATEGORI', 'F', 0);
       subtitleRow(s4, 'Periode: $periodLabel', printDate, 'C', 'F', 1);
+      s4.setRowHeight(0, 28);
+      s4.setRowHeight(1, 22);
+      s4.setRowHeight(3, 26);
 
       const c4Hdrs = [
         'No',
@@ -5451,6 +5474,7 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           '$pct%',
           makeStyle(bg: bg, hAlign: xl.HorizontalAlign.Center),
         );
+        s4.setRowHeight(row, 26);
       }
       // Total row
       final totalRow4 = 4 + catList.length;
@@ -5482,10 +5506,10 @@ class _ReimbursementReportModalState extends State<ReimbursementReportModal> {
           hAlign: xl.HorizontalAlign.Right,
         ),
       );
-      s4.merge(
-        xl.CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: totalRow4),
-        xl.CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: totalRow4),
-      );
+      for (int col = 4; col <= 5; col++) {
+        setC(s4, col, totalRow4, '', makeStyle(bg: cTotalRow, border: false));
+      }
+      s4.setRowHeight(totalRow4, 26);
 
       s4.setColumnWidth(0, 5);
       s4.setColumnWidth(1, 28);

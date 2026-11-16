@@ -623,7 +623,21 @@ class _HalamanNotifikasiState extends State<HalamanNotifikasi>
         context,
         MaterialPageRoute(builder: (_) => OrgApprovalScreen(userId: userId)),
       );
-    } else if (notification.referenceType == 'asset') {
+    } else if (notification.referenceType == 'attendance_outside_radius') {
+      final prefs = await SharedPreferences.getInstance();
+      final role = (prefs.getString('Role') ?? '').toLowerCase();
+      final userId = prefs.getString('UserID') ?? '';
+      if (!mounted) return;
+      if (role == 'hrd') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => OrgApprovalScreen(userId: userId)),
+        );
+      } else {
+        _showInfoSnackBar(notification.message);
+      }
+    } else if (notification.referenceType == 'asset' ||
+        notification.referenceType == 'inventory') {
       // HRD dapat notif "pengajuan baru" → review lewat layar Persetujuan;
       // pengaju dapat notif status pengajuannya sendiri → layar Asset miliknya.
       final prefs = await SharedPreferences.getInstance();

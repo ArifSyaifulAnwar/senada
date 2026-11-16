@@ -4,7 +4,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/attendance.dart';
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/listkaryawan.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/homenyaadmin.dart';
 import 'package:absensikaryawan/Screen%20admin/Home/profileadmin.dart';
-import 'package:absensikaryawan/Screen%20admin/navbar/admin_attendance_page.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/riwayatabsensihrd.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -45,7 +45,7 @@ class _HomePageAdminState extends State<HomePageAdmin> {
 
     List<Widget> pages = [
       const HomeScreenAdmin(), // 0 - Home
-      const HalamanAdminAbsensi(), // 1 - Riwayat Absensi
+      const HalamanHRDAbsensi(presentationRole: 'Direktur'), // 1 - Riwayat Absensi
       const AbsensiScreen(), // 2 - Kamera (FAB / mobile only)
       const HalamanListEmployee(), // 3 - List Karyawan
       const ProfileScreenAdmin(), // 4 - Profile

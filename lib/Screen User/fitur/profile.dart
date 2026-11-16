@@ -14,6 +14,7 @@ import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/educationscr
 import 'package:absensikaryawan/Screen%20User/fitur/profile%20fitur/warningletterscreen.dart';
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
 import 'package:absensikaryawan/Services/config.dart';
+import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/profile.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -670,6 +671,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _performLogout() async {
+    await FcmService.deleteToken();
     await TokenService.logout();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();

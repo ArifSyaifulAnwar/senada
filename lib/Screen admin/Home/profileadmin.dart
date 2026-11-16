@@ -22,6 +22,7 @@ import '../../Screen User/fitur/profile fitur/warningletterscreen.dart';
 import '../../Screen User/home.dart';
 import '../../Screen User/splash_screen.dart';
 import '../../Services/config.dart';
+import '../../Services/fcm_service.dart';
 import '../../Services/profile.dart';
 import '../../Services/token_service.dart';
 import '../../Screen HRD/Home/company_invite_screen.dart';
@@ -1642,6 +1643,7 @@ class _ProfileScreenAdminState extends State<ProfileScreenAdmin> {
   }
 
   void _performLogout() async {
+    await FcmService.deleteToken();
     await TokenService.logout();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
