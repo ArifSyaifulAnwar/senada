@@ -1,5 +1,3 @@
-
-
 class AdminAttendanceRequest {
   final String adminUserId;
   final String? filterUserId;
@@ -104,7 +102,6 @@ class AdminAttendanceData {
 
   factory AdminAttendanceData.fromJson(Map<String, dynamic> json) {
     try {
-
       final result = AdminAttendanceData(
         id: _parseInt(json['Id']) ?? 0,
         userId: _parseString(json['UserId']) ?? '',
@@ -139,7 +136,6 @@ class AdminAttendanceData {
 
       return result;
     } catch (e) {
-
       // Return null instead of default object to identify failed parsing
       throw Exception('Failed to parse AdminAttendanceData: $e');
     }
@@ -306,7 +302,6 @@ class AdminAttendanceResponse {
 
   factory AdminAttendanceResponse.fromJson(Map<String, dynamic> json) {
     try {
-
       final dataList = json['Data'] as List?;
 
       final statsJson = json['Stats'] as Map<String, dynamic>?;
@@ -324,7 +319,6 @@ class AdminAttendanceResponse {
           }
         }
       }
-
 
       return AdminAttendanceResponse(
         data: parsedData,
@@ -345,6 +339,7 @@ class AdminAttendanceResponse {
 class Employee {
   final String userId;
   final String name;
+  final String? role;
   final String? employeeId;
   final String? department;
   final String? position;
@@ -355,6 +350,7 @@ class Employee {
   Employee({
     required this.userId,
     required this.name,
+    this.role,
     this.employeeId,
     this.department,
     this.position,
@@ -368,6 +364,7 @@ class Employee {
       return Employee(
         userId: json['user_id'] ?? json['UserId'] ?? '',
         name: json['Name'] ?? '',
+        role: json['Role'] ?? json['role'],
         employeeId: json['employee_id'] ?? json['EmployeeId'],
         department: json['Department'],
         position: json['Position'],

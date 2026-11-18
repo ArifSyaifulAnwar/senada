@@ -20,6 +20,7 @@ import '../../Screen User/Screen HRD/hrd_employee_service.dart';
 import '../../Services/company_calendar_service.dart';
 import '../../Services/attendance_reminder_service.dart';
 import '../doa_karyawan_screen.dart';
+import '../prayer_schedule_screen.dart';
 import '../hrd_absensi_edit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -86,7 +87,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: _isDirectorView ? 3 : 4,
+      length: _isDirectorView ? 3 : 5,
       vsync: this,
     );
     _tabController.addListener(() {
@@ -2017,7 +2018,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
               labelColor: const Color(0xFF6366F1),
               unselectedLabelColor: Colors.grey,
               indicatorColor: const Color(0xFF6366F1),
-              isScrollable: MediaQuery.of(context).size.width < 400,
+              isScrollable:
+                  !_isDirectorView || MediaQuery.of(context).size.width < 400,
               tabs: [
                 const Tab(
                   icon: Icon(Icons.dashboard, size: 18),
@@ -2036,6 +2038,11 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                     icon: Icon(Icons.volunteer_activism, size: 18),
                     text: 'Input Doa',
                   ),
+                if (!_isDirectorView)
+                  const Tab(
+                    icon: Icon(Icons.mosque, size: 18),
+                    text: 'Jadwal Salat',
+                  ),
               ],
             ),
     );
@@ -2048,6 +2055,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _buildAttendanceTab(),
       _buildAnalyticsTab(),
       if (!_isDirectorView) _buildKaryawanDoa(),
+      if (!_isDirectorView) const PrayerScheduleScreen(),
     ],
   );
 
@@ -2063,6 +2071,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
             _buildAttendanceTab(),
             _buildAnalyticsTab(),
             if (!_isDirectorView) _buildKaryawanDoa(),
+            if (!_isDirectorView) const PrayerScheduleScreen(),
           ],
         ),
       ),
@@ -2076,6 +2085,7 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       _WebNavItem(Icons.analytics, 'Analitik', 2),
       if (!_isDirectorView)
         _WebNavItem(Icons.volunteer_activism, 'Input Doa', 3),
+      if (!_isDirectorView) _WebNavItem(Icons.mosque, 'Jadwal Salat', 4),
     ];
     return Container(
       width: 180,
@@ -3741,7 +3751,8 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
           final scaledTextHeight = MediaQuery.textScalerOf(context).scale(18);
           final textScale = scaledTextHeight / 18;
           final cardHeight = 80.0 * (textScale > 1 ? textScale : 1);
-          final cardWidth = (width - 12 * (crossAxisCount - 1)) / crossAxisCount;
+          final cardWidth =
+              (width - 12 * (crossAxisCount - 1)) / crossAxisCount;
 
           return GridView.count(
             crossAxisCount: crossAxisCount,

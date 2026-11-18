@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:absensikaryawan/Screen%20User/splash_screen.dart';
+import 'package:absensikaryawan/Screen%20HRD/Home/attendance_monitor_screen.dart';
 import 'package:absensikaryawan/Services/fcm_service.dart';
 import 'package:absensikaryawan/Services/token_service.dart';
 import 'package:absensikaryawan/firebase_web_options.dart';
@@ -66,11 +67,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // Kedua alamat Web (/#/monitor dan /monitor) membuka satu rute saja.
+    // Generator awal bawaan Flutter dapat membuat '/' di bawah '/monitor';
+    // SplashScreen di rute '/' lalu bernavigasi otomatis dan menimpa monitor.
+    final monitorRequested = kIsWeb &&
+        (Uri.base.fragment == '/monitor' ||
+            Uri.base.path.replaceFirst(RegExp(r'/+$'), '') == '/monitor');
     return MaterialApp(
       title: 'SENADA',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const SplashScreen(),
+      onGenerateInitialRoutes: (initialRouteName) => [
+        MaterialPageRoute<void>(
+          settings: RouteSettings(name: monitorRequested ? '/monitor' : '/'),
+          builder: (_) => monitorRequested
+              ? const AttendanceMonitorScreen()
+              : const SplashScreen(),
+        ),
+      ],
+      routes: {
+        '/': (_) => const SplashScreen(),
+        '/monitor': (_) => const AttendanceMonitorScreen(),
+      },
     );
   }
 }
@@ -81,4 +99,3 @@ Future<void> _refreshSessionAndNotifications() async {
     await FcmService.uploadToken();
   }
 }
-
