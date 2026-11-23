@@ -6,6 +6,7 @@ import 'package:absensikaryawan/Screen%20admin/service/reimburmentadminservice.d
 import 'package:absensikaryawan/Screen%20HRD/Home/reimbursementhrd.dart';
 import 'package:absensikaryawan/Services/reimbursementservice.dart'
     show ReimbursementAttachmentMeta;
+import 'package:absensikaryawan/Services/finance_reimbursement_service.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io' show File;
@@ -2060,6 +2061,30 @@ class _AdminReimbursementDetailModalState
     }
   }
 
+  Future<void> _downloadReimbursementLetter() async {
+    if (_isAttachmentProcessing) return;
+    setState(() => _isAttachmentProcessing = true);
+    try {
+      final letter = await FinanceReimbursementService.downloadLetter(
+        reimbursementId: widget.item.id,
+        viewerUserId: widget.currentAdminId,
+      );
+      if (kIsWeb) {
+        downloadFileWeb(letter.bytes, letter.fileName);
+      } else {
+        final dir = await getApplicationDocumentsDirectory();
+        final safeName = letter.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+        final file = File('${dir.path}/$safeName');
+        await file.writeAsBytes(letter.bytes, flush: true);
+      }
+      if (mounted) _showSuccessSnackBar('Surat reimbursement berhasil diunduh.');
+    } catch (error) {
+      if (mounted) _showErrorSnackBar('Surat belum dapat diunduh: $error');
+    } finally {
+      if (mounted) setState(() => _isAttachmentProcessing = false);
+    }
+  }
+
   Future<void> _showImagePreview(Uint8List bytes, String fileName) {
     return showDialog<void>(
       context: context,
@@ -2279,6 +2304,12 @@ class _AdminReimbursementDetailModalState
           const SizedBox(height: 20),
 
           // Content
+          OutlinedButton.icon(
+            onPressed: _isAttachmentProcessing ? null : _downloadReimbursementLetter,
+            icon: const Icon(Icons.description_outlined),
+            label: const Text('Download Surat Reimbursement'),
+          ),
+          const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
               child: Column(

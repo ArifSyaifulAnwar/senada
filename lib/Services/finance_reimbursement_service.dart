@@ -17,6 +17,19 @@ class FinanceReimbursementService {
 
   static const String _receiptDownloadEndpoint =
       '/api/asn/reimbursement/receipt/download';
+  static const String _letterDownloadEndpoint =
+      '/api/asn/reimbursement/letter/download';
+
+  static Future<FinanceReimbursementAttachment> downloadLetter({
+    required int reimbursementId,
+    required String viewerUserId,
+  }) => _downloadAttachment(
+    endpoint: _letterDownloadEndpoint,
+    reimbursementId: reimbursementId,
+    viewerUserId: viewerUserId,
+    fallbackFileName: 'Form_Reimbursement_$reimbursementId.docx',
+    defaultName: 'Form_Reimbursement_$reimbursementId.docx',
+  );
   static const String _paymentProofDownloadEndpoint =
       '/api/asn/reimbursement/payment-proof/download';
 

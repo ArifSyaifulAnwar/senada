@@ -2696,6 +2696,12 @@ class _HalamanFinanceReimbursementState
                         ],
                       ),
                       const SizedBox(height: 20),
+                      OutlinedButton.icon(
+                        onPressed: () => _downloadReimbursementLetter(item),
+                        icon: const Icon(Icons.description_outlined),
+                        label: const Text('Download Surat Reimbursement'),
+                      ),
+                      const SizedBox(height: 12),
                       _detailSection(
                         title: 'Informasi Pengaju',
                         icon: Icons.person_outline_rounded,
@@ -3244,6 +3250,22 @@ class _HalamanFinanceReimbursementState
 
     if (mounted) {
       _showSuccess('File tersimpan: ${localFile.path}');
+    }
+  }
+
+  Future<void> _downloadReimbursementLetter(
+    FinanceReimbursementItem item,
+  ) async {
+    final viewerId = _currentUserId;
+    if (viewerId == null || viewerId.isEmpty) return;
+    try {
+      final file = await FinanceReimbursementService.downloadLetter(
+        reimbursementId: item.id,
+        viewerUserId: viewerId,
+      );
+      await _downloadAttachment(file);
+    } catch (error) {
+      if (mounted) _showError('Surat belum dapat diunduh: $error');
     }
   }
 

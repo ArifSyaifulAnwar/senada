@@ -22,7 +22,13 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
     'MAGRIB': 'Magrib',
     'ISYA': 'Isya',
   };
+  static const _weekdays = {
+    1: 'Senin', 2: 'Selasa', 3: 'Rabu', 4: 'Kamis',
+    5: 'Jumat', 6: 'Sabtu', 7: 'Minggu',
+  };
   DateTime _date = DateUtils.dateOnly(DateTime.now());
+  int _weekday = DateTime.now().weekday;
+  bool _overrideMode = false;
   List<DoaKaryawanItem> _employees = [];
   final Map<String, PrayerScheduleEntry> _entries = {};
   final Map<String, String> _azan = {};
@@ -60,13 +66,20 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
 
   Future<void> _loadSchedule() async {
     final date = _date;
+    final overrideMode = _overrideMode;
+    final weekday = _weekday;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final entries = await PrayerScheduleService.list(date);
-      if (!mounted || date != _date) return;
+      final entries = overrideMode
+          ? await PrayerScheduleService.list(date)
+          : await _weeklyEntries(weekday);
+      if (!mounted || date != _date || overrideMode != _overrideMode ||
+          weekday != _weekday) {
+        return;
+      }
       setState(() {
         _entries
           ..clear()
@@ -83,21 +96,87 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
           );
       });
     } catch (error) {
-      if (mounted && date == _date) setState(() => _error = error.toString());
+      if (mounted && date == _date && overrideMode == _overrideMode && weekday == _weekday) {
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted && date == _date) setState(() => _loading = false);
+      if (mounted && date == _date && overrideMode == _overrideMode && weekday == _weekday) {
+        setState(() => _loading = false);
+      }
     }
   }
 
+  Future<List<PrayerScheduleEntry>> _weeklyEntries(int weekday) async {
+    final results = await Future.wait([
+      PrayerScheduleService.defaults(),
+      PrayerScheduleService.weekly(),
+    ]);
+    final entries = {for (final entry in results[0]) entry.prayerCode: entry};
+    for (final entry in results[1].where((e) => e.weekday == weekday)) {
+      entries[entry.prayerCode] = entry;
+    }
+    return entries.values.toList();
+  }
+
+  bool get _hasPendingChanges => _prayers.keys.any(
+    (code) =>
+        _azan[code] != _entries[code]?.muadzinUserId ||
+        _imam[code] != _entries[code]?.imamUserId,
+  );
+
+  Future<bool> _confirmDiscard() async {
+    if (!_hasPendingChanges) return true;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Perubahan belum disimpan'),
+            content: const Text('Buang pilihan yang belum disimpan?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Kembali'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Buang perubahan'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _showDefaults() async {
+    if (_saving || !_overrideMode || !await _confirmDiscard()) return;
+    if (!mounted) return;
+    setState(() => _overrideMode = false);
+    await _loadSchedule();
+  }
+
+  Future<void> _chooseWeekday(int weekday) async {
+    if (_saving || weekday == _weekday || !await _confirmDiscard()) return;
+    if (!mounted) return;
+    setState(() {
+      _weekday = weekday;
+      _overrideMode = false;
+    });
+    await _loadSchedule();
+  }
+
   Future<void> _chooseDate() async {
+    if (_saving || !await _confirmDiscard()) return;
+    if (!mounted) return;
     final chosen = await showDatePicker(
       context: context,
       initialDate: _date,
       firstDate: DateTime(2020),
       lastDate: DateTime(2100),
     );
-    if (chosen == null || !mounted || chosen == _date) return;
-    setState(() => _date = chosen);
+    if (chosen == null || !mounted) return;
+    setState(() {
+      _date = chosen;
+      _overrideMode = true;
+    });
     await _loadSchedule();
   }
 
@@ -172,6 +251,28 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
   void _message(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
+  Future<void> _deleteOverride(String code) async {
+    if (_saving || _loading || !await _confirmDiscard()) return;
+    if (!mounted) return;
+    setState(() => _saving = true);
+    try {
+      await PrayerScheduleService.deleteOverride(date: _date, prayerCode: code);
+      await _loadSchedule();
+      if (mounted) _message('${_prayers[code]} kembali memakai jadwal tetap.');
+    } catch (error) {
+      if (mounted) _message('Gagal menghapus pengecualian: $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _refresh() async {
+    if (_saving || !await _confirmDiscard()) return;
+    if (!mounted) return;
+    unawaited(_loadEmployees());
+    await _loadSchedule();
+  }
+
   Future<void> _saveAll() async {
     final changed = _prayers.keys
         .where(
@@ -194,12 +295,21 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
     final results = await Future.wait(
       changed.map((code) async {
         try {
-          await PrayerScheduleService.save(
-            date: date,
-            prayerCode: code,
-            muadzinUserId: _azan[code]!,
-            imamUserId: _imam[code]!,
-          );
+          if (_overrideMode) {
+            await PrayerScheduleService.save(
+              date: date,
+              prayerCode: code,
+              muadzinUserId: _azan[code]!,
+              imamUserId: _imam[code]!,
+            );
+          } else {
+            await PrayerScheduleService.saveWeekly(
+              weekday: _weekday,
+              prayerCode: code,
+              muadzinUserId: _azan[code]!,
+              imamUserId: _imam[code]!,
+            );
+          }
           return null;
         } catch (error) {
           return '${_prayers[code]}: $error';
@@ -213,7 +323,7 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
     if (!mounted) return;
     _message(
       failures.isEmpty
-          ? '${changed.length} jadwal berhasil disimpan.'
+          ? '${changed.length} ${_overrideMode ? 'pengecualian tanggal ini' : 'jadwal ${_weekdays[_weekday]}'} berhasil disimpan.'
           : 'Sebagian jadwal gagal: ${failures.join('; ')}',
     );
   }
@@ -231,24 +341,42 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
             'Jadwal Azan & Imam',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
+          FilledButton.tonalIcon(
+            onPressed: _saving || !_overrideMode ? null : _showDefaults,
+            icon: const Icon(Icons.repeat),
+            label: const Text('Jadwal mingguan'),
+          ),
+          if (!_overrideMode)
+            DropdownButton<int>(
+              value: _weekday,
+              items: _weekdays.entries
+                  .map((day) => DropdownMenuItem(value: day.key, child: Text(day.value)))
+                  .toList(),
+              onChanged: _saving ? null : (day) {
+                if (day != null) unawaited(_chooseWeekday(day));
+              },
+            ),
           OutlinedButton.icon(
             onPressed: _saving ? null : _chooseDate,
             icon: const Icon(Icons.event),
-            label: Text(DateFormat('dd MMMM yyyy', 'id').format(_date)),
+            label: Text(
+              _overrideMode
+                  ? 'Pengecualian ${DateFormat('dd MMMM yyyy', 'id').format(_date)}'
+                  : 'Ubah tanggal tertentu',
+            ),
           ),
           IconButton(
-            onPressed: _saving
-                ? null
-                : () {
-                    unawaited(_loadEmployees());
-                    unawaited(_loadSchedule());
-                  },
+            onPressed: _saving ? null : _refresh,
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
       const SizedBox(height: 8),
-      const Text('Isi beberapa waktu salat lalu simpan sekaligus.'),
+      Text(
+        _overrideMode
+            ? 'Perubahan ini hanya berlaku pada tanggal terpilih. Jadwal tetap tidak berubah.'
+            : 'Atur imam dan muazin untuk setiap hari; jadwal berulang tiap minggu. Jika hanya berubah pada satu tanggal, pilih Ubah tanggal tertentu.',
+      ),
       if (_loading) const LinearProgressIndicator(),
       if (_error != null)
         Text(
@@ -269,6 +397,14 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
                   prayer.value,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
+                if (_overrideMode && _entries[prayer.key]?.isOverride == true)
+                  TextButton.icon(
+                    onPressed: _saving || _loading
+                        ? null
+                        : () => _deleteOverride(prayer.key),
+                    icon: const Icon(Icons.restore, size: 18),
+                    label: const Text('Kembalikan ke jadwal tetap'),
+                  ),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 12,
@@ -308,7 +444,13 @@ class _PrayerScheduleScreenState extends State<PrayerScheduleScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.save_outlined),
-          label: Text(_saving ? 'Menyimpan...' : 'Simpan jadwal'),
+          label: Text(
+            _saving
+                ? 'Menyimpan...'
+                : _overrideMode
+                ? 'Simpan perubahan tanggal ini'
+                : 'Simpan jadwal ${_weekdays[_weekday]}',
+          ),
         ),
       ),
     ],

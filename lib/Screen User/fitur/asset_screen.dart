@@ -755,15 +755,22 @@ class _AssetScreenState extends State<AssetScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _AssetRequestForm(
-        userId: widget.userId,
-        catalogItems: _catalogItems,
-        categories: _categories,
-        offices: _offices, // ← tambah ini
-        onSubmitted: () {
-          _loadCatalog();
-          _loadMyRequests();
-        },
+      builder: (sheetContext) => AnimatedPadding(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: _AssetRequestForm(
+          userId: widget.userId,
+          catalogItems: _catalogItems,
+          categories: _categories,
+          offices: _offices,
+          onSubmitted: () {
+            _loadCatalog();
+            _loadMyRequests();
+          },
+        ),
       ),
     );
   }

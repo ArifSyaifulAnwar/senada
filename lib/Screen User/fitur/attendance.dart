@@ -473,9 +473,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         return;
       }
 
-      final imageBase64 = kIsWeb
-          ? base64Encode(_capturedImageBytes!)
-          : FaceRecognitionService.fileToBase64(_capturedImage!);
+      // Foto sudah dibaca sesaat setelah kamera mengambil gambar. Gunakan
+      // bytes yang sama, tanpa membaca file sinkron kedua kali di UI thread.
+      final imageBase64 = base64Encode(_capturedImageBytes!);
 
       if (!FaceRecognitionService.isImageQualityGood(imageBase64)) {
         _scheduleAutoRetry("Foto kurang jelas.");
@@ -598,6 +598,8 @@ class _AbsensiScreenState extends State<AbsensiScreen>
               lowerReason.contains('tidak ada kantor aktif') ||
               lowerReason.contains('lokasi kantor')) {
             _handleOutsideRadius(userId, imageBase64);
+          } else if (_isUncertainAttendanceFailure(reason)) {
+            await _checkAttendanceAfterConnectionFailure(userId);
           } else if (_isRetryableAttendanceFailure(reason)) {
             _scheduleAutoRetry(reason);
           } else {
@@ -613,8 +615,63 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         }
       }
     } catch (e) {
-      if (mounted) _scheduleAutoRetry("Error koneksi: ${e.toString()}");
+      if (mounted) await _checkAttendanceAfterConnectionFailure(userId);
     }
+  }
+
+  bool _isUncertainAttendanceFailure(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('timeout') ||
+        lower.contains('koneksi') ||
+        lower.contains('connection') ||
+        lower.contains('network');
+  }
+
+  Future<void> _checkAttendanceAfterConnectionFailure(String userId) async {
+    if (!mounted) return;
+    setState(() => _faceVerificationMessage =
+        'Respons terputus. Memastikan apakah absensi sudah tercatat...');
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await Future.delayed(const Duration(seconds: 2));
+      final today = await FaceRecognitionService.getTodayAttendance(userId: userId);
+      if (!mounted) return;
+      final raw = today['data'];
+      if (today['success'] == true && raw is Map) {
+        final data = Map<String, dynamic>.from(raw);
+        final time = _isCheckOut
+            ? (data['checkOutTime'] ?? data['CheckOutTime'])
+            : (data['checkInTime'] ?? data['CheckInTime']);
+        if (time != null && time.toString().isNotEmpty) {
+          final office = _isCheckOut
+              ? (data['checkOutOfficeName'] ?? data['CheckOutOfficeName'])
+              : (data['checkInOfficeName'] ?? data['CheckInOfficeName']);
+          if (!_isCheckOut) AttendanceReminderService.cancel();
+          setState(() {
+            _autoRetryCount = 0;
+            _isAttendanceSubmitted = true;
+            _isAutoRetrying = false;
+            _isProcessingFace = false;
+            _faceVerificationMessage = 'Absensi sudah tercatat.';
+          });
+          _showSuccessDialog({
+            'message': 'Absensi sudah tercatat. Respons sebelumnya terlambat.',
+            'timestamp': time.toString(),
+            'office_name': office,
+          });
+          return;
+        }
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isProcessingFace = false;
+      _isAutoRetrying = false;
+      _faceVerificationMessage =
+          'Status absensi belum dapat dipastikan karena koneksi. '
+          'Periksa riwayat absensi sebelum mencoba lagi.';
+    });
   }
 
   bool _isRetryableAttendanceFailure(String message) {
