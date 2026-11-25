@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:absensikaryawan/Services/web_download.dart';
 import 'package:absensikaryawan/Services/excel_export_service.dart';
+import 'package:absensikaryawan/Services/multi_period_attendance_export.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -1737,6 +1738,250 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       if (mounted) {
         setState(() => isExporting = false);
       }
+    }
+  }
+
+  Future<void> _exportMultiPeriod() async {
+    final today = _onlyDate(DateTime.now());
+    final years = [today.year - 2, today.year - 1, today.year];
+    final responses = await Future.wait(
+      years.map((year) => _adminService.getWorkPeriodsByYear(tahun: year)),
+    );
+    if (!mounted) return;
+    final byId = <int, HrdWorkPeriod>{};
+    for (final response in responses) {
+      for (final period in response.data ?? <HrdWorkPeriod>[]) {
+        if (!period.tanggalMulai.isAfter(today)) byId[period.id] = period;
+      }
+    }
+    final periods = byId.values.toList()
+      ..sort((a, b) => b.tanggalMulai.compareTo(a.tanggalMulai));
+    if (periods.length < 2) {
+      _showErrorSnackBar(
+        'Minimal dua periode kerja perusahaan harus tersedia.',
+      );
+      return;
+    }
+    var count = periods.length >= 6 ? 6 : periods.length;
+    var endingId = periods.first.id;
+    final picked = await showDialog<(int, int)>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Rekap beberapa periode'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Pilih periode terakhir dan jumlah periode ke belakang.',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                initialValue: endingId,
+                decoration: const InputDecoration(
+                  labelText: 'Periode terakhir',
+                ),
+                items: periods
+                    .take(periods.length - 1)
+                    .map(
+                      (p) => DropdownMenuItem(
+                        value: p.id,
+                        child: Text(p.bulanLabel),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null)
+                    update(() {
+                      endingId = value;
+                      final available =
+                          periods.length -
+                          periods.indexWhere((p) => p.id == value);
+                      if (count > available) count = available;
+                    });
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                key: ValueKey(endingId),
+                initialValue: count,
+                decoration: const InputDecoration(labelText: 'Jumlah periode'),
+                items: List.generate(
+                  periods.length -
+                      periods.indexWhere((p) => p.id == endingId) -
+                      1,
+                  (i) => DropdownMenuItem(
+                    value: i + 2,
+                    child: Text('${i + 2} periode'),
+                  ),
+                ),
+                onChanged: (value) {
+                  if (value != null) update(() => count = value);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, (endingId, count)),
+              child: const Text('Unduh Excel'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final index = periods.indexWhere((p) => p.id == picked.$1);
+    final selected = periods
+        .skip(index)
+        .take(picked.$2)
+        .toList()
+        .reversed
+        .toList();
+    setState(() => isExporting = true);
+    try {
+      final rangeStart = _onlyDate(selected.first.tanggalMulai);
+      final rangeEnd = _onlyDate(selected.last.tanggalSelesai);
+      final calendar = await _getCalendarEventsForExportRange(
+        rangeStart,
+        rangeEnd,
+      );
+      final izin = await _getApprovedIzinMapForExportRange(
+        rangeStart,
+        rangeEnd,
+      );
+      final joined = await _getJoinDateMap();
+      final users = <String, Employee>{
+        for (final e in employees)
+          if (e.userId.isNotEmpty && e.isActive) e.userId: e,
+      };
+      if (selectedEmployee != null) {
+        users.removeWhere((key, _) => key != selectedEmployee!.userId);
+      }
+      if (users.isEmpty)
+        throw Exception('Tidak ada karyawan pada cakupan ini.');
+      final records = <String, Map<String, AdminAttendanceData>>{};
+      for (final period in selected) {
+        final start = _onlyDate(period.tanggalMulai);
+        final end = _onlyDate(period.tanggalSelesai);
+        for (var page = 1; ; page++) {
+          final response = await _adminService.getAllAttendanceData(
+            filterUserId: selectedEmployee?.userId,
+            startDate: start,
+            endDate: end,
+            page: page,
+            pageSize: 500,
+          );
+          if (!response.success) throw Exception(response.message);
+          final data = response.data;
+          if (data == null) break;
+          for (final item in data.data) {
+            if (!users.containsKey(item.userId)) continue;
+            final key = DateFormat('yyyy-MM-dd').format(item.attendanceDate);
+            records.putIfAbsent(item.userId, () => {})[key] = item;
+          }
+          if (page >= data.totalPages || data.data.isEmpty) break;
+        }
+      }
+      final recap = <EmployeePeriodRecap>[];
+      for (final user in users.values) {
+        final perPeriod = <AttendancePeriodCount>[];
+        for (final period in selected) {
+          var work = 0, present = 0, sick = 0, permit = 0, absent = 0;
+          var date = _onlyDate(period.tanggalMulai);
+          final end = _onlyDate(period.tanggalSelesai);
+          while (!date.isAfter(end) && !date.isAfter(today)) {
+            final join = joined[user.userId];
+            final custom = _workDaysMap[user.userId];
+            if (!_isLiburExport(date, calendar) &&
+                (join == null || !date.isBefore(join)) &&
+                (custom == null || custom.contains(date.weekday))) {
+              work++;
+              final key = DateFormat('yyyy-MM-dd').format(date);
+              final record = records[user.userId]?[key];
+              final approved = izin['${user.userId}_$key']?.toLowerCase() ?? '';
+              final status = (record?.checkInStatus ?? '').toLowerCase();
+              if (record?.checkInTime != null) {
+                present++;
+              } else if (approved.contains('sakit') ||
+                  status.contains('sakit')) {
+                sick++;
+              } else if (approved.isNotEmpty ||
+                  status.contains('izin') ||
+                  status.contains('cuti')) {
+                permit++;
+              } else if (date.isBefore(today)) {
+                absent++;
+              } else {
+                work--; // Hari ini belum selesai, jangan dinilai alpa.
+              }
+            }
+            date = date.add(const Duration(days: 1));
+          }
+          perPeriod.add(
+            AttendancePeriodCount(period, work, present, sick, permit, absent),
+          );
+        }
+        recap.add(
+          EmployeePeriodRecap(
+            user.userId,
+            user.name,
+            user.department ?? '-',
+            perPeriod,
+          ),
+        );
+      }
+      recap.sort((a, b) => a.name.compareTo(b.name));
+      final bytes = MultiPeriodAttendanceExport.build(recap);
+      if (bytes == null) throw Exception('Gagal membuat file Excel.');
+      final fileName =
+          'Rekap_Absensi_${selected.first.bulanLabel.replaceAll(' ', '_')}_${selected.last.bulanLabel.replaceAll(' ', '_')}.xlsx';
+      if (kIsWeb) {
+        downloadFileWeb(bytes, fileName);
+      } else {
+        final dir = await getExternalStorageDirectory();
+        if (dir == null) throw Exception('Penyimpanan tidak tersedia.');
+        final path = '${dir.path}/$fileName';
+        File(path)
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(bytes);
+        if (mounted)
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Rekap tersimpan'),
+              content: Text(path),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Tutup'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    OpenFile.open(path);
+                  },
+                  child: const Text('Buka'),
+                ),
+              ],
+            ),
+          );
+      }
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Rekap beberapa periode berhasil diunduh.'),
+          ),
+        );
+    } catch (e) {
+      if (mounted) _showErrorSnackBar('Gagal membuat rekap: $e');
+    } finally {
+      if (mounted) setState(() => isExporting = false);
     }
   }
 
@@ -4731,19 +4976,20 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Text(
+            'Filter Data $_roleLabel',
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Expanded(
-                child: Text(
-                  'Filter Data $_roleLabel',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-              ),
               if (isExporting)
                 const SizedBox(
                   width: 20,
@@ -4783,6 +5029,13 @@ class _HalamanHRDAbsensiState extends State<HalamanHRDAbsensi>
                     ),
                   ),
                 ),
+              if (!isExporting) ...[
+                TextButton.icon(
+                  onPressed: _exportMultiPeriod,
+                  icon: const Icon(Icons.table_chart_outlined, size: 16),
+                  label: const Text('Rekap Periode'),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),

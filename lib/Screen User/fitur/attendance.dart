@@ -195,7 +195,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
     try {
       await _loadOfficeLocations();
       await _checkPermissions();
-      await _checkFaceRegistration();
+      // Status ini hanya untuk informasi UI. Endpoint verify-attendance sudah
+      // menangani registrasi pertama, jadi jangan menahan pembukaan kamera.
+      unawaited(_checkFaceRegistration());
       await _initializeCamera();
     } catch (e) {
       if (mounted) {
@@ -482,31 +484,9 @@ class _AbsensiScreenState extends State<AbsensiScreen>
         return;
       }
 
-      if (!_isFaceRegistered) {
-        setState(() => _faceVerificationMessage = "Mendaftarkan wajah...");
-        final registerResult = await FaceRecognitionService.registerFace(
-          userId: userId,
-          faceImageBase64: imageBase64,
-        ).timeout(const Duration(seconds: 30));
-
-        if (mounted) {
-          if (registerResult['success']) {
-            setState(() {
-              _isFaceRegistered = true;
-              _faceVerificationMessage =
-                  "Wajah terdaftar. Memproses absensi...";
-            });
-            await Future.delayed(const Duration(seconds: 1));
-            await _submitAttendance(userId, imageBase64);
-          } else {
-            _scheduleAutoRetry(
-              registerResult['message'] ?? "Gagal mendaftarkan wajah",
-            );
-          }
-        }
-      } else {
-        await _submitAttendance(userId, imageBase64);
-      }
+      // Satu foto dan satu request. API menangani akun yang sudah terdaftar
+      // maupun registrasi pertama; dua request berurutan memperlambat absen.
+      await _submitAttendance(userId, imageBase64);
     } catch (e) {
       if (mounted) _scheduleAutoRetry("Error: ${e.toString()}");
     } finally {

@@ -340,6 +340,7 @@ class Employee {
   final String userId;
   final String name;
   final String? role;
+  final String? employmentStatus;
   final String? employeeId;
   final String? department;
   final String? position;
@@ -351,6 +352,7 @@ class Employee {
     required this.userId,
     required this.name,
     this.role,
+    this.employmentStatus,
     this.employeeId,
     this.department,
     this.position,
@@ -365,6 +367,7 @@ class Employee {
         userId: json['user_id'] ?? json['UserId'] ?? '',
         name: json['Name'] ?? '',
         role: json['Role'] ?? json['role'],
+        employmentStatus: json['EmploymentStatus'] ?? json['employment_status'],
         employeeId: json['employee_id'] ?? json['EmployeeId'],
         department: json['Department'],
         position: json['Position'],

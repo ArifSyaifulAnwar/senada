@@ -231,8 +231,13 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
           ].join(' · '),
         );
       }
-      final employeesForTrend =
-          (employees.data as List<Employee>?) ?? <Employee>[];
+      final monitorEmployees = (employees.data as List<Employee>? ?? <Employee>[])
+          .where(_includeInMonitor)
+          .toList();
+      final monitorIds = monitorEmployees
+          .map((employee) => employee.userId.toLowerCase())
+          .toSet();
+      final employeesForTrend = monitorEmployees;
       final workDaysForTrend =
           (responses[5] as Map<String, List<int>>?) ?? <String, List<int>>{};
       if (_periodListLoadedAt == null ||
@@ -311,7 +316,8 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
           }).length;
         }
         final presentCount = records
-            .where((record) => record.checkInTime != null)
+            .where((record) => record.checkInTime != null &&
+                monitorIds.contains(record.userId.toLowerCase()))
             .map(
               (record) =>
                   '${record.userId.toLowerCase()}|${DateFormat('yyyy-MM-dd').format(record.attendanceDate)}',
@@ -338,6 +344,7 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
             periodRows
                 .where(
                   (record) =>
+                      monitorIds.contains(record.userId.toLowerCase()) &&
                       record.checkInTime != null &&
                       record.attendanceDate.isBefore(date),
                 )
@@ -360,10 +367,14 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
       }
       if (!mounted) return;
       setState(() {
-        _employees = employees.data ?? <Employee>[];
-        _attendance = attendance.data?.data ?? <AdminAttendanceData>[];
+        _employees = monitorEmployees;
+        _attendance = (attendance.data?.data ?? <AdminAttendanceData>[])
+            .where((record) => monitorIds.contains(record.userId.toLowerCase()))
+            .toList();
         _periodAttendance =
-            periodAttendance.data?.data ?? <AdminAttendanceData>[];
+            (periodAttendance.data?.data ?? <AdminAttendanceData>[])
+                .where((record) => monitorIds.contains(record.userId.toLowerCase()))
+                .toList();
         _periodTrend = trend;
         _prayerSchedule = prayerSchedule;
         _timeOffs = [
@@ -433,6 +444,9 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
         .toLowerCase();
     return status.contains('terlambat') || status.contains('late');
   }
+
+  bool _includeInMonitor(Employee employee) =>
+      (employee.employmentStatus ?? '').trim().toUpperCase() != 'FREELANCE';
 
   bool _ignoreMissingCheckIn(Employee employee) {
     final role = (employee.role ?? '').trim().toUpperCase();
@@ -580,35 +594,32 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
                 ? byCount
                 : latestLate(bRecords).compareTo(latestLate(aRecords));
           });
-    final missedDoaByUser = <String, List<DateTime>>{};
-    for (final record in periodRecords) {
-      if (date != null && !record.attendanceDate.isBefore(date)) continue;
-      final dayKey = DateFormat('yyyy-MM-dd').format(record.attendanceDate);
-      final doaRecords = _doaByDate[dayKey] ?? <DoaRecord>[];
-      if (doaRecords.isEmpty) continue;
-      final userKey = record.userId.toLowerCase();
-      final joined = doaRecords.any(
-        (doa) =>
-            doa.pemimpinDoaId.toLowerCase() == userKey ||
-            doa.pesertaIds.any((id) => id.toLowerCase() == userKey),
-      );
-      if (!joined) {
-        missedDoaByUser
-            .putIfAbsent(userKey, () => [])
-            .add(record.attendanceDate);
+    final joinedApelByUser = <String, List<DateTime>>{};
+    for (final entry in _doaByDate.entries) {
+      final day = DateTime.tryParse(entry.key);
+      if (day == null) continue;
+      final participantIds = <String>{};
+      for (final doa in entry.value) {
+        participantIds.add(doa.pemimpinDoaId.toLowerCase());
+        participantIds.addAll(doa.pesertaIds.map((id) => id.toLowerCase()));
+      }
+      for (final userId in participantIds) {
+        if (activeIds.contains(userId)) {
+          joinedApelByUser.putIfAbsent(userId, () => []).add(day);
+        }
       }
     }
-    final missedDoa =
+    final joinedApel =
         _employees
             .where(
               (employee) =>
                   employee.isActive &&
-                  missedDoaByUser.containsKey(employee.userId.toLowerCase()),
+                  joinedApelByUser.containsKey(employee.userId.toLowerCase()),
             )
             .toList()
           ..sort((a, b) {
-            final aDates = missedDoaByUser[a.userId.toLowerCase()]!;
-            final bDates = missedDoaByUser[b.userId.toLowerCase()]!;
+            final aDates = joinedApelByUser[a.userId.toLowerCase()]!;
+            final bDates = joinedApelByUser[b.userId.toLowerCase()]!;
             final byCount = bDates.length.compareTo(aDates.length);
             return byCount != 0 ? byCount : bDates.last.compareTo(aDates.last);
           });
@@ -818,17 +829,17 @@ class _AttendanceMonitorScreenState extends State<AttendanceMonitorScreen> {
                           Expanded(
                             flex: 4,
                             child: _personPanel(
-                              title: 'Tidak apel pagi',
-                              subtitle: 'Hari sebelumnya dalam periode',
+                              title: 'Karyawan ikut apel',
+                              subtitle: 'Peserta apel dalam periode hingga kemarin',
                               icon: Icons.volunteer_activism_rounded,
-                              color: _red,
-                              people: missedDoa,
+                              color: _green,
+                              people: joinedApel,
                               emptyMessage:
-                                  'Tidak ada yang tercatat tidak ikut doa',
+                                  'Belum ada peserta apel tercatat',
                               detail: (e) {
                                 final dates =
-                                    missedDoaByUser[e.userId.toLowerCase()]!;
-                                return '${dates.length}x tidak ikut · terakhir ${DateFormat('dd MMM').format(dates.last)}';
+                                    joinedApelByUser[e.userId.toLowerCase()]!;
+                                return '${dates.length}x ikut · terakhir ${DateFormat('dd MMM').format(dates.last)}';
                               },
                             ),
                           ),
